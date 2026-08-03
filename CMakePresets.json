@@ -1,0 +1,31 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": { "CMAKE_EXPORT_COMPILE_COMMANDS": "ON" }
+    },
+    { "name": "debug", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "development", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" } },
+    { "name": "release", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "ARCFLOW_ENABLE_VALIDATION": "OFF" } },
+    { "name": "asan", "inherits": "debug", "cacheVariables": { "CMAKE_C_FLAGS": "-fsanitize=address -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address", "ARCFLOW_BUILD_GPU_TESTS": "OFF" } },
+    { "name": "ubsan", "inherits": "debug", "cacheVariables": { "CMAKE_C_FLAGS": "-fsanitize=undefined -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=undefined", "ARCFLOW_BUILD_GPU_TESTS": "OFF" } }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "development", "configurePreset": "development" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "ubsan", "configurePreset": "ubsan" }
+  ],
+  "testPresets": [
+    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
+    { "name": "development", "configurePreset": "development", "output": { "outputOnFailure": true } },
+    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } },
+    { "name": "ubsan", "configurePreset": "ubsan", "output": { "outputOnFailure": true } }
+  ]
+}

@@ -1,0 +1,1679 @@
+You are the lead graphics-engine architect and senior C/Vulkan developer for this project.
+
+The project name is **Arcflow**.
+
+Build a native application for authoring and playing:
+
+1. High-performance 2D vector UI animations
+2. Interactive game-interface animations
+3. Real-time particles and visual effects
+4. Lightweight animations embeddable into custom game engines
+
+The product is conceptually similar to a focused combination of a vector-animation editor, UI animation state-machine editor, and game VFX authoring tool.
+
+Do not attempt to reproduce every feature of existing commercial tools.
+
+The primary goals are:
+
+* Predictable performance
+* Low runtime overhead
+* Small compiled assets
+* Resolution-independent UI
+* Flexible animation authoring
+* Deterministic playback
+* Safe loading of untrusted assets
+* Clean integration into Vulkan game engines
+* A maintainable C codebase
+
+Implement the system incrementally.
+
+Only implement the active milestone. Do not implement future features prematurely.
+
+# 1. Naming conventions
+
+Use these product names:
+
+```text
+Product:        Arcflow
+Editor:         Arcflow Editor
+Compiler:       Arcflow Compiler
+Runtime:        Arcflow Runtime
+Player:         Arcflow Player
+Package format: Arcflow Runtime Package
+```
+
+Use these target names:
+
+```text
+arcflow_editor
+arcflow_compiler
+arcflow_runtime
+arcflow_player
+arcflow_tests
+```
+
+Use `af_` as the prefix for public C functions.
+
+Use `Af` as the prefix for public types.
+
+Use `AF_` as the prefix for public constants, macros, and enumeration values.
+
+Examples:
+
+```c
+typedef struct AfRuntime AfRuntime;
+typedef struct AfRuntimeCreateInfo AfRuntimeCreateInfo;
+
+typedef uint64_t AfPackageHandle;
+typedef uint64_t AfInstanceHandle;
+
+typedef enum AfResult {
+    AF_RESULT_SUCCESS = 0,
+    AF_RESULT_INVALID_ARGUMENT,
+    AF_RESULT_OUT_OF_MEMORY,
+    AF_RESULT_INVALID_PACKAGE,
+    AF_RESULT_UNSUPPORTED_FEATURE,
+    AF_RESULT_VULKAN_ERROR
+} AfResult;
+
+AfResult af_runtime_create(
+    const AfRuntimeCreateInfo *create_info,
+    AfRuntime **out_runtime
+);
+
+void af_runtime_destroy(AfRuntime *runtime);
+```
+
+Use `arcflow_` for executable, library, CMake-target, and package names.
+
+Do not rename third-party symbols or unrelated identifiers.
+
+# 2. Response efficiency
+
+Minimize explanation and token usage.
+
+Prioritize:
+
+* Repository inspection
+* Implementation
+* Building
+* Testing
+* Debugging
+* Fixing failures
+
+Do not:
+
+* Repeat the requirements
+* Paste entire files into the response
+* Output code already present in the repository
+* Produce detailed implementation plans
+* Generate architecture summaries
+* Generate file-by-file change lists
+* Generate public API summaries
+* Generate dependency summaries
+* Generate detailed command logs
+* Generate diff summaries
+* Recommend future milestones unless asked
+* Report performance measurements unless requested
+* Explain routine implementation details
+
+Do not include generated diffs unless explicitly requested.
+
+Use concise progress messages only when:
+
+* User input is required
+* Work is blocked
+* A material assumption must be disclosed
+
+At completion, respond only with:
+
+```text
+Build: passed | failed | not run
+Tests: passed | failed | not run
+Unresolved: none | concise explanation
+```
+
+Keep the final response under 100 words unless a failure requires additional explanation.
+
+Never claim a command succeeded unless it was actually executed successfully.
+
+# 3. Technology requirements
+
+Use:
+
+* C17
+* Vulkan 1.3
+* SDL3
+* volk
+* CMake
+* GLSL compiled offline to SPIR-V
+* SPIR-V validation during builds
+* FreeType
+* HarfBuzz
+* KTX2 for packaged textures
+* Nuklear only where temporarily useful for editor panels
+
+Do not use C++.
+
+Do not require Vulkan 1.4.
+
+Optional Vulkan features must be detected at runtime and must have safe fallback paths.
+
+Use:
+
+* Dynamic rendering
+* Synchronization 2
+* Timeline semaphores where appropriate
+* Vulkan debug utilities
+* Premultiplied-alpha blending
+* Explicit resource ownership
+
+Do not use:
+
+* Legacy Vulkan render passes unless a specific feature requires them
+* Hidden global Vulkan state
+* Runtime shader compilation in release builds
+* General heap allocations during normal playback
+* Per-particle CPU simulation
+* GPU readbacks during ordinary rendering
+
+# 4. Product structure
+
+Create these targets:
+
+```text
+arcflow_editor
+arcflow_compiler
+arcflow_runtime
+arcflow_player
+arcflow_tests
+```
+
+## `arcflow_editor`
+
+The authoring application.
+
+It contains:
+
+* Canvas viewport
+* Scene hierarchy
+* Property inspector
+* Timeline
+* Curve editor
+* Animation controls
+* Asset management
+* Preview rendering
+* Undo and redo
+* Later: particle editor and state-machine editor
+
+## `arcflow_compiler`
+
+Validates editable projects and converts them into optimized runtime packages.
+
+The compiler must:
+
+* Perform strict validation
+* Detect unsupported features
+* Resolve references
+* Flatten or optimize suitable data
+* Deduplicate resources
+* Generate runtime lookup tables
+* Produce versioned binary packages
+* Never trust editor project data
+
+## `arcflow_runtime`
+
+A small C library intended to be embedded into Vulkan game engines.
+
+The runtime must not depend on:
+
+* SDL3
+* Nuklear
+* Editor code
+* Project serialization code
+* File-dialog libraries
+* Runtime shader compilers
+
+## `arcflow_player`
+
+A minimal standalone runtime host.
+
+It loads compiled packages and demonstrates runtime playback without editor code.
+
+## `arcflow_tests`
+
+Contains:
+
+* Unit tests
+* Serialization tests
+* Malformed-input tests
+* Determinism tests
+* Runtime-package tests
+* GPU initialization smoke tests
+* Selected rendering regression tests
+
+# 5. Required data separation
+
+Use three distinct representations:
+
+```text
+Editable project model
+        ↓
+Validated compiler IR
+        ↓
+Compiled runtime package
+```
+
+## Editable project model
+
+Optimize for:
+
+* Editing
+* Stable identifiers
+* Undo and redo
+* Human-readable debugging
+* Schema migration
+* Partial project recovery
+
+It may contain names, editor metadata, expanded hierarchy information, and other data that must not ship in game packages.
+
+## Compiler intermediate representation
+
+Optimize for:
+
+* Validation
+* Reference resolution
+* Cycle detection
+* Feature compatibility checks
+* Resource deduplication
+* Animation optimization
+* Runtime-data generation
+
+The IR must not contain editor widget state.
+
+## Runtime package
+
+Optimize for:
+
+* Fast loading
+* Minimal allocations
+* Compact storage
+* Cache-friendly access
+* Direct runtime evaluation
+
+The runtime must never load editable project files directly.
+
+Do not:
+
+* Serialize raw C structures
+* Serialize pointers
+* Depend on compiler-specific structure padding
+
+# 6. Module architecture
+
+Use approximately this module layout:
+
+```text
+src/
+├── core/
+│   ├── allocator
+│   ├── arena
+│   ├── scratch
+│   ├── arrays
+│   ├── handles
+│   ├── hashing
+│   ├── strings
+│   ├── logging
+│   ├── errors
+│   ├── safe_math
+│   ├── file_io
+│   └── math
+│
+├── platform/
+│   ├── platform_sdl
+│   ├── input
+│   ├── clipboard
+│   ├── threading
+│   └── file_dialogs
+│
+├── renderer/
+│   ├── vk_instance
+│   ├── vk_device
+│   ├── vk_swapchain
+│   ├── vk_memory
+│   ├── vk_resources
+│   ├── vk_commands
+│   ├── vk_descriptors
+│   ├── vk_pipelines
+│   ├── vk_synchronization
+│   ├── vk_upload
+│   ├── shader_library
+│   ├── render_commands
+│   └── gpu_profiler
+│
+├── scene/
+│   ├── nodes
+│   ├── hierarchy
+│   ├── transforms
+│   ├── properties
+│   └── components
+│
+├── vector/
+│   ├── primitives
+│   ├── paths
+│   ├── bezier
+│   ├── flattening
+│   ├── tessellation
+│   ├── gradients
+│   ├── strokes
+│   ├── clipping
+│   ├── geometry_cache
+│   └── vector_renderer
+│
+├── animation/
+│   ├── clips
+│   ├── tracks
+│   ├── keyframes
+│   ├── easing
+│   ├── timeline
+│   ├── events
+│   └── evaluator
+│
+├── layout/
+│   ├── anchors
+│   ├── pivots
+│   ├── constraints
+│   └── layout_solver
+│
+├── text/
+│   ├── fonts
+│   ├── shaping
+│   ├── glyph_cache
+│   ├── text_layout
+│   └── text_renderer
+│
+├── vfx/
+│   ├── emitters
+│   ├── particle_pools
+│   ├── simulation
+│   ├── force_fields
+│   ├── trails
+│   ├── ribbons
+│   └── particle_renderer
+│
+├── assets/
+│   ├── project_schema
+│   ├── project_loader
+│   ├── project_writer
+│   ├── compiler_ir
+│   ├── package_writer
+│   ├── package_loader
+│   └── validation
+│
+├── editor/
+│   ├── editor_app
+│   ├── editor_commands
+│   ├── selection
+│   ├── canvas
+│   ├── hierarchy_panel
+│   ├── inspector_panel
+│   ├── timeline_panel
+│   ├── curve_editor
+│   ├── preview
+│   └── undo_history
+│
+└── runtime/
+    ├── runtime_context
+    ├── runtime_package
+    ├── runtime_instance
+    ├── runtime_animation
+    ├── runtime_events
+    └── public_api
+```
+
+Use this top-level repository layout:
+
+```text
+arcflow/
+├── CMakeLists.txt
+├── CMakePresets.json
+├── include/
+│   └── arcflow/
+├── src/
+├── shaders/
+├── assets/
+├── tests/
+├── tools/
+├── third_party/
+└── docs/
+```
+
+Use small, focused `.c` and `.h` files.
+
+Keep public headers under:
+
+```text
+include/arcflow/
+```
+
+Keep internal headers separate from public headers.
+
+Do not create one oversized engine header.
+
+# 7. Renderer design
+
+Implement one renderer backend only:
+
+```text
+Vulkan 1.3
+```
+
+Maintain a clean boundary between scene systems and Vulkan code, but do not create a large theoretical multi-backend abstraction.
+
+The scene and animation systems should generate backend-neutral render commands such as:
+
+* Draw analytic shape instances
+* Draw vector meshes
+* Draw image instances
+* Draw text glyph instances
+* Begin clipping region
+* End clipping region
+* Begin offscreen layer
+* Composite offscreen layer
+* Dispatch particle simulation
+* Draw particle batch
+
+Only the renderer module may directly access Vulkan objects.
+
+Do not expose these outside the renderer:
+
+* `VkBuffer`
+* `VkImage`
+* `VkPipeline`
+* `VkDescriptorSet`
+* Vulkan barriers
+* Vulkan memory allocations
+
+The public Arcflow Runtime integration API may accept host-owned Vulkan objects, but internal scene nodes must remain independent from Vulkan handles.
+
+# 8. Vector rendering strategy
+
+Use a hybrid vector-rendering approach.
+
+## Analytic GPU primitives
+
+Render these using instanced quads and fragment-shader distance calculations:
+
+* Rectangle
+* Rounded rectangle
+* Ellipse
+* Circle
+* Line segment
+* Simple border
+* Solid fill
+* Basic linear gradient
+* Basic radial gradient
+
+These primitives must not require CPU tessellation.
+
+Instance data should contain only required values such as:
+
+* Transform
+* Bounds
+* Fill parameters
+* Border parameters
+* Gradient parameters
+* Opacity
+* Clip identifier
+* Layer order
+
+Batch compatible analytic primitives.
+
+Avoid one draw call per shape.
+
+## Tessellated vector paths
+
+Use tessellation for:
+
+* Arbitrary Bézier paths
+* Complex polygons
+* Complex strokes
+* Nontrivial fill rules
+* Trimmed paths
+* Paths used as particle-emission sources
+
+Begin with CPU path flattening and CPU tessellation.
+
+Place tessellation behind a replaceable internal interface.
+
+Do not build GPU tessellation in early milestones.
+
+## Geometry caching
+
+Every path must have separate generation counters for:
+
+* Geometry
+* Paint
+* Transform
+* Animation data
+
+Only rebuild path geometry when geometry-affecting properties change.
+
+Changing these properties must not trigger tessellation:
+
+* Position
+* Rotation
+* Scale
+* Opacity
+* Solid fill color
+* Layer visibility
+
+Use cached GPU geometry for unchanged paths.
+
+Track geometry-cache memory and add eviction policies later.
+
+# 9. Coordinate and color conventions
+
+Use:
+
+* Canvas origin at top-left
+* Positive X to the right
+* Positive Y downward
+* Angles stored in radians internally
+* User-facing angle controls may display degrees
+* 2D affine transforms
+* Consistent parent-to-child transform order
+
+Use premultiplied alpha throughout the renderer.
+
+Document and enforce:
+
+* Texture color-space expectations
+* sRGB texture usage
+* Linear-space calculations
+* Gradient interpolation space
+* Offscreen target formats
+* Compositing behavior
+
+Do not silently mix straight alpha and premultiplied alpha.
+
+# 10. Animation system
+
+Use typed property tracks.
+
+Initial property types:
+
+* Scalar
+* 2D vector
+* Color
+* Integer
+* Boolean
+
+Initial animated properties:
+
+* Position
+* Rotation
+* Scale
+* Opacity
+* Fill color
+* Corner radius
+
+Later properties may include:
+
+* Stroke width
+* Gradient values
+* Path control points
+* Trim-path values
+* Text reveal
+* Particle parameters
+* Custom exposed values
+
+Each animation track must use stable identifiers.
+
+Do not serialize pointers to scene nodes or properties.
+
+Each keyframe contains:
+
+* Time
+* Typed value
+* Interpolation mode
+* Easing information
+
+Initial interpolation modes:
+
+* Step
+* Linear
+* Cubic Bézier easing
+
+Animation playback must support:
+
+* Play
+* Pause
+* Stop
+* Seek
+* Loop
+* Playback speed
+* Forward playback
+* Reverse playback
+
+Evaluation must be deterministic for the same:
+
+* Runtime package
+* Animation time
+* Runtime inputs
+* Random seed
+
+Normal animation evaluation must not allocate memory.
+
+# 11. Editor interaction architecture
+
+Use an explicit editor command system.
+
+Every editing action that changes project data must be represented as a command.
+
+Examples:
+
+* Create node
+* Delete node
+* Rename node
+* Reparent node
+* Change property
+* Add keyframe
+* Remove keyframe
+* Move keyframe
+* Change interpolation
+* Change layer order
+
+Commands must support:
+
+* Apply
+* Undo
+* Redo
+* Memory-size reporting
+* Stable target identifiers
+
+Do not implement undo by copying the entire project for every change.
+
+Allow command merging for continuous edits such as dragging a position control.
+
+Keep editor selection state separate from project data.
+
+# 12. Editor UI policy
+
+Nuklear may be used for:
+
+* Menus
+* Basic panels
+* Buttons
+* Checkboxes
+* Property controls
+* Temporary debugging interfaces
+
+Do not use Nuklear to render exported Arcflow UI animations.
+
+Build these as custom editor systems:
+
+* Canvas interaction
+* Transform gizmos
+* Timeline tracks
+* Keyframe manipulation
+* Curve editor
+* Node graph later
+
+Custom editor widgets may use the same low-level vector renderer as authored content, but editor state must remain separate from project state.
+
+# 13. Responsive layout
+
+Do not build a complete web-style layout engine initially.
+
+The first layout system should support:
+
+* Reference canvas resolution
+* Canvas scaling mode
+* Anchors
+* Pivot
+* Fixed size
+* Percentage position
+* Percentage size
+* Minimum size
+* Maximum size
+* Aspect-ratio preservation
+* Safe-area rectangle from the host
+
+Use this evaluation order:
+
+```text
+Parent layout
+    ↓
+Node layout
+    ↓
+Base local transform
+    ↓
+Animation overrides
+    ↓
+Final world transform
+```
+
+Document and test this order.
+
+Advanced flexbox-style layout is a later feature.
+
+# 14. Text strategy
+
+Use HarfBuzz for shaping and FreeType for glyph rasterization.
+
+Initial text support should include:
+
+* UTF-8 validation
+* Left-to-right text
+* Basic right-to-left shaping through HarfBuzz
+* Font size
+* Alignment
+* Line spacing
+* Runtime text replacement
+* Glyph-atlas caching
+
+Use a grayscale or alpha glyph atlas initially.
+
+Do not implement MSDF text in the first milestone.
+
+Design the glyph-cache interface so SDF or MSDF rendering can be added later.
+
+Limit:
+
+* Font file size
+* Glyph dimensions
+* Atlas dimensions
+* Total cached glyph count
+* Text length
+* Shaping output size
+
+Do not upload the entire glyph atlas when one glyph is added.
+
+# 15. VFX architecture
+
+Do not implement GPU particles in the first milestone.
+
+The future VFX system will use:
+
+* Fixed-capacity GPU pools
+* Alive and dead index lists
+* Compute shaders
+* Indirect rendering
+* No normal-frame readback
+* Deterministic random seeds
+* Configurable simulation limits
+
+Initial future particle outputs:
+
+* Billboard
+* Flipbook
+* Trail
+* Ribbon
+* UI-space particle
+
+Initial future forces:
+
+* Gravity
+* Directional wind
+* Drag
+* Radial force
+* Vortex
+* Turbulence
+
+Particles must later be able to spawn from:
+
+* Point
+* Line
+* Rectangle
+* Circle
+* Vector path
+
+Do not add asynchronous compute until profiling demonstrates a benefit.
+
+Begin particle simulation on the graphics queue.
+
+# 16. Runtime API rules
+
+Expose an opaque C API.
+
+The host must be able to:
+
+* Create an Arcflow runtime context
+* Supply an existing Vulkan instance
+* Supply a physical device
+* Supply a logical device
+* Supply queue information
+* Supply command buffers
+* Load a package from memory
+* Create an animation instance
+* Destroy an instance
+* Set animation time
+* Play or stop an animation
+* Set playback speed
+* Set exposed numeric properties
+* Set runtime text
+* Resize the canvas
+* Supply safe-area information
+* Update an instance
+* Poll animation events
+* Record rendering commands
+
+Do not automatically submit command buffers by default.
+
+Do not automatically call `vkDeviceWaitIdle`.
+
+Do not create a second Vulkan device.
+
+Clearly define:
+
+* Host ownership
+* Runtime ownership
+* Required image layouts
+* Synchronization responsibilities
+* Frames-in-flight requirements
+* Destruction order
+
+Use generation-based runtime handles.
+
+Reject stale handles safely.
+
+Example public API shape:
+
+```c
+#ifndef ARCFLOW_RUNTIME_H
+#define ARCFLOW_RUNTIME_H
+
+#include <stddef.h>
+#include <stdint.h>
+#include <vulkan/vulkan.h>
+
+typedef struct AfRuntime AfRuntime;
+
+typedef uint64_t AfPackageHandle;
+typedef uint64_t AfInstanceHandle;
+
+typedef enum AfResult {
+    AF_RESULT_SUCCESS = 0,
+    AF_RESULT_INVALID_ARGUMENT,
+    AF_RESULT_OUT_OF_MEMORY,
+    AF_RESULT_INVALID_PACKAGE,
+    AF_RESULT_UNSUPPORTED_FEATURE,
+    AF_RESULT_STALE_HANDLE,
+    AF_RESULT_VULKAN_ERROR
+} AfResult;
+
+typedef struct AfRuntimeCreateInfo {
+    VkInstance instance;
+    VkPhysicalDevice physical_device;
+    VkDevice device;
+
+    VkQueue graphics_queue;
+    uint32_t graphics_queue_family;
+
+    uint32_t frames_in_flight;
+} AfRuntimeCreateInfo;
+
+AfResult af_runtime_create(
+    const AfRuntimeCreateInfo *create_info,
+    AfRuntime **out_runtime
+);
+
+void af_runtime_destroy(AfRuntime *runtime);
+
+AfResult af_package_load(
+    AfRuntime *runtime,
+    const void *data,
+    size_t data_size,
+    AfPackageHandle *out_package
+);
+
+AfResult af_package_destroy(
+    AfRuntime *runtime,
+    AfPackageHandle package
+);
+
+AfResult af_instance_create(
+    AfRuntime *runtime,
+    AfPackageHandle package,
+    AfInstanceHandle *out_instance
+);
+
+AfResult af_instance_destroy(
+    AfRuntime *runtime,
+    AfInstanceHandle instance
+);
+
+AfResult af_instance_update(
+    AfRuntime *runtime,
+    AfInstanceHandle instance,
+    float delta_time
+);
+
+#endif
+```
+
+The exact API may evolve, but public ownership and error behavior must remain explicit.
+
+# 17. Runtime package format
+
+Call the compiled format the:
+
+```text
+Arcflow Runtime Package
+```
+
+Use a stable file extension such as:
+
+```text
+.afp
+```
+
+Do not assume the extension provides security or validation.
+
+Every package must include:
+
+* Magic bytes
+* Format version
+* Minimum runtime version
+* Endianness marker
+* Total file size
+* Section-table offset
+* Section count
+* Required-feature flags
+* Optional checksum
+
+Use Arcflow-specific package magic.
+
+For example, define the magic through explicit bytes rather than relying on implementation-defined multi-character literals:
+
+```c
+static const uint8_t AF_PACKAGE_MAGIC[8] = {
+    'A', 'R', 'C', 'F', 'L', 'O', 'W', '\0'
+};
+```
+
+Every section must include:
+
+* Type
+* Offset
+* Size
+* Alignment
+* Element count where applicable
+
+Before reading any value:
+
+* Check integer addition overflow
+* Check integer multiplication overflow
+* Check offset bounds
+* Check size bounds
+* Check alignment
+* Check element-count limits
+* Check section-overlap rules
+* Check reference validity
+
+Do not cast package memory directly to arbitrary C structures unless alignment, size, endianness, and representation have been explicitly validated.
+
+Prefer decoding fixed-width fields through safe-reader functions.
+
+Create a package-validation function that does not create GPU resources.
+
+The package validator must be suitable for fuzz testing.
+
+# 18. Memory architecture
+
+Provide explicit allocator interfaces.
+
+Required allocators:
+
+* Permanent runtime allocator
+* Project allocator
+* Per-frame arena
+* Scratch arena
+* Editor undo allocator
+* GPU upload ring
+* GPU readback ring
+
+All allocation functions must include:
+
+* Size
+* Alignment
+* Error reporting
+
+Use overflow-safe allocation helpers.
+
+Normal runtime update and rendering must produce:
+
+```text
+0 general heap allocations per frame
+```
+
+Add debug instrumentation that counts allocations per frame and detects violations.
+
+Do not use a custom allocator merely as a wrapper around uncontrolled per-object heap allocation.
+
+# 19. Error handling
+
+Create structured errors containing:
+
+* Error code
+* Subsystem
+* Optional Vulkan result
+* Source file
+* Source line
+* Human-readable message
+
+Recoverable user-file errors must not trigger assertions.
+
+Use assertions for internal invariants only.
+
+Every partially initialized subsystem must clean up successfully on failure.
+
+Do not ignore Vulkan return values.
+
+Do not claim initialization succeeded when optional features failed.
+
+# 20. Dependency policy
+
+Keep third-party dependencies small and isolated.
+
+For every dependency:
+
+* Pin the exact version
+* Record its license in project documentation
+* Wrap it behind a project-owned interface where practical
+* Prevent its headers from spreading throughout the codebase
+* Disable unwanted features
+* Do not download dependencies during application startup
+
+CMake may retrieve dependencies during configuration only when explicitly enabled.
+
+Support vendored or system-provided dependencies.
+
+Do not add a dependency when a small, well-tested implementation is more appropriate.
+
+Do not reimplement complex standards such as text shaping when a mature selected library already handles them.
+
+# 21. Performance requirements
+
+Add instrumentation before advanced optimization.
+
+Initial reference workload:
+
+* 1920×1080 viewport
+* 1,000 analytic vector primitives
+* 100 animated nodes
+* 500 active animation tracks
+* Several clipping regions
+* No particles in the first milestone
+
+Initial engineering targets on a reasonable desktop GPU:
+
+* 60 FPS minimum
+* 144 FPS desirable
+* Animation evaluation below 0.5 ms
+* CPU render-command generation below 0.5 ms
+* Vector GPU rendering below 1.0 ms for the reference scene
+* Zero general heap allocations per frame
+* No Vulkan validation errors
+* No unbounded resource growth
+
+Track internally:
+
+* CPU frame time
+* Animation evaluation time
+* Layout time
+* Render-command generation time
+* Draw count
+* Pipeline changes
+* Descriptor changes
+* Instance count
+* Tessellated path count
+* Uploaded bytes
+* GPU vector-rendering time
+* GPU frame time
+* Per-frame allocations
+* GPU memory usage
+
+Do not include these measurements in the final response unless requested.
+
+Do not optimize unmeasured code.
+
+# 22. Build configurations
+
+Provide:
+
+* Debug
+* Development
+* Release
+* AddressSanitizer
+* UndefinedBehaviorSanitizer
+
+Initially support:
+
+* Windows x64
+* Linux x64
+
+Enable strict warnings for project-owned code.
+
+Treat project warnings as errors in continuous integration.
+
+Do not treat third-party warnings as project errors.
+
+Provide CMake presets.
+
+Provide formatting checks.
+
+Use a consistent clang-format configuration.
+
+# 23. Testing requirements
+
+Add deterministic tests for the following.
+
+## Core
+
+* Arena allocation
+* Alignment
+* Scratch allocator restoration
+* Integer overflow checks
+* Generation handles
+* Stale handles
+* Dynamic arrays
+* Hashing
+* File-size limits
+
+## Math and transforms
+
+* Affine transform composition
+* Parent-child transforms
+* Inverse transforms
+* Canvas projection
+* Anchor calculations
+
+## Animation
+
+* Step sampling
+* Linear sampling
+* Cubic Bézier easing
+* Exact-keyframe sampling
+* Empty tracks
+* Duplicate keyframe times
+* Looping
+* Reverse playback
+* Playback speed
+* Deterministic evaluation
+
+## Scene
+
+* Stable identifiers
+* Parenting
+* Reparenting
+* Hierarchy-cycle rejection
+* Layer ordering
+* Node deletion
+
+## Serialization
+
+* Round-trip serialization
+* Unknown fields
+* Unsupported versions
+* Invalid identifiers
+* Excessive resource counts
+* Invalid references
+
+## Runtime package
+
+* Invalid magic
+* Truncated header
+* Integer overflow
+* Out-of-bounds sections
+* Misaligned sections
+* Overlapping sections
+* Invalid counts
+* Invalid references
+* Unsupported required features
+
+## Rendering
+
+* Vulkan initialization smoke test
+* Pipeline-creation smoke test
+* Offscreen analytic-shape rendering where supported
+* Tolerance-based image comparison for stable environments
+
+Do not make correctness validation depend entirely on screenshots.
+
+# 24. Security requirements
+
+Treat projects, packages, textures, shaders, and fonts as untrusted.
+
+Enforce limits on:
+
+* File size
+* String length
+* Node count
+* Hierarchy depth
+* Animation count
+* Track count
+* Keyframe count
+* Path point count
+* Bézier subdivision depth
+* Texture dimensions
+* Font size
+* Glyph dimensions
+* Atlas dimensions
+* Component nesting
+* State-machine transitions later
+* Particle count later
+
+Normalize project paths.
+
+Prevent imported paths from escaping the project directory.
+
+Reject absolute paths unless explicitly permitted.
+
+Restrict shader include paths.
+
+Validate SPIR-V before module creation.
+
+Do not execute scripts from project files.
+
+Do not embed a scripting language in early milestones.
+
+# 25. Development process
+
+Before changing code:
+
+1. Inspect relevant repository files.
+2. Identify existing conventions and dependencies.
+3. Preserve working functionality.
+4. Implement only the active milestone.
+5. Build affected targets.
+6. Run relevant tests.
+7. Run formatting and sanitizers when available.
+8. Fix failures caused by the changes.
+9. Verify acceptance criteria internally.
+
+Do not provide a detailed implementation plan unless the task is ambiguous.
+
+Do not stop after describing what should be implemented.
+
+Modify the repository and verify the implementation.
+
+Do not fabricate:
+
+* Successful builds
+* Successful tests
+* Performance measurements
+* Vulkan validation results
+* Platform support
+
+When a required tool or dependency is unavailable, complete everything that can be verified and mention the limitation concisely.
+
+# 26. Milestone plan
+
+Follow this order.
+
+## Milestone 1: Foundation and analytic vector player
+
+Implement only:
+
+* Core allocator and error systems
+* SDL3 window
+* Vulkan instance and device
+* Swapchain
+* Dynamic rendering
+* Synchronization 2
+* Two frames in flight
+* Upload ring
+* Shader loading
+* Analytic rectangle rendering
+* Analytic rounded-rectangle rendering
+* Analytic ellipse rendering
+* Scene hierarchy
+* 2D transforms
+* Solid fills
+* Opacity
+* Basic animation evaluation
+* Minimal Arcflow Runtime Package
+* Standalone player
+* Core and package tests
+
+Do not implement project editing in Milestone 1 beyond a hard-coded or programmatically generated demonstration scene.
+
+## Milestone 2: Basic editor
+
+Implement:
+
+* Canvas viewport
+* Hierarchy panel
+* Inspector
+* Selection
+* Transform gizmos
+* Create and delete primitives
+* Editable properties
+* Editor command system
+* Undo and redo
+* Save and load editable projects
+* Compile projects to Arcflow Runtime Packages
+
+## Milestone 3: Timeline editor
+
+Implement:
+
+* Animation clips
+* Timeline tracks
+* Add and remove keyframes
+* Move keyframes
+* Step interpolation
+* Linear interpolation
+* Cubic Bézier easing
+* Playback controls
+* Looping
+* Reverse playback
+* Curve editor
+* Timeline undo and redo
+
+## Milestone 4: Vector paths
+
+Implement:
+
+* Path model
+* Cubic Bézier segments
+* Path editing
+* Path flattening
+* Tessellation
+* Geometry caching
+* Solid path fills
+* Basic strokes
+* Path hit testing
+
+## Milestone 5: Layout and text
+
+Implement:
+
+* Anchors
+* Pivots
+* Reference-resolution scaling
+* Safe areas
+* FreeType loading
+* HarfBuzz shaping
+* Glyph atlas
+* Runtime text replacement
+
+## Milestone 6: Components and interaction
+
+Implement:
+
+* Reusable components
+* Component instances
+* Exposed properties
+* Pointer hit testing
+* Named animation events
+* Basic state machines
+* Transition-loop limits
+
+## Milestone 7: GPU particles
+
+Implement:
+
+* Fixed GPU particle pools
+* Compute simulation
+* Alive/dead lists
+* Billboard rendering
+* Indirect draw commands
+* UI-space particles
+* Wind
+* Gravity
+* Drag
+* Color over lifetime
+* Size over lifetime
+
+## Milestone 8: Advanced composition
+
+Implement:
+
+* Clipping paths
+* Masks
+* Offscreen layers
+* Blend modes
+* Gradients
+* Trim paths
+* Trails
+* Ribbons
+* Distortion
+* Particle spawning along vector paths
+
+Do not start a later milestone until the active milestone passes its acceptance criteria.
+
+# 27. Active task: Milestone 1
+
+Implement Milestone 1 only.
+
+## Core
+
+Implement:
+
+* Structured error system
+* Overflow-safe integer helpers
+* Arena allocator
+* Scratch allocator
+* Generation-based handles
+* File loading with explicit size limits
+* Logging
+* Basic vectors and matrices
+* 2D affine transforms
+
+## Vulkan
+
+Implement:
+
+* SDL3 Vulkan window
+* Vulkan 1.3 instance
+* Debug messenger
+* Physical-device selection
+* Device capability detection
+* Logical device
+* Graphics queue
+* Presentation queue where required
+* Swapchain
+* Swapchain recreation
+* Dynamic rendering
+* Synchronization 2
+* Two frames in flight
+* Per-frame command pools
+* Persistent upload ring
+* Vulkan object names
+* Validation-layer support in debug builds
+* Graceful cleanup after partial initialization failure
+
+Use one primary graphics queue.
+
+Do not implement asynchronous compute.
+
+Do not implement multithreaded command recording.
+
+## Analytic vector renderer
+
+Render these using instanced quads:
+
+* Rectangle
+* Rounded rectangle
+* Ellipse
+
+Support:
+
+* Position
+* Rotation
+* Scale
+* Bounds
+* Solid fill
+* Opacity
+* Corner radius
+* Parent-child transforms
+* Layer order
+* Canvas resize
+* Orthographic projection
+* Premultiplied-alpha blending
+
+Do not tessellate these primitives.
+
+Batch compatible shape instances.
+
+## Scene
+
+Implement:
+
+* Stable node identifiers
+* Group nodes
+* Rectangle nodes
+* Rounded-rectangle nodes
+* Ellipse nodes
+* Parent identifiers
+* Local transform
+* World-transform evaluation
+* Visibility
+* Opacity
+* Layer order
+* Hierarchy-cycle detection
+
+## Animation
+
+Implement tracks for:
+
+* Position
+* Rotation
+* Scale
+* Opacity
+* Fill color
+* Corner radius
+
+Implement:
+
+* Step interpolation
+* Linear interpolation
+* Cubic Bézier easing
+* Play
+* Pause
+* Stop
+* Seek
+* Loop
+* Playback speed
+* Reverse playback
+
+No normal playback allocations are allowed.
+
+## Arcflow Runtime Package
+
+Implement a versioned binary package containing:
+
+* Scene hierarchy
+* Primitive data
+* Animation clips
+* Animation tracks
+* Keyframes
+* String table where necessary
+
+Implement:
+
+* Safe package writer
+* Package validator
+* Package loader
+* Bounds checks
+* Overflow checks
+* Required-feature checks
+* Maximum-count checks
+
+## Arcflow Player
+
+Create `arcflow_player`.
+
+It must:
+
+* Open an SDL3 Vulkan window
+* Load an Arcflow Runtime Package
+* Create an animation instance
+* Play the animation
+* Resize correctly
+* Exit cleanly
+* Report validation or loading errors clearly
+
+Provide a generated demonstration package containing:
+
+* At least one rectangle
+* At least one rounded rectangle
+* At least one ellipse
+* Parent-child transforms
+* Position animation
+* Rotation animation
+* Opacity animation
+* Color animation
+* Looping playback
+
+## Tests
+
+Implement all Milestone 1 tests listed above.
+
+# 28. Milestone 1 acceptance criteria
+
+Milestone 1 is complete only when:
+
+1. CMake configuration succeeds.
+2. All Milestone 1 targets compile.
+3. Unit tests pass.
+4. Arcflow Player opens a Vulkan window.
+5. Arcflow Player renders all three analytic primitive types.
+6. Parent-child transforms work.
+7. Animation playback works.
+8. Looping and reverse playback work.
+9. The Arcflow Runtime Package is validated before loading.
+10. Malformed-package tests pass.
+11. Normal playback performs zero general heap allocations per frame.
+12. Swapchain recreation works.
+13. Vulkan validation reports no errors during the demonstrated workflow.
+14. Vulkan objects are destroyed correctly.
+15. Initialization-failure paths clean up created resources.
+16. Ownership and destruction order are documented.
+17. No completed feature is represented only by a placeholder.
+
+Verify these criteria internally.
+
+Only mention criteria that failed or could not be verified.
+
+# 29. Required documentation
+
+Create and maintain:
+
+```text
+README.md
+docs/architecture.md
+docs/building.md
+docs/memory.md
+docs/runtime-api.md
+docs/runtime-package.md
+docs/vector-rendering.md
+docs/animation.md
+docs/vulkan-lifecycle.md
+docs/security.md
+```
+
+Document:
+
+* Arcflow module boundaries
+* Initialization order
+* Destruction order
+* Frame lifecycle
+* Coordinate conventions
+* Transform order
+* Color-space rules
+* Premultiplied-alpha rules
+* Package ownership
+* Vulkan synchronization
+* Host/runtime ownership
+* Allocation policy
+* Current limitations
+* Milestone boundaries
+
+Do not summarize these documents in the final response.
+
+Begin by inspecting the repository, then implement Milestone 1.
+
