@@ -115,6 +115,67 @@ static AfResult af_editor_create_path(AfEditorState *editor, int width, int heig
     return result;
 }
 
+static AfResult af_editor_add_vector_smoke_track(AfEditorState *editor, uint64_t node_id,
+                                                 AfPropertyType property, uint32_t command_index,
+                                                 float duration, AfVec2 start, AfVec2 end) {
+    AfProjectTrack track = {.clip_id = editor->selected_clip_id,
+                            .node_id = node_id,
+                            .property = property,
+                            .element_index = command_index};
+    AfProjectKeyframe keys[2] = {0};
+    AfResult result = af_project_allocate_animation_id(&editor->project, &track.id);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_add_track(&editor->project, &track);
+    }
+    for (uint32_t index = 0U; result == AF_RESULT_SUCCESS && index < 2U; ++index) {
+        result = af_project_allocate_animation_id(&editor->project, &keys[index].id);
+        keys[index].track_id = track.id;
+        keys[index].keyframe.time = index == 0U ? 0.0F : duration;
+        keys[index].keyframe.interpolation = AF_INTERPOLATION_LINEAR;
+        keys[index].keyframe.value[0] = index == 0U ? start.x : end.x;
+        keys[index].keyframe.value[1] = index == 0U ? start.y : end.y;
+        if (result == AF_RESULT_SUCCESS) {
+            result = af_project_add_keyframe(&editor->project, &keys[index]);
+        }
+    }
+    return result;
+}
+
+static AfResult af_editor_prepare_vector_animation_smoke(AfEditorState *editor, int width,
+                                                         int height) {
+    const AfProjectClip *clip = NULL;
+    AfPath *path = NULL;
+    AfPathCommand *command = NULL;
+    AfResult result = af_editor_create_path(editor, width, height);
+    if (result != AF_RESULT_SUCCESS) {
+        return result;
+    }
+    clip = af_project_find_clip_const(&editor->project, editor->selected_clip_id);
+    path = af_editor_selected_path(editor);
+    if (clip == NULL || path == NULL || path->command_count <= 1U) {
+        return AF_RESULT_NOT_FOUND;
+    }
+    command = &editor->project.path_data.commands[path->command_start + 1U];
+    if (command->type != AF_PATH_CUBIC) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    result =
+        af_editor_add_vector_smoke_track(editor, path->node_id, AF_PROPERTY_PATH_POINT, 1U,
+                                         clip->duration, command->point, (AfVec2){90.0F, 85.0F});
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_editor_add_vector_smoke_track(editor, path->node_id,
+                                                  AF_PROPERTY_PATH_CONTROL_OUT, 1U, clip->duration,
+                                                  command->control1, (AfVec2){10.0F, 145.0F});
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_editor_add_vector_smoke_track(editor, path->node_id,
+                                                  AF_PROPERTY_PATH_CONTROL_IN, 1U, clip->duration,
+                                                  command->control2, (AfVec2){140.0F, 145.0F});
+    }
+    editor->selected_path_command = 1U;
+    return result;
+}
+
 static AfResult af_editor_apply_path_edit(AfEditorState *editor, const AfPathCommand *new_commands,
                                           uint32_t new_command_count, AfPathFillRule fill_rule,
                                           const char *status) {

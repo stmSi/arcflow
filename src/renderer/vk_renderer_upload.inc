@@ -1,8 +1,18 @@
+static uint64_t af_vk_path_content_hash(const AfPathData *data, const AfPath *path) {
+    uint64_t hash = af_hash_bytes(&path->fill_rule, sizeof(path->fill_rule));
+    const uint64_t commands_hash = af_hash_bytes(
+        &data->commands[path->command_start], (size_t)path->command_count * sizeof(AfPathCommand));
+    hash ^= commands_hash + UINT64_C(0x9e3779b97f4a7c15) + (hash << 6U) + (hash >> 2U);
+    return hash;
+}
+
 static AfResult af_vk_update_path_cache(AfVkRenderer *renderer, const AfPathData *data,
                                         const AfPath *path, AfVkPathCache **out_cache) {
     AfVkPathCache *cache = NULL;
     AfVkPathCache *empty = NULL;
+    AfVkPathCache *recyclable = NULL;
     uint32_t vertex_count = 0U;
+    const uint64_t content_hash = af_vk_path_content_hash(data, path);
     AfResult result = AF_RESULT_SUCCESS;
     for (uint32_t index = 0U; index < AF_MAX_PATHS; ++index) {
         if (renderer->path_caches[index].path_id == path->id) {
@@ -11,17 +21,21 @@ static AfResult af_vk_update_path_cache(AfVkRenderer *renderer, const AfPathData
         }
         if (empty == NULL && renderer->path_caches[index].path_id == 0U) {
             empty = &renderer->path_caches[index];
+        } else if (recyclable == NULL &&
+                   renderer->path_caches[index].seen_serial != renderer->path_cache_serial) {
+            recyclable = &renderer->path_caches[index];
         }
     }
     if (cache == NULL) {
-        cache = empty;
+        cache = empty != NULL ? empty : recyclable;
     }
     if (cache == NULL) {
         return AF_RESULT_LIMIT_EXCEEDED;
     }
     cache->seen_serial = renderer->path_cache_serial;
     if (cache->source == data && cache->path_id == path->id &&
-        cache->geometry_generation == path->geometry_generation) {
+        cache->geometry_generation == path->geometry_generation &&
+        cache->content_hash == content_hash) {
         *out_cache = cache;
         return AF_RESULT_SUCCESS;
     }
@@ -54,6 +68,7 @@ static AfResult af_vk_update_path_cache(AfVkRenderer *renderer, const AfPathData
     cache->source = data;
     cache->path_id = path->id;
     cache->geometry_generation = path->geometry_generation;
+    cache->content_hash = content_hash;
     cache->vertex_count = vertex_count;
     ++cache->rebuild_count;
     *out_cache = cache;
@@ -65,11 +80,13 @@ static AfResult af_vk_update_stroke_cache(AfVkRenderer *renderer, const AfPathDa
                                           const AfStyle *style, AfVkStrokeCache **out_cache) {
     AfVkStrokeCache *cache = NULL;
     AfVkStrokeCache *empty = NULL;
+    AfVkStrokeCache *recyclable = NULL;
     AfFlattenedPath flattened = {.points = renderer->path_scratch->points,
                                  .point_capacity = AF_MAX_PATH_FLATTENED_POINTS,
                                  .contours = renderer->path_scratch->contours,
                                  .contour_capacity = AF_MAX_PATH_CONTOURS};
     uint32_t vertex_count = 0U;
+    const uint64_t path_content_hash = af_vk_path_content_hash(paths, path);
     AfResult result = AF_RESULT_SUCCESS;
     for (uint32_t index = 0U; index < AF_MAX_PATHS; ++index) {
         if (renderer->stroke_caches[index].path_id == path->id &&
@@ -79,10 +96,13 @@ static AfResult af_vk_update_stroke_cache(AfVkRenderer *renderer, const AfPathDa
         }
         if (empty == NULL && renderer->stroke_caches[index].path_id == 0U) {
             empty = &renderer->stroke_caches[index];
+        } else if (recyclable == NULL &&
+                   renderer->stroke_caches[index].seen_serial != renderer->path_cache_serial) {
+            recyclable = &renderer->stroke_caches[index];
         }
     }
     if (cache == NULL) {
-        cache = empty;
+        cache = empty != NULL ? empty : recyclable;
     }
     if (cache == NULL) {
         return AF_RESULT_LIMIT_EXCEEDED;
@@ -91,6 +111,7 @@ static AfResult af_vk_update_stroke_cache(AfVkRenderer *renderer, const AfPathDa
     if (cache->path_source == paths && cache->style_source == styles &&
         cache->path_id == path->id && cache->style_id == style->id &&
         cache->path_geometry_generation == path->geometry_generation &&
+        cache->path_content_hash == path_content_hash &&
         cache->stroke_geometry_generation == style->stroke_geometry_generation) {
         *out_cache = cache;
         return AF_RESULT_SUCCESS;
@@ -128,6 +149,7 @@ static AfResult af_vk_update_stroke_cache(AfVkRenderer *renderer, const AfPathDa
     cache->path_id = path->id;
     cache->style_id = style->id;
     cache->path_geometry_generation = path->geometry_generation;
+    cache->path_content_hash = path_content_hash;
     cache->stroke_geometry_generation = style->stroke_geometry_generation;
     cache->vertex_count = vertex_count;
     ++cache->rebuild_count;
@@ -145,6 +167,25 @@ static void af_vk_insert_render_item(AfVkRenderer *renderer, uint32_t *count, Af
     ++(*count);
 }
 
+static void af_vk_prune_path_caches(AfVkRenderer *renderer, const AfPathData *paths) {
+    for (uint32_t index = 0U; index < AF_MAX_PATHS; ++index) {
+        AfVkPathCache *path_cache = &renderer->path_caches[index];
+        AfVkStrokeCache *stroke_cache = &renderer->stroke_caches[index];
+        if (path_cache->path_id != 0U &&
+            (paths == NULL || af_path_find_const(paths, path_cache->path_id) == NULL)) {
+            renderer->cached_path_vertex_count -= path_cache->vertex_count;
+            free(path_cache->vertices);
+            *path_cache = (AfVkPathCache){0};
+        }
+        if (stroke_cache->path_id != 0U &&
+            (paths == NULL || af_path_find_const(paths, stroke_cache->path_id) == NULL)) {
+            renderer->cached_stroke_vertex_count -= stroke_cache->vertex_count;
+            free(stroke_cache->vertices);
+            *stroke_cache = (AfVkStrokeCache){0};
+        }
+    }
+}
+
 static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                                    uint32_t *out_shape_count, uint32_t *out_path_vertex_count,
                                    uint32_t *out_item_count) {
@@ -159,6 +200,7 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
     if (++renderer->path_cache_serial == 0U) {
         renderer->path_cache_serial = 1U;
     }
+    af_vk_prune_path_caches(renderer, scene->paths);
     for (index = 0U; index < scene->count && item_count < AF_MAX_RENDER_ITEMS; ++index) {
         const AfSceneNode *node = &scene->nodes[index];
         const AfStyle *source_style =

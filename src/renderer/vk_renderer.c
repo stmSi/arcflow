@@ -1,5 +1,6 @@
 #include "renderer/vk_renderer.h"
 
+#include "core/hash.h"
 #include "core/log.h"
 #include "core/png.h"
 #include "renderer/vk_particles.h"
@@ -57,6 +58,7 @@ typedef struct AfVkPathCache {
     const AfPathData *source;
     uint64_t path_id;
     uint64_t geometry_generation;
+    uint64_t content_hash;
     AfVec2 *vertices;
     uint32_t vertex_count;
     uint64_t rebuild_count;
@@ -69,6 +71,7 @@ typedef struct AfVkStrokeCache {
     uint64_t path_id;
     uint64_t style_id;
     uint64_t path_geometry_generation;
+    uint64_t path_content_hash;
     uint64_t stroke_geometry_generation;
     AfVec2 *vertices;
     uint32_t vertex_count;

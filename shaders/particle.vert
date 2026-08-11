@@ -47,6 +47,8 @@ layout(push_constant) uniform ParticleView {
     vec2 viewport_size;
     uint parity;
     uint reserved;
+    vec4 transform;
+    vec4 translation;
 } view;
 
 layout(location = 0) out vec2 out_uv;
@@ -100,6 +102,9 @@ void main() {
     } else if (particle.meta.y == 7U || particle.meta.y == 8U) {
         world.x += sin(world.y * 0.08 + particle.position_age.z * 12.0) * emitter.render1.x;
     }
+    world = vec2(view.transform.x * world.x + view.transform.y * world.y,
+                 view.transform.z * world.x + view.transform.w * world.y) +
+            view.translation.xy;
     vec2 ndc = world * 2.0 / view.viewport_size - 1.0;
     gl_Position = vec4(ndc, 0.0, 1.0);
     out_uv = UVS[gl_VertexIndex];

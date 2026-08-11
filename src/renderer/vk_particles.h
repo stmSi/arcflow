@@ -30,7 +30,7 @@ AfResult af_vk_particles_update(AfVkParticleSystem *system, const AfScene *scene
 void af_vk_particles_record(AfVkParticleSystem *system, VkCommandBuffer command_buffer,
                             uint32_t frame_index, float delta_time);
 void af_vk_particles_draw(AfVkParticleSystem *system, VkCommandBuffer command_buffer,
-                          uint32_t frame_index, VkExtent2D extent);
+                          uint32_t frame_index, VkExtent2D extent, AfAffine2 view_transform);
 uint64_t af_vk_particles_memory_size(void);
 AfVkVfxMetrics af_vk_particles_metrics(const AfVkParticleSystem *system);
 

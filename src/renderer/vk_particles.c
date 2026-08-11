@@ -82,6 +82,9 @@ typedef struct AfGpuParticleView {
     float viewport_size[2];
     uint32_t parity;
     uint32_t reserved;
+    float transform[4];
+    float translation[2];
+    float padding[2];
 } AfGpuParticleView;
 
 struct AfVkParticleSystem {
@@ -129,7 +132,7 @@ _Static_assert(sizeof(AfGpuParticle) == 96U, "GPU particle layout mismatch");
 _Static_assert(sizeof(AfGpuParticleEmitter) == 416U, "GPU emitter layout mismatch");
 _Static_assert(sizeof(AfGpuParticleEmitterState) == 48U, "GPU emitter state layout mismatch");
 _Static_assert(sizeof(AfGpuParticleStep) == 32U, "GPU step push constant mismatch");
-_Static_assert(sizeof(AfGpuParticleView) == 16U, "GPU view push constant mismatch");
+_Static_assert(sizeof(AfGpuParticleView) == 48U, "GPU view push constant mismatch");
 
 static double af_vk_particle_now_milliseconds(void) {
     struct timespec value;
@@ -346,7 +349,7 @@ static AfResult af_vk_particles_create_layout(AfVkParticleSystem *system) {
     const VkPushConstantRange push_range = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT |
                                                           VK_SHADER_STAGE_VERTEX_BIT,
                                             .offset = 0U,
-                                            .size = sizeof(AfGpuParticleStep)};
+                                            .size = sizeof(AfGpuParticleView)};
     const VkPipelineLayoutCreateInfo pipeline_layout_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1U,
@@ -1020,7 +1023,7 @@ void af_vk_particles_record(AfVkParticleSystem *system, VkCommandBuffer command_
 }
 
 void af_vk_particles_draw(AfVkParticleSystem *system, VkCommandBuffer command_buffer,
-                          uint32_t frame_index, VkExtent2D extent) {
+                          uint32_t frame_index, VkExtent2D extent, AfAffine2 view_transform) {
     AfGpuParticleView view = {0};
     if (system == NULL || command_buffer == VK_NULL_HANDLE ||
         frame_index >= AF_PARTICLE_FRAME_COUNT || !system->renderer_enabled) {
@@ -1029,6 +1032,12 @@ void af_vk_particles_draw(AfVkParticleSystem *system, VkCommandBuffer command_bu
     view.viewport_size[0] = (float)extent.width;
     view.viewport_size[1] = (float)extent.height;
     view.parity = system->parity;
+    view.transform[0] = view_transform.m00;
+    view.transform[1] = view_transform.m01;
+    view.transform[2] = view_transform.m10;
+    view.transform[3] = view_transform.m11;
+    view.translation[0] = view_transform.tx;
+    view.translation[1] = view_transform.ty;
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, system->graphics_pipeline);
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             system->pipeline_layout, 0U, 1U, &system->descriptor_sets[frame_index],

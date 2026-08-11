@@ -208,6 +208,9 @@ typedef struct AfEditorState {
     bool tooltip_smoke;
     bool selection_smoke;
     bool vfx_smoke;
+    bool particle_view_smoke;
+    bool vector_animation_smoke;
+    bool vector_animation_smoke_prepared;
     bool running;
     bool dirty;
 } AfEditorState;
@@ -376,9 +379,47 @@ int af_editor_run(int argument_count, char **arguments) {
                 }
             }
         }
+        if (editor.vector_animation_smoke) {
+            const AfProjectClip *clip = NULL;
+            if (!editor.vector_animation_smoke_prepared) {
+                result = af_editor_prepare_vector_animation_smoke(&editor, width, height);
+                if (result != AF_RESULT_SUCCESS) {
+                    goto cleanup;
+                }
+                editor.vector_animation_smoke_prepared = true;
+            }
+            clip = af_project_find_clip_const(&editor.project, editor.selected_clip_id);
+            if (clip != NULL) {
+                const uint32_t denominator =
+                    editor.maximum_frames > 1U ? editor.maximum_frames - 1U : 1U;
+                editor.playhead =
+                    clip->duration * (float)editor.rendered_frames / (float)denominator;
+            }
+        }
         af_editor_update_preview(&editor);
         af_editor_build_hierarchy(&editor);
-        if (editor.vfx_smoke) {
+        if (editor.vector_animation_smoke) {
+            editor.selected_property = AF_PROPERTY_PATH_CONTROL_OUT;
+            af_editor_status(&editor, "Programmatic animated vector handles capture");
+        } else if (editor.particle_view_smoke) {
+            const uint32_t stage = editor.rendered_frames / 8U;
+            for (uint32_t index = 0U; index < editor.project.particle_data.count; ++index) {
+                af_editor_select_only(&editor,
+                                      editor.project.particle_data.emitters[index].node_id);
+                break;
+            }
+            if (stage == 0U) {
+                editor.zoom = 0.65F;
+                editor.pan = (AfVec2){48.0F, 42.0F};
+            } else if (stage == 1U) {
+                editor.zoom = 1.5F;
+                editor.pan = (AfVec2){-350.0F, -220.0F};
+            } else {
+                editor.zoom = 0.4F;
+                editor.pan = (AfVec2){850.0F, 300.0F};
+            }
+            af_editor_status(&editor, "Programmatic particle pan / zoom / clip capture");
+        } else if (editor.vfx_smoke) {
             for (uint32_t index = 0U; index < editor.project.particle_data.count; ++index) {
                 af_editor_select_only(&editor,
                                       editor.project.particle_data.emitters[index].node_id);
@@ -429,8 +470,23 @@ int af_editor_run(int argument_count, char **arguments) {
             result = af_vk_renderer_capture_next(editor.renderer, editor.output_path);
         }
         if (result == AF_RESULT_SUCCESS) {
-            result = af_vk_renderer_draw_timed(editor.renderer, &editor.render_scene,
-                                               fminf(delta_time, 0.1F));
+            float canvas_x = 0.0F;
+            float canvas_y = 0.0F;
+            float canvas_width = 0.0F;
+            float canvas_height = 0.0F;
+            af_editor_layout(&editor, width, height, &canvas_x, &canvas_y, &canvas_width,
+                             &canvas_height);
+            const AfVkRenderOptions render_options = {
+                .particle_scene = &editor.preview_scene,
+                .particle_transform = af_editor_camera(&editor, width, height),
+                .particle_layer_order = 89980,
+                .particle_clip_x = (uint32_t)fmaxf(canvas_x, 0.0F),
+                .particle_clip_y = (uint32_t)fmaxf(canvas_y, 0.0F),
+                .particle_clip_width = (uint32_t)fmaxf(canvas_width, 0.0F),
+                .particle_clip_height = (uint32_t)fmaxf(canvas_height, 0.0F),
+                .particle_clip_enabled = true};
+            result = af_vk_renderer_draw_timed_with_options(
+                editor.renderer, &editor.render_scene, fminf(delta_time, 0.1F), &render_options);
         }
         if (result != AF_RESULT_SUCCESS) {
             af_log(AF_LOG_ERROR, "Editor rendering failed: %s", af_result_string(result));

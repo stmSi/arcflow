@@ -1,4 +1,19 @@
-AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene, float delta_time) {
+static void af_vk_renderer_draw_particles(AfVkRenderer *renderer, VkCommandBuffer command_buffer,
+                                          uint32_t frame_index, AfAffine2 transform,
+                                          const VkRect2D *particle_scissor,
+                                          const VkRect2D *full_scissor) {
+    if (particle_scissor->extent.width == 0U || particle_scissor->extent.height == 0U) {
+        return;
+    }
+    vkCmdSetScissor(command_buffer, 0U, 1U, particle_scissor);
+    af_vk_particles_draw(renderer->particles, command_buffer, frame_index, renderer->extent,
+                         transform);
+    vkCmdSetScissor(command_buffer, 0U, 1U, full_scissor);
+}
+
+AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const AfScene *scene,
+                                                float delta_time,
+                                                const AfVkRenderOptions *options) {
     AfVkFrame *frame = NULL;
     uint32_t image_index = 0U;
     uint32_t shape_count = 0U;
@@ -8,6 +23,9 @@ AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene,
     AfResult capture_result = AF_RESULT_SUCCESS;
     bool capture_this_frame = false;
     bool present_failed = false;
+    bool particles_drawn = false;
+    AfVkRenderOptions render_options = {0};
+    const AfScene *particle_scene = NULL;
     VkCommandBufferBeginInfo begin_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     VkImageMemoryBarrier2 to_render = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -58,6 +76,7 @@ AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene,
                                  .pColorAttachments = &color_attachment};
     VkViewport viewport;
     VkRect2D scissor;
+    VkRect2D particle_scissor;
     float canvas[2];
     VkDeviceSize upload_offset = 0U;
     VkDeviceSize path_upload_offset = 0U;
@@ -86,6 +105,24 @@ AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene,
     if (renderer == NULL || scene == NULL || !isfinite(delta_time) || delta_time < 0.0F) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
+    render_options.particle_scene = scene;
+    render_options.particle_transform = af_affine_identity();
+    render_options.particle_layer_order = INT32_MAX;
+    if (options != NULL) {
+        render_options = *options;
+        if (render_options.particle_scene == NULL) {
+            render_options.particle_scene = scene;
+        }
+    }
+    particle_scene = render_options.particle_scene;
+    if (!isfinite(render_options.particle_transform.m00) ||
+        !isfinite(render_options.particle_transform.m01) ||
+        !isfinite(render_options.particle_transform.m10) ||
+        !isfinite(render_options.particle_transform.m11) ||
+        !isfinite(render_options.particle_transform.tx) ||
+        !isfinite(render_options.particle_transform.ty)) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
     if (renderer->resize_requested) {
         AfResult recreate_result = af_vk_recreate_swapchain(renderer);
         if (recreate_result != AF_RESULT_SUCCESS || renderer->resize_requested) {
@@ -110,7 +147,7 @@ AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene,
     }
     {
         const AfResult particle_result =
-            af_vk_particles_update(renderer->particles, scene, renderer->frame_index);
+            af_vk_particles_update(renderer->particles, particle_scene, renderer->frame_index);
         if (particle_result != AF_RESULT_SUCCESS) {
             return particle_result;
         }
@@ -154,6 +191,25 @@ AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene,
                             .minDepth = 0.0F,
                             .maxDepth = 1.0F};
     scissor = (VkRect2D){.extent = renderer->extent};
+    particle_scissor = scissor;
+    if (render_options.particle_clip_enabled) {
+        const uint32_t clip_x = render_options.particle_clip_x < renderer->extent.width
+                                    ? render_options.particle_clip_x
+                                    : renderer->extent.width;
+        const uint32_t clip_y = render_options.particle_clip_y < renderer->extent.height
+                                    ? render_options.particle_clip_y
+                                    : renderer->extent.height;
+        particle_scissor.offset.x = (int32_t)clip_x;
+        particle_scissor.offset.y = (int32_t)clip_y;
+        particle_scissor.extent.width =
+            render_options.particle_clip_width < renderer->extent.width - clip_x
+                ? render_options.particle_clip_width
+                : renderer->extent.width - clip_x;
+        particle_scissor.extent.height =
+            render_options.particle_clip_height < renderer->extent.height - clip_y
+                ? render_options.particle_clip_height
+                : renderer->extent.height - clip_y;
+    }
     canvas[0] = (float)renderer->extent.width;
     canvas[1] = (float)renderer->extent.height;
     upload_offset = renderer->frame_index * renderer->upload_slice_size;
@@ -171,6 +227,13 @@ AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene,
         AfVkRenderItemType bound_type = (AfVkRenderItemType)UINT32_MAX;
         for (uint32_t item_index = 0U; item_index < item_count; ++item_index) {
             const AfVkRenderItem *item = &renderer->render_items[item_index];
+            if (!particles_drawn && item->layer_order > render_options.particle_layer_order) {
+                af_vk_renderer_draw_particles(
+                    renderer, frame->command_buffer, renderer->frame_index,
+                    render_options.particle_transform, &particle_scissor, &scissor);
+                particles_drawn = true;
+                bound_type = (AfVkRenderItemType)UINT32_MAX;
+            }
             if (item->type != bound_type) {
                 const VkDeviceSize *offset =
                     item->type == AF_VK_RENDER_PATH ? &path_upload_offset : &upload_offset;
@@ -192,9 +255,13 @@ AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene,
                 vkCmdDraw(frame->command_buffer, 6U, 1U, 0U, item->first);
             }
         }
+        if (!particles_drawn) {
+            af_vk_renderer_draw_particles(renderer, frame->command_buffer, renderer->frame_index,
+                                          render_options.particle_transform, &particle_scissor,
+                                          &scissor);
+            particles_drawn = true;
+        }
     }
-    af_vk_particles_draw(renderer->particles, frame->command_buffer, renderer->frame_index,
-                         renderer->extent);
     (void)shape_count;
     (void)path_vertex_count;
     vkCmdEndRendering(frame->command_buffer);
@@ -284,6 +351,10 @@ AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene,
         return AF_RESULT_VULKAN_ERROR;
     }
     return capture_result;
+}
+
+AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene, float delta_time) {
+    return af_vk_renderer_draw_timed_with_options(renderer, scene, delta_time, NULL);
 }
 
 AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {

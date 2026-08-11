@@ -1121,6 +1121,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->selection_smoke = true;
         } else if (strcmp(arguments[index], "--vfx-smoke") == 0) {
             editor->vfx_smoke = true;
+        } else if (strcmp(arguments[index], "--particle-view-smoke") == 0) {
+            editor->particle_view_smoke = true;
+        } else if (strcmp(arguments[index], "--vector-animation-smoke") == 0) {
+            editor->vector_animation_smoke = true;
         } else if (strcmp(arguments[index], "--sequence") == 0 && index + 1 < argument_count) {
             (void)snprintf(editor->sequence_prefix, sizeof(editor->sequence_prefix), "%s",
                            arguments[++index]);
@@ -1133,9 +1137,17 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         }
     }
     if (editor->output_path[0] != '\0' && editor->maximum_frames == 0U) {
-        editor->maximum_frames = editor->tooltip_smoke ? 2U : 1U;
+        editor->maximum_frames =
+            editor->particle_view_smoke
+                ? 24U
+                : (editor->vector_animation_smoke ? 18U : (editor->tooltip_smoke ? 2U : 1U));
     } else if (editor->sequence_prefix[0] != '\0' && editor->maximum_frames == 0U) {
-        editor->maximum_frames = editor->vfx_smoke ? AF_EDITOR_PARTICLE_PAGE_COUNT : 60U;
+        editor->maximum_frames =
+            editor->particle_view_smoke
+                ? 24U
+                : (editor->vector_animation_smoke
+                       ? 18U
+                       : (editor->vfx_smoke ? AF_EDITOR_PARTICLE_PAGE_COUNT : 60U));
     }
     af_editor_derive_package_path(editor);
 }
