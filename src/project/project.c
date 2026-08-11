@@ -89,6 +89,7 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
     AfPathCommand *path_commands = NULL;
     AfStyle *styles = NULL;
     AfLayoutNode *layouts = NULL;
+    AfParticleEmitter *emitters = NULL;
     uint64_t *validation_ids = NULL;
     if (project == NULL || allocator == NULL || capacity == 0U || capacity > AF_MAX_NODES) {
         return AF_RESULT_INVALID_ARGUMENT;
@@ -108,15 +109,18 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
     styles = af_allocate_array(allocator, AF_MAX_STYLES, sizeof(*styles), alignof(AfStyle));
     layouts =
         af_allocate_array(allocator, AF_MAX_LAYOUT_NODES, sizeof(*layouts), alignof(AfLayoutNode));
+    emitters = af_allocate_array(allocator, AF_MAX_PARTICLE_EMITTERS, sizeof(*emitters),
+                                 alignof(AfParticleEmitter));
     validation_ids = af_allocate_array(allocator, AF_PROJECT_VALIDATION_ID_CAPACITY,
                                        sizeof(*validation_ids), alignof(uint64_t));
     if (nodes == NULL || names == NULL || clips == NULL || tracks == NULL || keyframes == NULL ||
         paths == NULL || path_commands == NULL || styles == NULL || layouts == NULL ||
-        validation_ids == NULL) {
+        emitters == NULL || validation_ids == NULL) {
         af_deallocate(allocator, validation_ids);
         af_deallocate(allocator, path_commands);
         af_deallocate(allocator, styles);
         af_deallocate(allocator, layouts);
+        af_deallocate(allocator, emitters);
         af_deallocate(allocator, paths);
         af_deallocate(allocator, keyframes);
         af_deallocate(allocator, tracks);
@@ -134,6 +138,7 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
     memset(path_commands, 0, AF_MAX_PATH_COMMANDS * sizeof(*path_commands));
     memset(styles, 0, AF_MAX_STYLES * sizeof(*styles));
     memset(layouts, 0, AF_MAX_LAYOUT_NODES * sizeof(*layouts));
+    memset(emitters, 0, AF_MAX_PARTICLE_EMITTERS * sizeof(*emitters));
     memset(validation_ids, 0, AF_PROJECT_VALIDATION_ID_CAPACITY * sizeof(*validation_ids));
     af_scene_init(&project->scene, nodes, capacity);
     project->names = names;
@@ -159,6 +164,9 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
                                           .target_size = project->canvas_size,
                                           .scale_mode = AF_CANVAS_SCALE_FIT};
     project->scene.layouts = &project->layout_data;
+    project->particle_data =
+        (AfParticleData){.emitters = emitters, .capacity = AF_MAX_PARTICLE_EMITTERS};
+    project->scene.particles = &project->particle_data;
     project->validation_ids = validation_ids;
     project->allocator = allocator;
     return AF_RESULT_SUCCESS;
@@ -173,6 +181,7 @@ void af_project_destroy(AfProject *project) {
         af_deallocate(project->allocator, project->path_data.commands);
         af_deallocate(project->allocator, project->style_data.styles);
         af_deallocate(project->allocator, project->layout_data.nodes);
+        af_deallocate(project->allocator, project->particle_data.emitters);
         af_deallocate(project->allocator, project->path_data.paths);
         af_deallocate(project->allocator, project->keyframes);
         af_deallocate(project->allocator, project->tracks);
@@ -237,7 +246,8 @@ AfResult af_project_validate(const AfProject *project) {
         project->next_animation_id == UINT64_MAX ||
         af_scene_validate(&project->scene) != AF_RESULT_SUCCESS ||
         af_path_data_validate(&project->path_data) != AF_RESULT_SUCCESS ||
-        af_style_data_validate(&project->style_data) != AF_RESULT_SUCCESS) {
+        af_style_data_validate(&project->style_data) != AF_RESULT_SUCCESS ||
+        af_particle_data_validate(&project->particle_data, &project->scene) != AF_RESULT_SUCCESS) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
     if (af_layout_validate(&project->layout_data, &project->scene) != AF_RESULT_SUCCESS) {
@@ -338,6 +348,13 @@ AfResult af_project_validate(const AfProject *project) {
         }
         maximum_animation_id = key->id > maximum_animation_id ? key->id : maximum_animation_id;
     }
+    for (index = 0U; index < project->particle_data.count; ++index) {
+        const uint64_t id = project->particle_data.emitters[index].id;
+        if (!af_project_validation_insert(project, id)) {
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
+        maximum_animation_id = id > maximum_animation_id ? id : maximum_animation_id;
+    }
     return project->next_animation_id > maximum_animation_id ? AF_RESULT_SUCCESS
                                                              : AF_RESULT_INVALID_ARGUMENT;
 }
@@ -387,7 +404,12 @@ AfResult af_project_insert_snapshot(AfProject *project, const AfProjectNodeSnaps
         af_project_find_index(project, snapshot->node.id) != UINT32_MAX ||
         snapshot->node.id == 0U || snapshot->node.id >= AF_INVALID_NODE_ID - 1U ||
         project->style_data.count >= project->style_data.capacity ||
-        (snapshot->has_layout && project->layout_data.count >= project->layout_data.capacity)) {
+        (snapshot->has_layout && project->layout_data.count >= project->layout_data.capacity) ||
+        (snapshot->has_emitter &&
+         (project->particle_data.count >= project->particle_data.capacity ||
+          snapshot->emitter.node_id != snapshot->node.id ||
+          af_project_find_emitter(project, snapshot->emitter.id) != NULL ||
+          af_project_find_node_emitter(project, snapshot->node.id) != NULL))) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
     style = snapshot->style;
@@ -407,6 +429,12 @@ AfResult af_project_insert_snapshot(AfProject *project, const AfProjectNodeSnaps
         AfLayoutNode layout = snapshot->layout;
         layout.node_id = snapshot->node.id;
         project->layout_data.nodes[project->layout_data.count++] = layout;
+    }
+    if (snapshot->has_emitter) {
+        project->particle_data.emitters[project->particle_data.count++] = snapshot->emitter;
+        if (project->next_animation_id <= snapshot->emitter.id) {
+            project->next_animation_id = snapshot->emitter.id + 1U;
+        }
     }
     if (project->next_id <= snapshot->node.id) {
         project->next_id = snapshot->node.id + 1U;
@@ -441,6 +469,17 @@ AfResult af_project_remove_node_exact(AfProject *project, uint64_t id) {
                         sizeof(AfLayoutNode));
             --project->layout_data.count;
             break;
+        }
+    }
+    for (uint32_t emitter_index = 0U; emitter_index < project->particle_data.count;) {
+        if (project->particle_data.emitters[emitter_index].node_id == id) {
+            memmove(&project->particle_data.emitters[emitter_index],
+                    &project->particle_data.emitters[emitter_index + 1U],
+                    (size_t)(project->particle_data.count - emitter_index - 1U) *
+                        sizeof(AfParticleEmitter));
+            --project->particle_data.count;
+        } else {
+            ++emitter_index;
         }
     }
     return AF_RESULT_SUCCESS;
@@ -488,6 +527,14 @@ AfResult af_project_collect_subtree(const AfProject *project, uint64_t id,
                     snapshots[count].has_layout = true;
                 }
             }
+            {
+                const AfParticleEmitter *emitter =
+                    af_project_find_node_emitter_const(project, project->scene.nodes[index].id);
+                if (emitter != NULL) {
+                    snapshots[count].emitter = *emitter;
+                    snapshots[count].has_emitter = true;
+                }
+            }
             memcpy(snapshots[count].name, project->names[index], AF_PROJECT_NAME_CAPACITY);
             ++count;
         }
@@ -533,6 +580,18 @@ AfResult af_project_delete_subtree(AfProject *project, uint64_t id) {
             ++index;
         }
     }
+    for (index = 0U; index < project->particle_data.count;) {
+        if (af_scene_find_const(&project->scene, project->particle_data.emitters[index].node_id) ==
+            NULL) {
+            memmove(&project->particle_data.emitters[index],
+                    &project->particle_data.emitters[index + 1U],
+                    (size_t)(project->particle_data.count - index - 1U) *
+                        sizeof(AfParticleEmitter));
+            --project->particle_data.count;
+        } else {
+            ++index;
+        }
+    }
     return AF_RESULT_SUCCESS;
 }
 
@@ -549,6 +608,13 @@ AfResult af_project_snapshot(const AfProject *project, uint64_t id,
         if (layout != NULL) {
             out_snapshot->layout = *layout;
             out_snapshot->has_layout = true;
+        }
+    }
+    {
+        const AfParticleEmitter *emitter = af_project_find_node_emitter_const(project, id);
+        if (emitter != NULL) {
+            out_snapshot->emitter = *emitter;
+            out_snapshot->has_emitter = true;
         }
     }
     memcpy(out_snapshot->name, project->names[index], AF_PROJECT_NAME_CAPACITY);
@@ -621,6 +687,78 @@ AfResult af_project_clear_layout(AfProject *project, uint64_t node_id) {
             memmove(&project->layout_data.nodes[index], &project->layout_data.nodes[index + 1U],
                     (size_t)(project->layout_data.count - index - 1U) * sizeof(AfLayoutNode));
             --project->layout_data.count;
+            return AF_RESULT_SUCCESS;
+        }
+    }
+    return AF_RESULT_NOT_FOUND;
+}
+
+AfParticleEmitter *af_project_find_emitter(AfProject *project, uint64_t id) {
+    if (project == NULL) {
+        return NULL;
+    }
+    for (uint32_t index = 0U; index < project->particle_data.count; ++index) {
+        if (project->particle_data.emitters[index].id == id) {
+            return &project->particle_data.emitters[index];
+        }
+    }
+    return NULL;
+}
+
+AfParticleEmitter *af_project_find_node_emitter(AfProject *project, uint64_t node_id) {
+    if (project == NULL) {
+        return NULL;
+    }
+    for (uint32_t index = 0U; index < project->particle_data.count; ++index) {
+        if (project->particle_data.emitters[index].node_id == node_id) {
+            return &project->particle_data.emitters[index];
+        }
+    }
+    return NULL;
+}
+
+const AfParticleEmitter *af_project_find_node_emitter_const(const AfProject *project,
+                                                            uint64_t node_id) {
+    if (project == NULL) {
+        return NULL;
+    }
+    for (uint32_t index = 0U; index < project->particle_data.count; ++index) {
+        if (project->particle_data.emitters[index].node_id == node_id) {
+            return &project->particle_data.emitters[index];
+        }
+    }
+    return NULL;
+}
+
+AfResult af_project_add_emitter(AfProject *project, const AfParticleEmitter *emitter) {
+    if (project == NULL || emitter == NULL ||
+        project->particle_data.count >= project->particle_data.capacity ||
+        af_project_find_emitter(project, emitter->id) != NULL ||
+        af_project_find_node_emitter(project, emitter->node_id) != NULL) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    project->particle_data.emitters[project->particle_data.count++] = *emitter;
+    if (af_particle_data_validate(&project->particle_data, &project->scene) != AF_RESULT_SUCCESS) {
+        --project->particle_data.count;
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    if (project->next_animation_id <= emitter->id) {
+        project->next_animation_id = emitter->id + 1U;
+    }
+    return AF_RESULT_SUCCESS;
+}
+
+AfResult af_project_remove_emitter(AfProject *project, uint64_t id) {
+    if (project == NULL) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    for (uint32_t index = 0U; index < project->particle_data.count; ++index) {
+        if (project->particle_data.emitters[index].id == id) {
+            memmove(&project->particle_data.emitters[index],
+                    &project->particle_data.emitters[index + 1U],
+                    (size_t)(project->particle_data.count - index - 1U) *
+                        sizeof(AfParticleEmitter));
+            --project->particle_data.count;
             return AF_RESULT_SUCCESS;
         }
     }
@@ -1248,6 +1386,8 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_mul_overflow(project->layout_data.count, 512U, &animation_capacity) ||
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
+        af_size_mul_overflow(project->particle_data.count, 1024U, &animation_capacity) ||
+        af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_add_overflow(capacity, 256U, &capacity)) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
@@ -1345,6 +1485,32 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
             layout->aspect_ratio, (uint32_t)layout->aspect, (uint32_t)layout->direction,
             (uint32_t)layout->child_alignment, layout->spacing, layout->padding.left,
             layout->padding.top, layout->padding.right, layout->padding.bottom);
+    }
+    for (index = 0U; result == AF_RESULT_SUCCESS && index < project->particle_data.count; ++index) {
+        const AfParticleEmitter *emitter = &project->particle_data.emitters[index];
+        result = af_project_writer_append(
+            &writer,
+            "particle %llu %llu %llu %u %u %u %u %.9g %u "
+            "%.9g %.9g %.9g %.9g %.9g %.9g "
+            "%.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g "
+            "%.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g "
+            "%.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g "
+            "%.9g %u %u %.9g %u\n",
+            (unsigned long long)emitter->id, (unsigned long long)emitter->node_id,
+            (unsigned long long)emitter->path_id, (uint32_t)emitter->type,
+            (uint32_t)emitter->output, emitter->capacity, emitter->seed, emitter->spawn_rate,
+            emitter->burst_count, emitter->lifetime_min, emitter->lifetime_max,
+            emitter->position_min.x, emitter->position_min.y, emitter->position_max.x,
+            emitter->position_max.y, emitter->velocity_min.x, emitter->velocity_min.y,
+            emitter->velocity_max.x, emitter->velocity_max.y, emitter->rotation_min,
+            emitter->rotation_max, emitter->angular_velocity_min, emitter->angular_velocity_max,
+            emitter->size_start_min, emitter->size_start_max, emitter->size_end_min,
+            emitter->size_end_max, emitter->color_start.r, emitter->color_start.g,
+            emitter->color_start.b, emitter->color_start.a, emitter->color_end.r,
+            emitter->color_end.g, emitter->color_end.b, emitter->color_end.a, emitter->gravity.x,
+            emitter->gravity.y, emitter->wind.x, emitter->wind.y, emitter->drag,
+            emitter->flipbook_columns, emitter->flipbook_rows, emitter->flipbook_frames_per_second,
+            emitter->enabled ? 1U : 0U);
     }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->path_data.path_count;
          ++index) {
@@ -1638,6 +1804,77 @@ static bool af_project_parse_layout_canvas(const char *line, AfLayoutData *layou
         return false;
     }
     layout->scale_mode = (AfCanvasScaleMode)mode;
+    return true;
+}
+
+static bool af_project_parse_particle_line(const char *line, AfParticleEmitter *emitter) {
+    const char *cursor = line;
+    uint32_t type = 0U;
+    uint32_t output = 0U;
+    uint32_t enabled = 0U;
+    float *values[] = {
+        &emitter->lifetime_min,
+        &emitter->lifetime_max,
+        &emitter->position_min.x,
+        &emitter->position_min.y,
+        &emitter->position_max.x,
+        &emitter->position_max.y,
+        &emitter->velocity_min.x,
+        &emitter->velocity_min.y,
+        &emitter->velocity_max.x,
+        &emitter->velocity_max.y,
+        &emitter->rotation_min,
+        &emitter->rotation_max,
+        &emitter->angular_velocity_min,
+        &emitter->angular_velocity_max,
+        &emitter->size_start_min,
+        &emitter->size_start_max,
+        &emitter->size_end_min,
+        &emitter->size_end_max,
+        &emitter->color_start.r,
+        &emitter->color_start.g,
+        &emitter->color_start.b,
+        &emitter->color_start.a,
+        &emitter->color_end.r,
+        &emitter->color_end.g,
+        &emitter->color_end.b,
+        &emitter->color_end.a,
+        &emitter->gravity.x,
+        &emitter->gravity.y,
+        &emitter->wind.x,
+        &emitter->wind.y,
+        &emitter->drag,
+    };
+    if (strncmp(line, "particle ", 9U) != 0) {
+        return false;
+    }
+    cursor += 9U;
+    if (!af_project_next_u64_token(&cursor, &emitter->id) ||
+        !af_project_next_u64_token(&cursor, &emitter->node_id) ||
+        !af_project_next_u64_token(&cursor, &emitter->path_id) ||
+        !af_project_next_u32_token(&cursor, &type) || type > AF_PARTICLE_EMITTER_VECTOR_PATH ||
+        !af_project_next_u32_token(&cursor, &output) || output > AF_PARTICLE_OUTPUT_FLIPBOOK ||
+        !af_project_next_u32_token(&cursor, &emitter->capacity) ||
+        !af_project_next_u32_token(&cursor, &emitter->seed) ||
+        !af_project_next_float_token(&cursor, &emitter->spawn_rate) ||
+        !af_project_next_u32_token(&cursor, &emitter->burst_count)) {
+        return false;
+    }
+    for (uint32_t index = 0U; index < sizeof(values) / sizeof(values[0]); ++index) {
+        if (!af_project_next_float_token(&cursor, values[index])) {
+            return false;
+        }
+    }
+    if (!af_project_next_u32_token(&cursor, &emitter->flipbook_columns) ||
+        !af_project_next_u32_token(&cursor, &emitter->flipbook_rows) ||
+        !af_project_next_float_token(&cursor, &emitter->flipbook_frames_per_second) ||
+        !af_project_next_u32_token(&cursor, &enabled) || enabled > 1U ||
+        !af_project_parse_end(cursor)) {
+        return false;
+    }
+    emitter->type = (AfParticleEmitterType)type;
+    emitter->output = (AfParticleOutputType)output;
+    emitter->enabled = enabled != 0U;
     return true;
 }
 
@@ -2047,6 +2284,16 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
             header_seen = true;
             continue;
         }
+        if (strncmp(line, "particle ", 9U) == 0) {
+            AfParticleEmitter emitter = {0};
+            if (in_node || in_clip || in_track || in_keyframe || in_path ||
+                project.particle_data.count >= project.particle_data.capacity ||
+                !af_project_parse_particle_line(line, &emitter)) {
+                goto cleanup;
+            }
+            project.particle_data.emitters[project.particle_data.count++] = emitter;
+            continue;
+        }
         if (strncmp(line, "layout_canvas ", 14U) == 0) {
             if (layout_canvas_seen || in_node || in_clip || in_track || in_keyframe || in_path ||
                 !af_project_parse_layout_canvas(line, &project.layout_data)) {
@@ -2252,6 +2499,7 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
     out_project->scene.paths = &out_project->path_data;
     out_project->scene.styles = &out_project->style_data;
     out_project->scene.layouts = &out_project->layout_data;
+    out_project->scene.particles = &out_project->particle_data;
     project = (AfProject){0};
     result = AF_RESULT_SUCCESS;
 
@@ -2344,7 +2592,8 @@ AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
                          .capacity = project->scene.count,
                          .paths = &project->path_data,
                          .styles = &project->style_data,
-                         .layouts = &project->layout_data};
+                         .layouts = &project->layout_data,
+                         .particles = &project->particle_data};
     if (project->keyframe_count != 0U) {
         memcpy(ordered_keys, project->keyframes,
                (size_t)project->keyframe_count * sizeof(*ordered_keys));

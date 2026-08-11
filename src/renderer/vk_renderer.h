@@ -13,6 +13,8 @@ AfResult af_vk_renderer_create(AfPlatformWindow *window, AfVkRenderer **out_rend
 void af_vk_renderer_destroy(AfVkRenderer *renderer);
 AfRuntimeCreateInfo af_vk_renderer_runtime_create_info(const AfVkRenderer *renderer);
 AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene);
+AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene, float delta_time);
+AfResult af_vk_renderer_capture_next(AfVkRenderer *renderer, const char *path);
 void af_vk_renderer_request_resize(AfVkRenderer *renderer);
 bool af_vk_renderer_has_validation_errors(const AfVkRenderer *renderer);
 

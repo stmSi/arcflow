@@ -41,6 +41,7 @@ typedef struct AfLoadedPackage {
     AfLayoutData layout_data;
     AfComponentData component_data;
     AfStateMachineData state_machine_data;
+    AfParticleData particle_data;
     AfSceneNode *base_nodes;
 } AfLoadedPackage;
 

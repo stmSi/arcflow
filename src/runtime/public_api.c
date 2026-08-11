@@ -216,6 +216,7 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
     slot->scene.capacity = loaded->scene.count;
     slot->scene.paths = &loaded->path_data;
     slot->scene.styles = &loaded->style_data;
+    slot->scene.particles = &loaded->particle_data;
     slot->layout = loaded->layout_data;
     slot->scene.layouts = &slot->layout;
     if (loaded->scene.count != 0U) {

@@ -54,6 +54,20 @@ static AfResult af_editor_remove(AfProject *project, const AfProjectNodeSnapshot
     return AF_RESULT_SUCCESS;
 }
 
+static AfResult af_editor_set_snapshot_emitter(AfProject *project,
+                                               const AfProjectNodeSnapshot *snapshot) {
+    AfParticleEmitter *current = af_project_find_node_emitter(project, snapshot->node.id);
+    if (!snapshot->has_emitter) {
+        return current == NULL ? AF_RESULT_SUCCESS
+                               : af_project_remove_emitter(project, current->id);
+    }
+    if (current != NULL) {
+        *current = snapshot->emitter;
+        return AF_RESULT_SUCCESS;
+    }
+    return af_project_add_emitter(project, &snapshot->emitter);
+}
+
 static AfResult af_editor_modify(AfProject *project, const AfProjectNodeSnapshot *snapshots,
                                  uint32_t count) {
     AfProjectNodeSnapshot rollback[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
@@ -79,6 +93,9 @@ static AfResult af_editor_modify(AfProject *project, const AfProjectNodeSnapshot
         } else if (af_layout_find_const(&project->layout_data, snapshots[index].node.id) != NULL) {
             (void)af_project_clear_layout(project, snapshots[index].node.id);
         }
+        if (af_editor_set_snapshot_emitter(project, &snapshots[index]) != AF_RESULT_SUCCESS) {
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
     }
     if (af_project_validate(project) != AF_RESULT_SUCCESS ||
         af_scene_evaluate_world(&project->scene) != AF_RESULT_SUCCESS) {
@@ -96,6 +113,7 @@ static AfResult af_editor_modify(AfProject *project, const AfProjectNodeSnapshot
                            NULL) {
                     (void)af_project_clear_layout(project, rollback[index].node.id);
                 }
+                (void)af_editor_set_snapshot_emitter(project, &rollback[index]);
             }
         }
         (void)af_scene_evaluate_world(&project->scene);
@@ -404,14 +422,32 @@ AfResult af_editor_command_create(const AfProjectNodeSnapshot *snapshot,
 
 AfResult af_editor_command_delete(const AfProject *project, uint64_t id,
                                   AfEditorCommand *out_command) {
+    return af_editor_command_delete_many(project, &id, 1U, out_command);
+}
+
+AfResult af_editor_command_delete_many(const AfProject *project, const uint64_t *ids,
+                                       uint32_t id_count, AfEditorCommand *out_command) {
     AfResult result = AF_RESULT_SUCCESS;
-    if (out_command == NULL) {
+    if (project == NULL || ids == NULL || id_count == 0U || out_command == NULL) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
-    *out_command = (AfEditorCommand){.type = AF_EDITOR_COMMAND_DELETE, .target_id = id};
-    result =
-        af_project_collect_subtree(project, id, out_command->before,
-                                   AF_EDITOR_COMMAND_MAX_SNAPSHOTS, &out_command->before_count);
+    *out_command = (AfEditorCommand){.type = AF_EDITOR_COMMAND_DELETE, .target_id = ids[0]};
+    for (uint32_t id_index = 0U; result == AF_RESULT_SUCCESS && id_index < id_count; ++id_index) {
+        uint32_t subtree_count = 0U;
+        result = af_project_collect_subtree(
+            project, ids[id_index], &out_command->before[out_command->before_count],
+            AF_EDITOR_COMMAND_MAX_SNAPSHOTS - out_command->before_count, &subtree_count);
+        out_command->before_count += subtree_count;
+    }
+    for (uint32_t index = 1U; index < out_command->before_count; ++index) {
+        const AfProjectNodeSnapshot value = out_command->before[index];
+        uint32_t position = index;
+        while (position > 0U && out_command->before[position - 1U].index > value.index) {
+            out_command->before[position] = out_command->before[position - 1U];
+            --position;
+        }
+        out_command->before[position] = value;
+    }
     for (uint32_t track_index = 0U;
          result == AF_RESULT_SUCCESS && track_index < project->track_count; ++track_index) {
         bool affected = false;

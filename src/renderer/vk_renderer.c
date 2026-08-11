@@ -1,10 +1,13 @@
 #include "renderer/vk_renderer.h"
 
 #include "core/log.h"
+#include "core/png.h"
+#include "renderer/vk_particles.h"
 
 #include <SDL3/SDL_vulkan.h>
 #include <volk.h>
 
+#include <math.h>
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -20,6 +23,7 @@
 #define AF_MAX_QUEUE_FAMILIES 64U
 #define AF_MAX_GPU_PATH_VERTICES (AF_MAX_PATH_TESSELLATED_VERTICES * 2U)
 #define AF_MAX_RENDER_ITEMS (AF_MAX_NODES * 2U)
+#define AF_CAPTURE_PATH_CAPACITY 1024U
 
 typedef struct AfVkFrame {
     VkCommandPool command_pool;
@@ -29,6 +33,10 @@ typedef struct AfVkFrame {
     VkImage color_image;
     VkDeviceMemory color_memory;
     VkImageView color_view;
+    VkBuffer capture_buffer;
+    VkDeviceMemory capture_memory;
+    uint8_t *capture_mapping;
+    VkDeviceSize capture_size;
     bool color_initialized;
 } AfVkFrame;
 
@@ -107,6 +115,7 @@ struct AfVkRenderer {
     VkPipeline pipeline;
     VkPipelineLayout path_pipeline_layout;
     VkPipeline path_pipeline;
+    AfVkParticleSystem *particles;
     AfVkPathCache path_caches[AF_MAX_PATHS];
     AfVkStrokeCache stroke_caches[AF_MAX_PATHS];
     AfPathTessellationScratch *path_scratch;
@@ -118,6 +127,9 @@ struct AfVkRenderer {
     bool resize_requested;
     bool validation_enabled;
     bool validation_error;
+    bool capture_supported;
+    bool capture_requested;
+    char capture_path[AF_CAPTURE_PATH_CAPACITY];
 };
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL af_vk_debug_callback(
@@ -417,6 +429,70 @@ static uint32_t af_vk_find_memory_type(AfVkRenderer *renderer, uint32_t type_bit
     return UINT32_MAX;
 }
 
+static void af_vk_destroy_capture_targets(AfVkRenderer *renderer) {
+    for (uint32_t index = 0U; index < AF_FRAME_COUNT; ++index) {
+        AfVkFrame *frame = &renderer->frames[index];
+        if (frame->capture_mapping != NULL) {
+            vkUnmapMemory(renderer->device, frame->capture_memory);
+            frame->capture_mapping = NULL;
+        }
+        if (frame->capture_buffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(renderer->device, frame->capture_buffer, NULL);
+            frame->capture_buffer = VK_NULL_HANDLE;
+        }
+        if (frame->capture_memory != VK_NULL_HANDLE) {
+            vkFreeMemory(renderer->device, frame->capture_memory, NULL);
+            frame->capture_memory = VK_NULL_HANDLE;
+        }
+        frame->capture_size = 0U;
+    }
+}
+
+static AfResult af_vk_create_capture_targets(AfVkRenderer *renderer) {
+    const VkDeviceSize capture_size =
+        (VkDeviceSize)renderer->extent.width * renderer->extent.height * 4U;
+    if (!renderer->capture_supported) {
+        return AF_RESULT_SUCCESS;
+    }
+    for (uint32_t index = 0U; index < AF_FRAME_COUNT; ++index) {
+        AfVkFrame *frame = &renderer->frames[index];
+        const VkBufferCreateInfo buffer_info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                                .size = capture_size,
+                                                .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+        VkMemoryRequirements requirements;
+        VkMemoryAllocateInfo allocation = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        uint32_t memory_type = UINT32_MAX;
+        if (vkCreateBuffer(renderer->device, &buffer_info, NULL, &frame->capture_buffer) !=
+            VK_SUCCESS) {
+            return AF_RESULT_VULKAN_ERROR;
+        }
+        vkGetBufferMemoryRequirements(renderer->device, frame->capture_buffer, &requirements);
+        memory_type = af_vk_find_memory_type(renderer, requirements.memoryTypeBits,
+                                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (memory_type == UINT32_MAX) {
+            af_vk_destroy_capture_targets(renderer);
+            renderer->capture_supported = false;
+            return AF_RESULT_SUCCESS;
+        }
+        allocation.allocationSize = requirements.size;
+        allocation.memoryTypeIndex = memory_type;
+        if (vkAllocateMemory(renderer->device, &allocation, NULL, &frame->capture_memory) !=
+                VK_SUCCESS ||
+            vkBindBufferMemory(renderer->device, frame->capture_buffer, frame->capture_memory,
+                               0U) != VK_SUCCESS ||
+            vkMapMemory(renderer->device, frame->capture_memory, 0U, capture_size, 0U,
+                        (void **)&frame->capture_mapping) != VK_SUCCESS) {
+            return AF_RESULT_VULKAN_ERROR;
+        }
+        frame->capture_size = capture_size;
+        af_vk_name(renderer, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)frame->capture_buffer,
+                   "Arcflow frame capture readback");
+    }
+    return AF_RESULT_SUCCESS;
+}
+
 static void af_vk_destroy_multisample_targets(AfVkRenderer *renderer) {
     for (uint32_t index = 0U; index < AF_FRAME_COUNT; ++index) {
         AfVkFrame *frame = &renderer->frames[index];
@@ -519,6 +595,7 @@ static void af_vk_destroy_pipeline(AfVkRenderer *renderer) {
 
 static void af_vk_destroy_swapchain(AfVkRenderer *renderer) {
     uint32_t index = 0U;
+    af_vk_destroy_capture_targets(renderer);
     af_vk_destroy_multisample_targets(renderer);
     for (index = 0U; index < renderer->swapchain_image_count; ++index) {
         if (renderer->present_semaphores[index] != VK_NULL_HANDLE) {
@@ -599,6 +676,15 @@ static AfResult af_vk_create_swapchain(AfVkRenderer *renderer) {
     create_info.imageExtent = extent;
     create_info.imageArrayLayers = 1U;
     create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    renderer->capture_supported = (renderer->surface_capabilities.supportedUsageFlags &
+                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0U &&
+                                  (chosen_format.format == VK_FORMAT_B8G8R8A8_SRGB ||
+                                   chosen_format.format == VK_FORMAT_B8G8R8A8_UNORM ||
+                                   chosen_format.format == VK_FORMAT_R8G8B8A8_SRGB ||
+                                   chosen_format.format == VK_FORMAT_R8G8B8A8_UNORM);
+    if (renderer->capture_supported) {
+        create_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
     create_info.imageSharingMode = renderer->graphics_family == renderer->present_family
                                        ? VK_SHARING_MODE_EXCLUSIVE
                                        : VK_SHARING_MODE_CONCURRENT;
@@ -650,7 +736,13 @@ static AfResult af_vk_create_swapchain(AfVkRenderer *renderer) {
     }
     af_vk_name(renderer, VK_OBJECT_TYPE_SWAPCHAIN_KHR, (uint64_t)(uintptr_t)renderer->swapchain,
                "Arcflow swapchain");
-    return af_vk_create_multisample_targets(renderer);
+    {
+        AfResult target_result = af_vk_create_multisample_targets(renderer);
+        if (target_result == AF_RESULT_SUCCESS) {
+            target_result = af_vk_create_capture_targets(renderer);
+        }
+        return target_result;
+    }
 }
 
 static AfResult af_vk_load_shader(AfVkRenderer *renderer, const char *path,
@@ -1030,6 +1122,10 @@ static AfResult af_vk_recreate_swapchain(AfVkRenderer *renderer) {
     if (result == AF_RESULT_SUCCESS) {
         result = af_vk_create_path_pipeline(renderer);
     }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_vk_particles_set_render_target(renderer->particles, renderer->swapchain_format,
+                                                   renderer->sample_count);
+    }
     renderer->resize_requested = result != AF_RESULT_SUCCESS;
     return result;
 }
@@ -1064,6 +1160,9 @@ AfResult af_vk_renderer_create(AfPlatformWindow *window, AfVkRenderer **out_rend
     } else if ((result = af_vk_create_swapchain(renderer)) != AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_create_pipeline(renderer)) != AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_create_path_pipeline(renderer)) != AF_RESULT_SUCCESS) {
+    } else if ((result = af_vk_particles_create(renderer->physical_device, renderer->device,
+                                                renderer->swapchain_format, renderer->sample_count,
+                                                &renderer->particles)) != AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_create_upload_ring(renderer)) != AF_RESULT_SUCCESS) {
     } else {
         result = af_vk_create_frames(renderer);
@@ -1104,6 +1203,8 @@ void af_vk_renderer_destroy(AfVkRenderer *renderer) {
         if (renderer->upload_memory != VK_NULL_HANDLE) {
             vkFreeMemory(renderer->device, renderer->upload_memory, NULL);
         }
+        af_vk_particles_destroy(renderer->particles);
+        renderer->particles = NULL;
         af_vk_destroy_pipeline(renderer);
         af_vk_destroy_swapchain(renderer);
         vkDestroyDevice(renderer->device, NULL);
@@ -1432,13 +1533,16 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
     return AF_RESULT_SUCCESS;
 }
 
-AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
+AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene, float delta_time) {
     AfVkFrame *frame = NULL;
     uint32_t image_index = 0U;
     uint32_t shape_count = 0U;
     uint32_t path_vertex_count = 0U;
     uint32_t item_count = 0U;
     VkResult result = VK_SUCCESS;
+    AfResult capture_result = AF_RESULT_SUCCESS;
+    bool capture_this_frame = false;
+    bool present_failed = false;
     VkCommandBufferBeginInfo begin_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     VkImageMemoryBarrier2 to_render = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -1497,7 +1601,7 @@ AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
                                        .deviceIndex = 0U,
                                        .value = 0U};
     VkSemaphoreSubmitInfo signal_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-                                         .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+                                         .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                          .deviceIndex = 0U,
                                          .value = 0U};
     VkCommandBufferSubmitInfo command_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
@@ -1514,7 +1618,7 @@ AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
                                 .pSwapchains = &renderer->swapchain,
                                 .swapchainCount = 1U,
                                 .pImageIndices = &image_index};
-    if (renderer == NULL || scene == NULL) {
+    if (renderer == NULL || scene == NULL || !isfinite(delta_time) || delta_time < 0.0F) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
     if (renderer->resize_requested) {
@@ -1523,6 +1627,11 @@ AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
             return recreate_result;
         }
     }
+    if (renderer->capture_requested && !renderer->capture_supported) {
+        renderer->capture_requested = false;
+        return AF_RESULT_UNSUPPORTED_FEATURE;
+    }
+    capture_this_frame = renderer->capture_requested;
     frame = &renderer->frames[renderer->frame_index];
     if (vkWaitForFences(renderer->device, 1U, &frame->fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
         return AF_RESULT_VULKAN_ERROR;
@@ -1532,6 +1641,13 @@ AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
             af_vk_upload_scene(renderer, scene, &shape_count, &path_vertex_count, &item_count);
         if (upload_result != AF_RESULT_SUCCESS) {
             return upload_result;
+        }
+    }
+    {
+        const AfResult particle_result =
+            af_vk_particles_update(renderer->particles, scene, renderer->frame_index);
+        if (particle_result != AF_RESULT_SUCCESS) {
+            return particle_result;
         }
     }
     result = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, UINT64_MAX,
@@ -1577,6 +1693,8 @@ AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
     canvas[1] = (float)renderer->extent.height;
     upload_offset = renderer->frame_index * renderer->upload_slice_size;
     path_upload_offset = upload_offset + AF_MAX_NODES * sizeof(AfGpuShape);
+    af_vk_particles_record(renderer->particles, frame->command_buffer, renderer->frame_index,
+                           delta_time);
     vkCmdPipelineBarrier2(frame->command_buffer, &dependency);
     if (renderer->sample_count != VK_SAMPLE_COUNT_1_BIT && !frame->color_initialized) {
         vkCmdPipelineBarrier2(frame->command_buffer, &multisample_dependency);
@@ -1610,16 +1728,60 @@ AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
             }
         }
     }
+    af_vk_particles_draw(renderer->particles, frame->command_buffer, renderer->frame_index,
+                         renderer->extent);
     (void)shape_count;
     (void)path_vertex_count;
     vkCmdEndRendering(frame->command_buffer);
     to_render.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
     to_render.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    to_render.dstStageMask = VK_PIPELINE_STAGE_2_NONE;
-    to_render.dstAccessMask = VK_ACCESS_2_NONE;
     to_render.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    to_render.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    vkCmdPipelineBarrier2(frame->command_buffer, &dependency);
+    if (capture_this_frame) {
+        const VkBufferImageCopy copy = {
+            .bufferOffset = 0U,
+            .bufferRowLength = 0U,
+            .bufferImageHeight = 0U,
+            .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                 .mipLevel = 0U,
+                                 .baseArrayLayer = 0U,
+                                 .layerCount = 1U},
+            .imageOffset = {0, 0, 0},
+            .imageExtent = {
+                .width = renderer->extent.width, .height = renderer->extent.height, .depth = 1U}};
+        const VkBufferMemoryBarrier2 to_host = {.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+                                                .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                                .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                                                .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+                                                .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
+                                                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                                .buffer = frame->capture_buffer,
+                                                .offset = 0U,
+                                                .size = frame->capture_size};
+        const VkDependencyInfo host_dependency = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                                  .bufferMemoryBarrierCount = 1U,
+                                                  .pBufferMemoryBarriers = &to_host};
+        to_render.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        to_render.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        to_render.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        vkCmdPipelineBarrier2(frame->command_buffer, &dependency);
+        vkCmdCopyImageToBuffer(frame->command_buffer, renderer->swapchain_images[image_index],
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, frame->capture_buffer, 1U,
+                               &copy);
+        vkCmdPipelineBarrier2(frame->command_buffer, &host_dependency);
+        to_render.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        to_render.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        to_render.dstStageMask = VK_PIPELINE_STAGE_2_NONE;
+        to_render.dstAccessMask = VK_ACCESS_2_NONE;
+        to_render.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        to_render.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        vkCmdPipelineBarrier2(frame->command_buffer, &dependency);
+    } else {
+        to_render.dstStageMask = VK_PIPELINE_STAGE_2_NONE;
+        to_render.dstAccessMask = VK_ACCESS_2_NONE;
+        to_render.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        vkCmdPipelineBarrier2(frame->command_buffer, &dependency);
+    }
     if (vkEndCommandBuffer(frame->command_buffer) != VK_SUCCESS) {
         return AF_RESULT_VULKAN_ERROR;
     }
@@ -1635,9 +1797,48 @@ AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         renderer->resize_requested = true;
     } else if (result != VK_SUCCESS) {
-        return AF_RESULT_VULKAN_ERROR;
+        present_failed = true;
+    }
+    if (capture_this_frame) {
+        const AfPixelOrder order = renderer->swapchain_format == VK_FORMAT_B8G8R8A8_SRGB ||
+                                           renderer->swapchain_format == VK_FORMAT_B8G8R8A8_UNORM
+                                       ? AF_PIXEL_ORDER_BGRA
+                                       : AF_PIXEL_ORDER_RGBA;
+        if (vkWaitForFences(renderer->device, 1U, &frame->fence, VK_TRUE, UINT64_MAX) !=
+            VK_SUCCESS) {
+            capture_result = AF_RESULT_VULKAN_ERROR;
+        } else {
+            capture_result = af_png_write_rgba8(renderer->capture_path, frame->capture_mapping,
+                                                renderer->extent.width, renderer->extent.height,
+                                                renderer->extent.width * 4U, order);
+        }
+        renderer->capture_requested = false;
     }
     renderer->frame_index = (renderer->frame_index + 1U) % AF_FRAME_COUNT;
+    if (present_failed) {
+        return AF_RESULT_VULKAN_ERROR;
+    }
+    return capture_result;
+}
+
+AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
+    return af_vk_renderer_draw_timed(renderer, scene, AF_PARTICLE_FIXED_STEP);
+}
+
+AfResult af_vk_renderer_capture_next(AfVkRenderer *renderer, const char *path) {
+    size_t path_length = 0U;
+    if (renderer == NULL || path == NULL || path[0] == '\0') {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    if (!renderer->capture_supported) {
+        return AF_RESULT_UNSUPPORTED_FEATURE;
+    }
+    path_length = strlen(path);
+    if (path_length >= sizeof(renderer->capture_path)) {
+        return AF_RESULT_LIMIT_EXCEEDED;
+    }
+    memcpy(renderer->capture_path, path, path_length + 1U);
+    renderer->capture_requested = true;
     return AF_RESULT_SUCCESS;
 }
 

@@ -41,7 +41,8 @@ typedef enum AfEditorMergeKey {
     AF_EDITOR_MERGE_TANGENT,
     AF_EDITOR_MERGE_LOOP_REGION,
     AF_EDITOR_MERGE_PATH_POINT,
-    AF_EDITOR_MERGE_STYLE
+    AF_EDITOR_MERGE_STYLE,
+    AF_EDITOR_MERGE_PARTICLE
 } AfEditorMergeKey;
 
 typedef struct AfEditorCommand {
@@ -95,6 +96,8 @@ AfResult af_editor_command_create(const AfProjectNodeSnapshot *snapshot,
                                   AfEditorCommand *out_command);
 AfResult af_editor_command_delete(const AfProject *project, uint64_t id,
                                   AfEditorCommand *out_command);
+AfResult af_editor_command_delete_many(const AfProject *project, const uint64_t *ids,
+                                       uint32_t id_count, AfEditorCommand *out_command);
 AfResult af_editor_command_duplicate(const AfProjectNodeSnapshot *snapshots, uint32_t count,
                                      AfEditorCommand *out_command);
 AfResult af_editor_command_modify(const AfProjectNodeSnapshot *before,

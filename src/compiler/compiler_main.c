@@ -95,6 +95,8 @@ static AfResult af_write_demo(const char *path) {
                             .commands = path_commands,
                             .command_count = 10U,
                             .command_capacity = 10U};
+    AfParticleEmitter particle = af_particle_emitter_default(300U, 5U);
+    AfParticleData particle_data = {.emitters = &particle, .count = 1U, .capacity = 1U};
     AfAnimationClip clips[1] = {
         {.id = 100U, .duration = 4.0F, .track_start = 0U, .track_count = 4U, .loop = true}};
     AfAnimationTrack tracks[4] = {{.id = 101U,
@@ -129,7 +131,11 @@ static AfResult af_write_demo(const char *path) {
                            af_key(0.0F, 0.15F, 0.55F, 0.95F, 1.0F, AF_INTERPOLATION_LINEAR),
                            af_key(2.0F, 0.72F, 0.28F, 0.95F, 1.0F, AF_INTERPOLATION_LINEAR),
                            af_key(4.0F, 0.15F, 0.55F, 0.95F, 1.0F, AF_INTERPOLATION_LINEAR)};
-    AfScene scene = {.nodes = nodes, .count = 5U, .capacity = 5U, .paths = &path_data};
+    AfScene scene = {.nodes = nodes,
+                     .count = 5U,
+                     .capacity = 5U,
+                     .paths = &path_data,
+                     .particles = &particle_data};
     AfAnimationData animation = {.clips = clips,
                                  .clip_count = 1U,
                                  .tracks = tracks,
@@ -139,6 +145,11 @@ static AfResult af_write_demo(const char *path) {
     AfPackageSource source = {.scene = &scene, .animation = &animation};
     AfPackageBlob blob = {0};
     AfResult result = AF_RESULT_SUCCESS;
+    particle.type = AF_PARTICLE_EMITTER_VECTOR_PATH;
+    particle.path_id = vector_path.id;
+    particle.output = AF_PARTICLE_OUTPUT_UI_BILLBOARD;
+    particle.spawn_rate = 90.0F;
+    particle.capacity = 4096U;
     af_allocator_init_default(&allocator);
     result = af_package_write(&source, &allocator, &blob);
     if (result == AF_RESULT_SUCCESS) {

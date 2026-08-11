@@ -86,6 +86,7 @@ set(ARCFLOW_PROJECT_SOURCES
     src/core/hash.c
     src/core/log.c
     src/core/math.c
+    src/core/png.c
     src/scene/scene.c
     src/animation/animation.c
     src/animation/advanced_animation.c
@@ -99,6 +100,7 @@ set(ARCFLOW_PROJECT_SOURCES
     src/composition/composition.c
     src/deformation/deformation.c
     src/rigging/rigging.c
+    src/particle/particle.c
     src/assets/package.c
 )
 
@@ -160,15 +162,22 @@ arcflow_shader(analytic.vert analytic.vert.spv)
 arcflow_shader(analytic.frag analytic.frag.spv)
 arcflow_shader(path.vert path.vert.spv)
 arcflow_shader(path.frag path.frag.spv)
+arcflow_shader(particle.comp particle.comp.spv)
+arcflow_shader(particle.vert particle.vert.spv)
+arcflow_shader(particle.frag particle.frag.spv)
 add_custom_target(arcflow_shaders ALL DEPENDS
     "${ARCFLOW_SHADER_DIR}/analytic.vert.spv"
     "${ARCFLOW_SHADER_DIR}/analytic.frag.spv"
     "${ARCFLOW_SHADER_DIR}/path.vert.spv"
     "${ARCFLOW_SHADER_DIR}/path.frag.spv"
+    "${ARCFLOW_SHADER_DIR}/particle.comp.spv"
+    "${ARCFLOW_SHADER_DIR}/particle.vert.spv"
+    "${ARCFLOW_SHADER_DIR}/particle.frag.spv"
 )
 
 add_library(arcflow_renderer STATIC
     src/platform/platform_sdl.c
+    src/renderer/vk_particles.c
     src/renderer/vk_renderer.c
 )
 target_include_directories(arcflow_renderer PUBLIC include PRIVATE src "${ARCFLOW_SHADER_DIR}")

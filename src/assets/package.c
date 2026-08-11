@@ -22,7 +22,8 @@ enum {
     AF_SECTION_LAYOUTS = 9U,
     AF_SECTION_COMPONENTS = 10U,
     AF_SECTION_STATE_MACHINES = 11U,
-    AF_SECTION_COUNT = 11U,
+    AF_SECTION_PARTICLES = 12U,
+    AF_SECTION_COUNT = 12U,
     AF_NODE_RECORD_SIZE = 80U,
     AF_CLIP_RECORD_SIZE = 24U,
     AF_TRACK_RECORD_SIZE = 32U,
@@ -43,7 +44,8 @@ enum {
     AF_STATE_RECORD_SIZE = 48U,
     AF_STATE_TRANSITION_RECORD_SIZE = 64U,
     AF_STATE_INPUT_RECORD_SIZE = 32U,
-    AF_STATE_CONDITION_RECORD_SIZE = 32U
+    AF_STATE_CONDITION_RECORD_SIZE = 32U,
+    AF_PARTICLE_RECORD_SIZE = 256U
 };
 
 typedef struct AfSectionView {
@@ -70,6 +72,44 @@ static float af_read_f32(const uint8_t *bytes) {
     return value;
 }
 
+static AfParticleEmitter af_read_particle(const uint8_t *record) {
+    return (AfParticleEmitter){
+        .id = af_read_u64(record),
+        .node_id = af_read_u64(record + 8U),
+        .path_id = af_read_u64(record + 16U),
+        .type = (AfParticleEmitterType)af_read_u32(record + 24U),
+        .output = (AfParticleOutputType)af_read_u32(record + 28U),
+        .capacity = af_read_u32(record + 32U),
+        .seed = af_read_u32(record + 36U),
+        .spawn_rate = af_read_f32(record + 40U),
+        .burst_count = af_read_u32(record + 44U),
+        .lifetime_min = af_read_f32(record + 48U),
+        .lifetime_max = af_read_f32(record + 52U),
+        .position_min = {af_read_f32(record + 56U), af_read_f32(record + 60U)},
+        .position_max = {af_read_f32(record + 64U), af_read_f32(record + 68U)},
+        .velocity_min = {af_read_f32(record + 72U), af_read_f32(record + 76U)},
+        .velocity_max = {af_read_f32(record + 80U), af_read_f32(record + 84U)},
+        .rotation_min = af_read_f32(record + 88U),
+        .rotation_max = af_read_f32(record + 92U),
+        .angular_velocity_min = af_read_f32(record + 96U),
+        .angular_velocity_max = af_read_f32(record + 100U),
+        .size_start_min = af_read_f32(record + 104U),
+        .size_start_max = af_read_f32(record + 108U),
+        .size_end_min = af_read_f32(record + 112U),
+        .size_end_max = af_read_f32(record + 116U),
+        .color_start = {af_read_f32(record + 120U), af_read_f32(record + 124U),
+                        af_read_f32(record + 128U), af_read_f32(record + 132U)},
+        .color_end = {af_read_f32(record + 136U), af_read_f32(record + 140U),
+                      af_read_f32(record + 144U), af_read_f32(record + 148U)},
+        .gravity = {af_read_f32(record + 152U), af_read_f32(record + 156U)},
+        .wind = {af_read_f32(record + 160U), af_read_f32(record + 164U)},
+        .drag = af_read_f32(record + 168U),
+        .flipbook_columns = af_read_u32(record + 172U),
+        .flipbook_rows = af_read_u32(record + 176U),
+        .flipbook_frames_per_second = af_read_f32(record + 180U),
+        .enabled = af_read_u32(record + 184U) != 0U};
+}
+
 static void af_write_u32(uint8_t *bytes, uint32_t value) {
     bytes[0] = (uint8_t)value;
     bytes[1] = (uint8_t)(value >> 8U);
@@ -86,6 +126,53 @@ static void af_write_f32(uint8_t *bytes, float value) {
     uint32_t bits = 0U;
     memcpy(&bits, &value, sizeof(bits));
     af_write_u32(bytes, bits);
+}
+
+static void af_write_particle(uint8_t *record, const AfParticleEmitter *emitter) {
+    af_write_u64(record, emitter->id);
+    af_write_u64(record + 8U, emitter->node_id);
+    af_write_u64(record + 16U, emitter->path_id);
+    af_write_u32(record + 24U, (uint32_t)emitter->type);
+    af_write_u32(record + 28U, (uint32_t)emitter->output);
+    af_write_u32(record + 32U, emitter->capacity);
+    af_write_u32(record + 36U, emitter->seed);
+    af_write_f32(record + 40U, emitter->spawn_rate);
+    af_write_u32(record + 44U, emitter->burst_count);
+    af_write_f32(record + 48U, emitter->lifetime_min);
+    af_write_f32(record + 52U, emitter->lifetime_max);
+    af_write_f32(record + 56U, emitter->position_min.x);
+    af_write_f32(record + 60U, emitter->position_min.y);
+    af_write_f32(record + 64U, emitter->position_max.x);
+    af_write_f32(record + 68U, emitter->position_max.y);
+    af_write_f32(record + 72U, emitter->velocity_min.x);
+    af_write_f32(record + 76U, emitter->velocity_min.y);
+    af_write_f32(record + 80U, emitter->velocity_max.x);
+    af_write_f32(record + 84U, emitter->velocity_max.y);
+    af_write_f32(record + 88U, emitter->rotation_min);
+    af_write_f32(record + 92U, emitter->rotation_max);
+    af_write_f32(record + 96U, emitter->angular_velocity_min);
+    af_write_f32(record + 100U, emitter->angular_velocity_max);
+    af_write_f32(record + 104U, emitter->size_start_min);
+    af_write_f32(record + 108U, emitter->size_start_max);
+    af_write_f32(record + 112U, emitter->size_end_min);
+    af_write_f32(record + 116U, emitter->size_end_max);
+    af_write_f32(record + 120U, emitter->color_start.r);
+    af_write_f32(record + 124U, emitter->color_start.g);
+    af_write_f32(record + 128U, emitter->color_start.b);
+    af_write_f32(record + 132U, emitter->color_start.a);
+    af_write_f32(record + 136U, emitter->color_end.r);
+    af_write_f32(record + 140U, emitter->color_end.g);
+    af_write_f32(record + 144U, emitter->color_end.b);
+    af_write_f32(record + 148U, emitter->color_end.a);
+    af_write_f32(record + 152U, emitter->gravity.x);
+    af_write_f32(record + 156U, emitter->gravity.y);
+    af_write_f32(record + 160U, emitter->wind.x);
+    af_write_f32(record + 164U, emitter->wind.y);
+    af_write_f32(record + 168U, emitter->drag);
+    af_write_u32(record + 172U, emitter->flipbook_columns);
+    af_write_u32(record + 176U, emitter->flipbook_rows);
+    af_write_f32(record + 180U, emitter->flipbook_frames_per_second);
+    af_write_u32(record + 184U, emitter->enabled ? 1U : 0U);
 }
 
 static void af_write_component_value(uint8_t *record, uint64_t owner_id, uint64_t property_id,
@@ -386,7 +473,7 @@ static AfResult af_read_sections(const uint8_t *bytes, size_t size, AfSectionVie
                                           .alignment = af_read_u32(entry + 24U),
                                           .count = af_read_u32(entry + 28U)};
         if (af_read_u32(entry + 4U) != 0U || sections[index].type < AF_SECTION_NODES ||
-            sections[index].type > AF_SECTION_STATE_MACHINES ||
+            sections[index].type > AF_SECTION_PARTICLES ||
             !af_is_power_of_two(sections[index].alignment) || sections[index].alignment > 4096U ||
             (sections[index].offset & (uint64_t)(sections[index].alignment - 1U)) != 0U ||
             af_u64_add_overflow(sections[index].offset, sections[index].size, &end) || end > size ||
@@ -425,6 +512,94 @@ static uint32_t af_node_type_for_id(const uint8_t *bytes, const AfSectionView *n
         }
     }
     return UINT32_MAX;
+}
+
+static bool af_path_id_exists(const uint8_t *bytes, const AfSectionView *paths, uint64_t id) {
+    for (uint32_t index = 0U; index < paths->count; ++index) {
+        if (af_read_u64(bytes + paths->offset + (uint64_t)index * AF_PATH_RECORD_SIZE) == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool af_particle_record_valid(const uint8_t *record, const uint8_t *bytes,
+                                     const AfSectionView *nodes, const AfSectionView *paths) {
+    const AfParticleEmitter emitter = af_read_particle(record);
+    const float values[] = {
+        emitter.spawn_rate,
+        emitter.lifetime_min,
+        emitter.lifetime_max,
+        emitter.position_min.x,
+        emitter.position_min.y,
+        emitter.position_max.x,
+        emitter.position_max.y,
+        emitter.velocity_min.x,
+        emitter.velocity_min.y,
+        emitter.velocity_max.x,
+        emitter.velocity_max.y,
+        emitter.rotation_min,
+        emitter.rotation_max,
+        emitter.angular_velocity_min,
+        emitter.angular_velocity_max,
+        emitter.size_start_min,
+        emitter.size_start_max,
+        emitter.size_end_min,
+        emitter.size_end_max,
+        emitter.color_start.r,
+        emitter.color_start.g,
+        emitter.color_start.b,
+        emitter.color_start.a,
+        emitter.color_end.r,
+        emitter.color_end.g,
+        emitter.color_end.b,
+        emitter.color_end.a,
+        emitter.gravity.x,
+        emitter.gravity.y,
+        emitter.wind.x,
+        emitter.wind.y,
+        emitter.drag,
+        emitter.flipbook_frames_per_second,
+    };
+    if (emitter.id == 0U || emitter.id == UINT64_MAX || emitter.node_id == 0U ||
+        !af_node_id_exists(bytes, nodes, emitter.node_id) ||
+        emitter.type > AF_PARTICLE_EMITTER_VECTOR_PATH ||
+        emitter.output > AF_PARTICLE_OUTPUT_FLIPBOOK || emitter.capacity == 0U ||
+        emitter.capacity > AF_MAX_PARTICLES_PER_EMITTER || emitter.spawn_rate < 0.0F ||
+        emitter.burst_count > emitter.capacity || emitter.lifetime_min <= 0.0F ||
+        emitter.lifetime_max < emitter.lifetime_min ||
+        emitter.position_max.x < emitter.position_min.x ||
+        emitter.position_max.y < emitter.position_min.y ||
+        emitter.velocity_max.x < emitter.velocity_min.x ||
+        emitter.velocity_max.y < emitter.velocity_min.y ||
+        emitter.rotation_max < emitter.rotation_min ||
+        emitter.angular_velocity_max < emitter.angular_velocity_min ||
+        emitter.size_start_min < 0.0F || emitter.size_start_max < emitter.size_start_min ||
+        emitter.size_end_min < 0.0F || emitter.size_end_max < emitter.size_end_min ||
+        emitter.drag < 0.0F || emitter.flipbook_columns == 0U || emitter.flipbook_columns > 64U ||
+        emitter.flipbook_rows == 0U || emitter.flipbook_rows > 64U ||
+        emitter.flipbook_frames_per_second < 0.0F || af_read_u32(record + 184U) > 1U ||
+        (emitter.type == AF_PARTICLE_EMITTER_VECTOR_PATH &&
+         !af_path_id_exists(bytes, paths, emitter.path_id)) ||
+        (emitter.type != AF_PARTICLE_EMITTER_VECTOR_PATH && emitter.path_id != 0U)) {
+        return false;
+    }
+    for (uint32_t index = 0U; index < sizeof(values) / sizeof(values[0]); ++index) {
+        if (!isfinite(values[index])) {
+            return false;
+        }
+    }
+    for (uint32_t index = 19U; index <= 26U; ++index) {
+        if (values[index] < 0.0F || values[index] > 1.0F) {
+            return false;
+        }
+    }
+    for (uint32_t reserved = 188U; reserved < AF_PARTICLE_RECORD_SIZE; reserved += 4U) {
+        if (af_read_u32(record + reserved) != 0U) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static bool af_path_node_exists(const uint8_t *bytes, const AfSectionView *paths,
@@ -901,14 +1076,16 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
         af_find_section(sections, section_count, AF_SECTION_COMPONENTS);
     const AfSectionView *state_machines =
         af_find_section(sections, section_count, AF_SECTION_STATE_MACHINES);
+    const AfSectionView *particles = af_find_section(sections, section_count, AF_SECTION_PARTICLES);
     uint32_t index = 0U;
     if (section_count != AF_SECTION_COUNT || nodes == NULL || clips == NULL || tracks == NULL ||
         keys == NULL || strings == NULL || paths == NULL || path_commands == NULL ||
         styles == NULL || layouts == NULL || components == NULL || state_machines == NULL ||
-        nodes->count > AF_MAX_NODES || clips->count > AF_MAX_CLIPS ||
+        particles == NULL || nodes->count > AF_MAX_NODES || clips->count > AF_MAX_CLIPS ||
         tracks->count > AF_MAX_TRACKS || keys->count > AF_MAX_KEYFRAMES ||
         paths->count > AF_MAX_PATHS || path_commands->count > AF_MAX_PATH_COMMANDS ||
         styles->count > AF_MAX_STYLES || layouts->count > AF_MAX_LAYOUT_NODES ||
+        particles->count > AF_MAX_PARTICLE_EMITTERS ||
         nodes->size != (uint64_t)nodes->count * AF_NODE_RECORD_SIZE ||
         clips->size != (uint64_t)clips->count * AF_CLIP_RECORD_SIZE ||
         tracks->size != (uint64_t)tracks->count * AF_TRACK_RECORD_SIZE ||
@@ -917,6 +1094,7 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
         path_commands->size != (uint64_t)path_commands->count * AF_PATH_COMMAND_RECORD_SIZE ||
         styles->size != (uint64_t)styles->count * AF_STYLE_RECORD_SIZE ||
         layouts->size != AF_LAYOUT_HEADER_SIZE + (uint64_t)layouts->count * AF_LAYOUT_RECORD_SIZE ||
+        particles->size != (uint64_t)particles->count * AF_PARTICLE_RECORD_SIZE ||
         strings->size == 0U || strings->size > 1048576U ||
         strings->count != (uint32_t)strings->size ||
         bytes[strings->offset + strings->size - 1U] != 0U) {
@@ -948,6 +1126,28 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
     }
     if (af_validate_state_machines(bytes, state_machines, clips, components) != AF_RESULT_SUCCESS) {
         return AF_RESULT_INVALID_PACKAGE;
+    }
+    {
+        uint64_t total_capacity = 0U;
+        for (index = 0U; index < particles->count; ++index) {
+            const uint8_t *record =
+                bytes + particles->offset + (uint64_t)index * AF_PARTICLE_RECORD_SIZE;
+            if (!af_particle_record_valid(record, bytes, nodes, paths)) {
+                return AF_RESULT_INVALID_PACKAGE;
+            }
+            total_capacity += af_read_u32(record + 32U);
+            if (total_capacity > AF_MAX_PARTICLES) {
+                return AF_RESULT_INVALID_PACKAGE;
+            }
+            for (uint32_t other = index + 1U; other < particles->count; ++other) {
+                const uint8_t *candidate =
+                    bytes + particles->offset + (uint64_t)other * AF_PARTICLE_RECORD_SIZE;
+                if (af_read_u64(record) == af_read_u64(candidate) ||
+                    af_read_u64(record + 8U) == af_read_u64(candidate + 8U)) {
+                    return AF_RESULT_INVALID_PACKAGE;
+                }
+            }
+        }
     }
     for (index = 0U; index < layouts->count; ++index) {
         const uint8_t *record = bytes + layouts->offset + AF_LAYOUT_HEADER_SIZE +
@@ -1574,6 +1774,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     const AfStyleData empty_styles = {0};
     const AfComponentData empty_components = {0};
     const AfStateMachineData empty_state_machines = {0};
+    const AfParticleData empty_particles = {0};
     const AfLayoutData default_layouts = {.reference_size = {1280.0F, 720.0F},
                                           .target_size = {1280.0F, 720.0F},
                                           .scale_mode = AF_CANVAS_SCALE_FIT};
@@ -1582,6 +1783,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     const AfLayoutData *layout_data = NULL;
     const AfComponentData *component_data = NULL;
     const AfStateMachineData *state_machine_data = NULL;
+    const AfParticleData *particle_data = NULL;
     AfResult result = AF_RESULT_SUCCESS;
     if (source == NULL || source->scene == NULL || source->animation == NULL || allocator == NULL ||
         out_blob == NULL) {
@@ -1594,6 +1796,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     component_data = source->components == NULL ? &empty_components : source->components;
     state_machine_data =
         source->state_machines == NULL ? &empty_state_machines : source->state_machines;
+    particle_data = source->scene->particles == NULL ? &empty_particles : source->scene->particles;
     result = af_scene_validate(source->scene);
     if (result != AF_RESULT_SUCCESS ||
         af_animation_validate(source->animation, source->scene) != AF_RESULT_SUCCESS ||
@@ -1603,7 +1806,8 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
         af_component_validate(component_data, source->scene, source->animation) !=
             AF_RESULT_SUCCESS ||
         af_state_machine_validate(state_machine_data, source->animation, component_data) !=
-            AF_RESULT_SUCCESS) {
+            AF_RESULT_SUCCESS ||
+        af_particle_data_validate(particle_data, source->scene) != AF_RESULT_SUCCESS) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
     sizes[0] = (uint64_t)source->scene->count * AF_NODE_RECORD_SIZE;
@@ -1617,6 +1821,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     sizes[8] = AF_LAYOUT_HEADER_SIZE + (uint64_t)layout_data->count * AF_LAYOUT_RECORD_SIZE;
     sizes[9] = af_component_section_size(component_data);
     sizes[10] = af_state_machine_section_size(state_machine_data);
+    sizes[11] = (uint64_t)particle_data->count * AF_PARTICLE_RECORD_SIZE;
     for (index = 0U; index < AF_SECTION_COUNT; ++index) {
         offsets[index] = af_align_u64(total_size, 8U);
         if (af_u64_add_overflow(offsets[index], sizes[index], &total_size) ||
@@ -1663,6 +1868,8 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     af_write_section(bytes + AF_PACKAGE_HEADER_SIZE + 10U * AF_PACKAGE_SECTION_SIZE,
                      AF_SECTION_STATE_MACHINES, offsets[10], sizes[10], 8U,
                      state_machine_data->machine_count);
+    af_write_section(bytes + AF_PACKAGE_HEADER_SIZE + 11U * AF_PACKAGE_SECTION_SIZE,
+                     AF_SECTION_PARTICLES, offsets[11], sizes[11], 8U, particle_data->count);
     for (index = 0U; index < source->scene->count; ++index) {
         const AfSceneNode *node = &source->scene->nodes[index];
         uint8_t *record = bytes + offsets[0] + (uint64_t)index * AF_NODE_RECORD_SIZE;
@@ -1756,6 +1963,10 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     }
     af_write_components(bytes + offsets[9], component_data);
     af_write_state_machines(bytes + offsets[10], state_machine_data);
+    for (index = 0U; index < particle_data->count; ++index) {
+        af_write_particle(bytes + offsets[11] + (uint64_t)index * AF_PARTICLE_RECORD_SIZE,
+                          &particle_data->emitters[index]);
+    }
     af_write_u32(bytes + 48U, af_checksum(bytes + AF_PACKAGE_HEADER_SIZE,
                                           (size_t)total_size - AF_PACKAGE_HEADER_SIZE));
     if (af_package_validate(bytes, (size_t)total_size) != AF_RESULT_SUCCESS) {
@@ -1789,6 +2000,7 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
     const AfSectionView *layouts = NULL;
     const AfSectionView *components = NULL;
     const AfSectionView *state_machines = NULL;
+    const AfSectionView *particles = NULL;
     uint32_t index = 0U;
     AfResult result = AF_RESULT_SUCCESS;
     if (allocator == NULL || out_package == NULL) {
@@ -1813,6 +2025,7 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
     layouts = af_find_section(sections, section_count, AF_SECTION_LAYOUTS);
     components = af_find_section(sections, section_count, AF_SECTION_COMPONENTS);
     state_machines = af_find_section(sections, section_count, AF_SECTION_STATE_MACHINES);
+    particles = af_find_section(sections, section_count, AF_SECTION_PARTICLES);
     out_package->scene.nodes =
         af_allocate_array(allocator, nodes->count, sizeof(AfSceneNode), alignof(AfSceneNode));
     out_package->base_nodes =
@@ -1831,6 +2044,8 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
         af_allocate_array(allocator, styles->count, sizeof(AfStyle), alignof(AfStyle));
     out_package->layout_data.nodes =
         af_allocate_array(allocator, layouts->count, sizeof(AfLayoutNode), alignof(AfLayoutNode));
+    out_package->particle_data.emitters = af_allocate_array(
+        allocator, particles->count, sizeof(AfParticleEmitter), alignof(AfParticleEmitter));
     if ((nodes->count != 0U &&
          (out_package->scene.nodes == NULL || out_package->base_nodes == NULL)) ||
         (clips->count != 0U && out_package->animation.clips == NULL) ||
@@ -1839,7 +2054,8 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
         (paths->count != 0U && out_package->path_data.paths == NULL) ||
         (path_commands->count != 0U && out_package->path_data.commands == NULL) ||
         (styles->count != 0U && out_package->style_data.styles == NULL) ||
-        (layouts->count != 0U && out_package->layout_data.nodes == NULL)) {
+        (layouts->count != 0U && out_package->layout_data.nodes == NULL) ||
+        (particles->count != 0U && out_package->particle_data.emitters == NULL)) {
         af_loaded_package_destroy(allocator, out_package);
         return AF_RESULT_OUT_OF_MEMORY;
     }
@@ -1868,6 +2084,8 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
     out_package->style_data.capacity = styles->count;
     out_package->layout_data.count = layouts->count;
     out_package->layout_data.capacity = layouts->count;
+    out_package->particle_data.count = particles->count;
+    out_package->particle_data.capacity = particles->count;
     out_package->layout_data.reference_size =
         (AfVec2){af_read_f32(bytes + layouts->offset), af_read_f32(bytes + layouts->offset + 4U)};
     out_package->layout_data.target_size = (AfVec2){af_read_f32(bytes + layouts->offset + 8U),
@@ -1882,6 +2100,7 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
     out_package->scene.paths = &out_package->path_data;
     out_package->scene.styles = &out_package->style_data;
     out_package->scene.layouts = &out_package->layout_data;
+    out_package->scene.particles = &out_package->particle_data;
     for (index = 0U; index < nodes->count; ++index) {
         const uint8_t *record = bytes + nodes->offset + (uint64_t)index * AF_NODE_RECORD_SIZE;
         AfSceneNode *node = &out_package->scene.nodes[index];
@@ -1961,6 +2180,10 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
             af_read_layout(bytes + layouts->offset + AF_LAYOUT_HEADER_SIZE +
                            (uint64_t)index * AF_LAYOUT_RECORD_SIZE);
     }
+    for (index = 0U; index < particles->count; ++index) {
+        out_package->particle_data.emitters[index] =
+            af_read_particle(bytes + particles->offset + (uint64_t)index * AF_PARTICLE_RECORD_SIZE);
+    }
     return af_scene_evaluate_world(&out_package->scene);
 }
 
@@ -1987,5 +2210,6 @@ void af_loaded_package_destroy(AfAllocator *allocator, AfLoadedPackage *package)
     af_deallocate(allocator, package->state_machine_data.transitions);
     af_deallocate(allocator, package->state_machine_data.inputs);
     af_deallocate(allocator, package->state_machine_data.conditions);
+    af_deallocate(allocator, package->particle_data.emitters);
     *package = (AfLoadedPackage){0};
 }

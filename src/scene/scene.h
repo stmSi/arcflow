@@ -3,6 +3,7 @@
 
 #include "arcflow/arcflow_result.h"
 #include "core/math.h"
+#include "particle/particle.h"
 #include "path/path.h"
 #include "style/style.h"
 
@@ -47,6 +48,7 @@ typedef struct AfScene {
     const AfPathData *paths;
     const AfStyleData *styles;
     const struct AfLayoutData *layouts;
+    const AfParticleData *particles;
 } AfScene;
 
 void af_scene_init(AfScene *scene, AfSceneNode *nodes, uint32_t capacity);

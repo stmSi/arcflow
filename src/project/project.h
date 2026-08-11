@@ -10,7 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AF_PROJECT_FORMAT_VERSION 5U
+#define AF_PROJECT_FORMAT_VERSION 6U
 #define AF_PROJECT_MAX_FILE_SIZE (32U * 1024U * 1024U)
 #define AF_PROJECT_NAME_CAPACITY 64U
 #define AF_PROJECT_MAX_CLIPS 64U
@@ -58,6 +58,7 @@ typedef struct AfProject {
     AfPathData path_data;
     AfStyleData style_data;
     AfLayoutData layout_data;
+    AfParticleData particle_data;
     uint64_t *validation_ids;
     AfAllocator *allocator;
 } AfProject;
@@ -66,7 +67,9 @@ typedef struct AfProjectNodeSnapshot {
     AfSceneNode node;
     AfStyle style;
     AfLayoutNode layout;
+    AfParticleEmitter emitter;
     bool has_layout;
+    bool has_emitter;
     char name[AF_PROJECT_NAME_CAPACITY];
     uint32_t index;
 } AfProjectNodeSnapshot;
@@ -112,6 +115,12 @@ AfStyle *af_project_find_node_style(AfProject *project, uint64_t node_id);
 AfResult af_project_add_style_preset(AfProject *project, const AfStyle *style);
 AfResult af_project_set_layout(AfProject *project, const AfLayoutNode *layout);
 AfResult af_project_clear_layout(AfProject *project, uint64_t node_id);
+AfParticleEmitter *af_project_find_emitter(AfProject *project, uint64_t id);
+AfParticleEmitter *af_project_find_node_emitter(AfProject *project, uint64_t node_id);
+const AfParticleEmitter *af_project_find_node_emitter_const(const AfProject *project,
+                                                            uint64_t node_id);
+AfResult af_project_add_emitter(AfProject *project, const AfParticleEmitter *emitter);
+AfResult af_project_remove_emitter(AfProject *project, uint64_t id);
 
 AfProjectClip *af_project_find_clip(AfProject *project, uint64_t id);
 const AfProjectClip *af_project_find_clip_const(const AfProject *project, uint64_t id);

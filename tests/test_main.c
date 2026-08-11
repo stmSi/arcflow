@@ -11,11 +11,13 @@
 #include "core/handles.h"
 #include "core/hash.h"
 #include "core/math.h"
+#include "core/png.h"
 #include "core/safe_math.h"
 #include "deformation/deformation.h"
 #include "editor/editor_commands.h"
 #include "interaction/interaction.h"
 #include "layout/layout.h"
+#include "particle/particle.h"
 #include "path/path.h"
 #include "project/project.h"
 #include "rigging/rigging.h"
@@ -108,6 +110,40 @@ static void af_test_fixture_init(AfTestFixture *fixture) {
                                            .keyframe_count = 5U};
 }
 
+static bool af_test_particles(void) {
+    AfTestFixture fixture;
+    AfParticleEmitter emitters[2];
+    AfParticleData data = {.emitters = emitters, .count = 1U, .capacity = 2U};
+    AfParticleSpawnSample first;
+    AfParticleSpawnSample second;
+    af_test_fixture_init(&fixture);
+    emitters[0] = af_particle_emitter_default(700U, 2U);
+    emitters[0].type = AF_PARTICLE_EMITTER_RECTANGLE;
+    emitters[0].seed = 0x12345678U;
+    CHECK(af_particle_data_validate(&data, &fixture.scene) == AF_RESULT_SUCCESS);
+    CHECK(af_particle_total_capacity(&data) == emitters[0].capacity);
+    CHECK(af_particle_spawn_sample(&emitters[0], 42U, &first) == AF_RESULT_SUCCESS);
+    CHECK(af_particle_spawn_sample(&emitters[0], 42U, &second) == AF_RESULT_SUCCESS);
+    CHECK(memcmp(&first, &second, sizeof(first)) == 0);
+    CHECK(af_particle_random_u32(emitters[0].seed, emitters[0].id, 42U, 0U) !=
+          af_particle_random_u32(emitters[0].seed, emitters[0].id, 43U, 0U));
+    emitters[1] = af_particle_emitter_default(701U, 3U);
+    emitters[0].capacity = AF_MAX_PARTICLES;
+    emitters[1].capacity = 1U;
+    data.count = 2U;
+    CHECK(af_particle_total_capacity(&data) == AF_MAX_PARTICLES + 1U);
+    CHECK(af_particle_data_validate(&data, &fixture.scene) == AF_RESULT_INVALID_ARGUMENT);
+    emitters[0].capacity = 1024U;
+    emitters[1].type = AF_PARTICLE_EMITTER_VECTOR_PATH;
+    emitters[1].path_id = 99U;
+    CHECK(af_particle_data_validate(&data, &fixture.scene) == AF_RESULT_INVALID_ARGUMENT);
+    emitters[1].type = AF_PARTICLE_EMITTER_POINT;
+    emitters[1].path_id = 0U;
+    emitters[1].node_id = emitters[0].node_id;
+    CHECK(af_particle_data_validate(&data, &fixture.scene) == AF_RESULT_INVALID_ARGUMENT);
+    return true;
+}
+
 static bool af_test_core(void) {
     alignas(64) uint8_t memory[512];
     AfArena arena;
@@ -166,6 +202,30 @@ static bool af_test_file_limit(void) {
     CHECK(af_file_read_limited(path, 8U, &allocator, &file) == AF_RESULT_SUCCESS);
     CHECK(file.size == sizeof(content) && memcmp(file.data, content, sizeof(content)) == 0);
     af_file_data_destroy(&allocator, &file);
+    CHECK(remove(path) == 0);
+    return true;
+}
+
+static bool af_test_png_writer(void) {
+    const char *path = "arcflow_test_image.png";
+    const uint8_t bgra[8] = {30U, 20U, 10U, 255U, 60U, 50U, 40U, 128U};
+    const uint8_t expected_signature[8] = {137U, 80U, 78U, 71U, 13U, 10U, 26U, 10U};
+    const uint8_t expected_scanline[9] = {0U, 10U, 20U, 30U, 255U, 40U, 50U, 60U, 128U};
+    uint8_t encoded[128] = {0};
+    FILE *file = NULL;
+    size_t encoded_size = 0U;
+    CHECK(af_png_write_rgba8(path, bgra, 2U, 1U, 8U, AF_PIXEL_ORDER_BGRA) == AF_RESULT_SUCCESS);
+    file = fopen(path, "rb");
+    CHECK(file != NULL);
+    encoded_size = fread(encoded, 1U, sizeof(encoded), file);
+    CHECK(fclose(file) == 0);
+    CHECK(encoded_size == 77U);
+    CHECK(memcmp(encoded, expected_signature, sizeof(expected_signature)) == 0);
+    CHECK(memcmp(encoded + 12U, "IHDR", 4U) == 0);
+    CHECK(encoded[19] == 2U && encoded[23] == 1U);
+    CHECK(memcmp(encoded + 48U, expected_scanline, sizeof(expected_scanline)) == 0);
+    CHECK(af_png_write_rgba8(path, bgra, 2U, 1U, 7U, AF_PIXEL_ORDER_BGRA) ==
+          AF_RESULT_INVALID_ARGUMENT);
     CHECK(remove(path) == 0);
     return true;
 }
@@ -1823,9 +1883,9 @@ static bool af_test_project(void) {
                                                  .value = {112.0F, 84.0F},
                                                  .interpolation = AF_INTERPOLATION_CUBIC_BEZIER,
                                                  .easing = {0.42F, 0.0F, 0.58F, 1.0F}}};
-    char with_unknown[4096];
-    char invalid_parent[4096];
-    char unsupported[4096];
+    char with_unknown[8192];
+    char invalid_parent[8192];
+    char unsupported[8192];
     int written = 0;
     af_allocator_init_default(&allocator);
     CHECK(af_project_create(&project, &allocator, 8U) == AF_RESULT_SUCCESS);
@@ -1838,6 +1898,17 @@ static bool af_test_project(void) {
     CHECK(af_project_add_track(&project, &track) == AF_RESULT_SUCCESS);
     CHECK(af_project_add_keyframe(&project, &first_key) == AF_RESULT_SUCCESS);
     CHECK(af_project_add_keyframe(&project, &second_key) == AF_RESULT_SUCCESS);
+    {
+        uint64_t emitter_id = 0U;
+        CHECK(af_project_allocate_animation_id(&project, &emitter_id) == AF_RESULT_SUCCESS);
+        AfParticleEmitter emitter = af_particle_emitter_default(emitter_id, shape.id);
+        emitter.type = AF_PARTICLE_EMITTER_RECTANGLE;
+        emitter.output = AF_PARTICLE_OUTPUT_FLIPBOOK;
+        emitter.flipbook_columns = 4U;
+        emitter.flipbook_rows = 2U;
+        emitter.flipbook_frames_per_second = 12.0F;
+        CHECK(af_project_add_emitter(&project, &emitter) == AF_RESULT_SUCCESS);
+    }
     {
         AfLayoutNode layout = af_layout_node_default(3U);
         project.layout_data.safe_area =
@@ -1873,7 +1944,8 @@ static bool af_test_project(void) {
         style->stroke.dash_count = 2U;
     }
     CHECK(af_project_serialize(&project, &allocator, &text) == AF_RESULT_SUCCESS);
-    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 5"));
+    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 6"));
+    CHECK(af_test_project_contains(text.data, text.size, "particle "));
     CHECK(af_test_project_contains(text.data, text.size, "name Editor Only Name"));
     CHECK(af_test_project_contains(text.data, text.size, "interpolation cubic_bezier"));
     CHECK(af_project_deserialize(text.data, text.size, &allocator, &loaded) == AF_RESULT_SUCCESS);
@@ -1885,6 +1957,8 @@ static bool af_test_project(void) {
     CHECK(af_project_find_node_style(&loaded, 3U)->fill.type == AF_PAINT_LINEAR_GRADIENT);
     CHECK(af_project_find_node_style(&loaded, 3U)->stroke.dash_count == 2U);
     CHECK(loaded.layout_data.count == 1U);
+    CHECK(loaded.particle_data.count == 1U);
+    CHECK(loaded.particle_data.emitters[0].output == AF_PARTICLE_OUTPUT_FLIPBOOK);
     CHECK_NEAR(af_layout_find_const(&loaded.layout_data, 3U)->width.value, 0.25F, 0.0001F);
     CHECK_NEAR(af_scene_find(&loaded.scene, 2U)->local_transform.rotation, 0.25F, 0.0001F);
     {
@@ -1911,6 +1985,8 @@ static bool af_test_project(void) {
     CHECK(runtime.path_data.path_count == 1U && runtime.path_data.command_count == 5U);
     CHECK(runtime.style_data.count == loaded.style_data.count);
     CHECK(runtime.layout_data.count == 1U);
+    CHECK(runtime.particle_data.count == 1U);
+    CHECK(runtime.scene.particles == &runtime.particle_data);
     CHECK(af_style_find_node_const(&runtime.style_data, 3U)->stroke.end_width == 6.0F);
     af_loaded_package_destroy(&allocator, &runtime);
     written = snprintf(with_unknown, sizeof(with_unknown), "unknown_editor_field retained\n%.*s",
@@ -2259,6 +2335,29 @@ static bool af_test_editor_commands(void) {
     CHECK(project.scene.count == 0U);
     CHECK(af_editor_history_undo(&history, &project) == AF_RESULT_SUCCESS);
     CHECK(project.scene.count == 4U && af_scene_find(&project.scene, 2U) != NULL);
+    command = (AfEditorCommand){.type = AF_EDITOR_COMMAND_MODIFY,
+                                .merge_key = AF_EDITOR_MERGE_TRANSFORM,
+                                .target_id = 2U,
+                                .before_count = 2U,
+                                .after_count = 2U};
+    CHECK(af_project_snapshot(&project, 2U, &command.before[0]) == AF_RESULT_SUCCESS);
+    CHECK(af_project_snapshot(&project, 3U, &command.before[1]) == AF_RESULT_SUCCESS);
+    af_scene_find(&project.scene, 2U)->local_transform.position.x += 12.0F;
+    af_scene_find(&project.scene, 3U)->local_transform.position.y += 18.0F;
+    CHECK(af_project_snapshot(&project, 2U, &command.after[0]) == AF_RESULT_SUCCESS);
+    CHECK(af_project_snapshot(&project, 3U, &command.after[1]) == AF_RESULT_SUCCESS);
+    CHECK(af_editor_history_execute(&history, &project, &command, true, false) ==
+          AF_RESULT_SUCCESS);
+    CHECK(af_editor_history_undo(&history, &project) == AF_RESULT_SUCCESS);
+    CHECK_NEAR(af_scene_find(&project.scene, 2U)->local_transform.position.x,
+               command.before[0].node.local_transform.position.x, 0.0001F);
+    CHECK_NEAR(af_scene_find(&project.scene, 3U)->local_transform.position.y,
+               command.before[1].node.local_transform.position.y, 0.0001F);
+    CHECK(af_editor_history_redo(&history, &project) == AF_RESULT_SUCCESS);
+    CHECK_NEAR(af_scene_find(&project.scene, 2U)->local_transform.position.x,
+               command.after[0].node.local_transform.position.x, 0.0001F);
+    CHECK_NEAR(af_scene_find(&project.scene, 3U)->local_transform.position.y,
+               command.after[1].node.local_transform.position.y, 0.0001F);
     snapshot = (AfProjectNodeSnapshot){.node = {.id = 5U,
                                                 .parent_id = 1U,
                                                 .type = AF_NODE_PATH,
@@ -2312,13 +2411,40 @@ static bool af_test_editor_commands(void) {
     CHECK_NEAR(project.path_data.commands[1].point.x, 100.0F, 0.0001F);
     CHECK(af_editor_history_redo(&history, &project) == AF_RESULT_SUCCESS);
     CHECK_NEAR(project.path_data.commands[1].point.x, 125.0F, 0.0001F);
-    CHECK(af_editor_command_delete(&project, 1U, &command) == AF_RESULT_SUCCESS);
+    {
+        AfParticleEmitter emitter = af_particle_emitter_default(900U, 5U);
+        emitter.type = AF_PARTICLE_EMITTER_VECTOR_PATH;
+        emitter.path_id = 50U;
+        CHECK(af_project_add_emitter(&project, &emitter) == AF_RESULT_SUCCESS);
+        CHECK(af_project_snapshot(&project, 5U, &before) == AF_RESULT_SUCCESS);
+        CHECK(before.has_emitter);
+        CHECK(af_project_remove_emitter(&project, emitter.id) == AF_RESULT_SUCCESS);
+        CHECK(af_project_snapshot(&project, 5U, &after) == AF_RESULT_SUCCESS);
+        CHECK(!after.has_emitter);
+        CHECK(af_editor_command_modify(&before, &after, AF_EDITOR_MERGE_PARTICLE, &command) ==
+              AF_RESULT_SUCCESS);
+        CHECK(af_editor_history_execute(&history, &project, &command, true, false) ==
+              AF_RESULT_SUCCESS);
+        CHECK(af_editor_history_undo(&history, &project) == AF_RESULT_SUCCESS);
+        CHECK(af_project_find_node_emitter(&project, 5U) != NULL);
+        CHECK(af_editor_history_redo(&history, &project) == AF_RESULT_SUCCESS);
+        CHECK(af_project_find_node_emitter(&project, 5U) == NULL);
+        CHECK(af_editor_history_undo(&history, &project) == AF_RESULT_SUCCESS);
+        CHECK(af_project_find_node_emitter(&project, 5U) != NULL);
+    }
+    CHECK(af_scene_reparent(&project.scene, 2U, AF_INVALID_NODE_ID) == AF_RESULT_SUCCESS);
+    {
+        const uint64_t selected_roots[2] = {1U, 2U};
+        CHECK(af_editor_command_delete_many(&project, selected_roots, 2U, &command) ==
+              AF_RESULT_SUCCESS);
+    }
     CHECK(command.path_before_count == 1U && command.path_command_before_count == 4U);
     CHECK(af_editor_history_execute(&history, &project, &command, false, false) ==
           AF_RESULT_SUCCESS);
     CHECK(project.scene.count == 0U && project.path_data.path_count == 0U);
     CHECK(af_editor_history_undo(&history, &project) == AF_RESULT_SUCCESS);
     CHECK(project.scene.count == 5U && project.path_data.path_count == 1U &&
+          af_project_find_node_emitter(&project, 5U) != NULL &&
           af_project_validate(&project) == AF_RESULT_SUCCESS);
     CHECK(af_editor_history_memory_used(&history) <= history_limit);
     CHECK(history.capacity == 3U);
@@ -2594,8 +2720,10 @@ int main(void) {
     static const AfTestCase tests[] = {
         {"core", af_test_core},
         {"file limits", af_test_file_limit},
+        {"PNG image export", af_test_png_writer},
         {"math and transforms", af_test_math},
         {"scene hierarchy", af_test_scene},
+        {"GPU particle data", af_test_particles},
         {"animation", af_test_animation},
         {"vector paths", af_test_paths},
         {"vector styling", af_test_vector_styling},

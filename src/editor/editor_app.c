@@ -36,6 +36,25 @@
 #define AF_EDITOR_CONTEXT_WIDTH 240.0F
 #define AF_EDITOR_CONTEXT_HEADER_HEIGHT 34.0F
 #define AF_EDITOR_CONTEXT_ITEM_HEIGHT 30.0F
+#define AF_EDITOR_TOOLTIP_WIDTH 292.0F
+#define AF_EDITOR_TOOLTIP_DETAIL_WIDTH 420.0F
+#define AF_EDITOR_TOOLTIP_DELAY_NS UINT64_C(350000000)
+#define AF_EDITOR_COLOR_SV_Y 76.0F
+#define AF_EDITOR_COLOR_SV_WIDTH 142.0F
+#define AF_EDITOR_COLOR_SV_HEIGHT 86.0F
+#define AF_EDITOR_COLOR_HUE_X 150.0F
+#define AF_EDITOR_COLOR_HUE_WIDTH 16.0F
+#define AF_EDITOR_COLOR_ALPHA_Y 170.0F
+#define AF_EDITOR_COLOR_ALPHA_HEIGHT 14.0F
+#define AF_EDITOR_INSPECTOR_SCALAR_Y 210.0F
+#define AF_EDITOR_INSPECTOR_SCALAR_STEP 44.0F
+#define AF_EDITOR_STYLE_BAR_Y 382.0F
+#define AF_EDITOR_STYLE_LABEL_Y 400.0F
+#define AF_EDITOR_STYLE_ROW_Y 414.0F
+#define AF_EDITOR_LAYOUT_ROW_Y 450.0F
+#define AF_EDITOR_PARTICLE_LABEL_Y 493.0F
+#define AF_EDITOR_PARTICLE_ROW_Y 514.0F
+#define AF_EDITOR_PARTICLE_ROW_STEP 36.0F
 #define AF_EDITOR_TEXT_FONT_ID 1U
 #define AF_EDITOR_TEXT_GLYPH_CAPACITY 512U
 #define AF_EDITOR_TEXT_LINE_CAPACITY 8U
@@ -61,7 +80,11 @@ typedef enum AfEditorDragMode {
     AF_EDITOR_DRAG_TANGENT_OUT,
     AF_EDITOR_DRAG_PATH_POINT,
     AF_EDITOR_DRAG_PATH_CONTROL1,
-    AF_EDITOR_DRAG_PATH_CONTROL2
+    AF_EDITOR_DRAG_PATH_CONTROL2,
+    AF_EDITOR_DRAG_CANVAS_BOX,
+    AF_EDITOR_DRAG_COLOR_SV,
+    AF_EDITOR_DRAG_COLOR_HUE,
+    AF_EDITOR_DRAG_COLOR_ALPHA
 } AfEditorDragMode;
 
 typedef enum AfEditorContextMenu {
@@ -80,9 +103,17 @@ typedef enum AfEditorContextMenu {
 
 typedef struct AfEditorContextMenuInfo {
     const char *title;
-    const char *items[6];
+    const char *items[7];
     uint32_t item_count;
 } AfEditorContextMenuInfo;
+
+typedef struct AfEditorTooltip {
+    uint64_t id;
+    const char *title;
+    const char *summary;
+    const char *details;
+    const char *shortcut;
+} AfEditorTooltip;
 
 typedef struct AfEditorState {
     AfAllocator allocator;
@@ -98,6 +129,8 @@ typedef struct AfEditorState {
     AfSceneNode *preview_nodes;
     AfScene preview_scene;
     uint64_t selected_id;
+    uint64_t selected_ids[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    uint32_t selected_count;
     uint32_t hierarchy_order[AF_EDITOR_PROJECT_CAPACITY];
     uint8_t hierarchy_depth[AF_EDITOR_PROJECT_CAPACITY];
     uint32_t hierarchy_count;
@@ -107,11 +140,14 @@ typedef struct AfEditorState {
     float zoom;
     AfVec2 pan;
     float grid_step;
+    float color_hue;
     bool grid_visible;
     bool snapping;
     AfVec2 mouse_position;
     AfVec2 context_position;
     AfEditorContextMenu context_menu;
+    uint64_t hovered_tooltip_id;
+    uint64_t tooltip_started_ticks;
     float timeline_height;
     float timeline_zoom;
     float timeline_pan;
@@ -143,22 +179,180 @@ typedef struct AfEditorState {
     AfEditorDragMode drag_mode;
     AfVec2 drag_start_mouse;
     AfProjectNodeSnapshot drag_before;
+    AfProjectNodeSnapshot selection_drag_before[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    uint32_t selection_drag_count;
+    AfVec2 canvas_box_start;
+    AfVec2 canvas_box_current;
+    bool canvas_box_additive;
     bool rename_active;
     AfProjectNodeSnapshot rename_before;
     char rename_buffer[AF_PROJECT_NAME_CAPACITY];
     char project_path[AF_EDITOR_PATH_CAPACITY];
     char package_path[AF_EDITOR_PATH_CAPACITY];
+    char output_path[AF_EDITOR_PATH_CAPACITY];
     char status[AF_EDITOR_STATUS_CAPACITY];
     uint32_t maximum_frames;
     uint32_t rendered_frames;
     bool resize_smoke;
     bool context_smoke;
+    bool tooltip_smoke;
+    bool selection_smoke;
     bool running;
     bool dirty;
 } AfEditorState;
 
 static float af_editor_clamp(float value, float minimum, float maximum) {
     return value < minimum ? minimum : (value > maximum ? maximum : value);
+}
+
+static AfColor af_editor_hsv_color(float hue, float saturation, float value, float alpha) {
+    const float wrapped = hue - floorf(hue);
+    const float sector_value = wrapped * 6.0F;
+    const int sector = (int)floorf(sector_value);
+    const float fraction = sector_value - (float)sector;
+    const float low = value * (1.0F - saturation);
+    const float falling = value * (1.0F - saturation * fraction);
+    const float rising = value * (1.0F - saturation * (1.0F - fraction));
+    switch (sector % 6) {
+    case 0:
+        return (AfColor){value, rising, low, alpha};
+    case 1:
+        return (AfColor){falling, value, low, alpha};
+    case 2:
+        return (AfColor){low, value, rising, alpha};
+    case 3:
+        return (AfColor){low, falling, value, alpha};
+    case 4:
+        return (AfColor){rising, low, value, alpha};
+    default:
+        return (AfColor){value, low, falling, alpha};
+    }
+}
+
+static void af_editor_color_hsv(AfColor color, float *out_hue, float *out_saturation,
+                                float *out_value) {
+    const float maximum = fmaxf(color.r, fmaxf(color.g, color.b));
+    const float minimum = fminf(color.r, fminf(color.g, color.b));
+    const float range = maximum - minimum;
+    float hue = 0.0F;
+    if (range > 0.00001F) {
+        if (maximum == color.r) {
+            hue = (color.g - color.b) / range;
+        } else if (maximum == color.g) {
+            hue = 2.0F + (color.b - color.r) / range;
+        } else {
+            hue = 4.0F + (color.r - color.g) / range;
+        }
+        hue /= 6.0F;
+        if (hue < 0.0F) {
+            hue += 1.0F;
+        }
+    }
+    *out_hue = hue;
+    *out_saturation = maximum <= 0.00001F ? 0.0F : range / maximum;
+    *out_value = maximum;
+}
+
+static bool af_editor_selection_contains(const AfEditorState *editor, uint64_t id) {
+    for (uint32_t index = 0U; index < editor->selected_count; ++index) {
+        if (editor->selected_ids[index] == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void af_editor_select_only(AfEditorState *editor, uint64_t id) {
+    editor->selected_count = id == 0U ? 0U : 1U;
+    editor->selected_id = id;
+    if (id != 0U) {
+        editor->selected_ids[0] = id;
+    }
+}
+
+static void af_editor_selection_add(AfEditorState *editor, uint64_t id) {
+    if (id == 0U || af_editor_selection_contains(editor, id)) {
+        return;
+    }
+    if (editor->selected_count < AF_EDITOR_COMMAND_MAX_SNAPSHOTS) {
+        editor->selected_ids[editor->selected_count++] = id;
+        editor->selected_id = id;
+    }
+}
+
+static void af_editor_selection_toggle(AfEditorState *editor, uint64_t id) {
+    for (uint32_t index = 0U; index < editor->selected_count; ++index) {
+        if (editor->selected_ids[index] == id) {
+            memmove(&editor->selected_ids[index], &editor->selected_ids[index + 1U],
+                    (size_t)(editor->selected_count - index - 1U) *
+                        sizeof(editor->selected_ids[0]));
+            --editor->selected_count;
+            editor->selected_id = editor->selected_count == 0U
+                                      ? 0U
+                                      : editor->selected_ids[editor->selected_count - 1U];
+            return;
+        }
+    }
+    af_editor_selection_add(editor, id);
+}
+
+static bool af_editor_selection_has_selected_ancestor(const AfEditorState *editor, uint64_t id) {
+    const AfSceneNode *node = af_scene_find_const(&editor->project.scene, id);
+    uint32_t depth = 0U;
+    while (node != NULL && node->parent_id != AF_INVALID_NODE_ID &&
+           depth++ < AF_MAX_HIERARCHY_DEPTH) {
+        if (af_editor_selection_contains(editor, node->parent_id)) {
+            return true;
+        }
+        node = af_scene_find_const(&editor->project.scene, node->parent_id);
+    }
+    return false;
+}
+
+static void af_editor_begin_selection_modify(AfEditorState *editor, bool top_level_only) {
+    editor->selection_drag_count = 0U;
+    for (uint32_t index = 0U; index < editor->selected_count; ++index) {
+        const uint64_t id = editor->selected_ids[index];
+        if ((!top_level_only || !af_editor_selection_has_selected_ancestor(editor, id)) &&
+            af_project_snapshot(&editor->project, id,
+                                &editor->selection_drag_before[editor->selection_drag_count]) ==
+                AF_RESULT_SUCCESS) {
+            ++editor->selection_drag_count;
+        }
+    }
+    if (editor->selection_drag_count == 0U && editor->selected_id != 0U &&
+        af_project_snapshot(&editor->project, editor->selected_id,
+                            &editor->selection_drag_before[0]) == AF_RESULT_SUCCESS) {
+        editor->selection_drag_count = 1U;
+    }
+}
+
+static AfResult af_editor_commit_selection_modify(AfEditorState *editor, AfEditorMergeKey merge_key,
+                                                  bool allow_merge) {
+    AfEditorCommand command = {.type = AF_EDITOR_COMMAND_MODIFY,
+                               .merge_key = merge_key,
+                               .target_id = editor->selected_id,
+                               .before_count = editor->selection_drag_count,
+                               .after_count = editor->selection_drag_count};
+    AfResult result = AF_RESULT_SUCCESS;
+    if (editor->selection_drag_count == 0U) {
+        return AF_RESULT_NOT_FOUND;
+    }
+    memcpy(command.before, editor->selection_drag_before,
+           (size_t)editor->selection_drag_count * sizeof(command.before[0]));
+    for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
+        result = af_project_snapshot(&editor->project, editor->selection_drag_before[index].node.id,
+                                     &command.after[index]);
+        if (result != AF_RESULT_SUCCESS) {
+            return result;
+        }
+    }
+    result = af_editor_history_execute(&editor->history, &editor->project, &command, true,
+                                       allow_merge && editor->selection_drag_count == 1U);
+    if (result == AF_RESULT_SUCCESS) {
+        editor->dirty = true;
+    }
+    return result;
 }
 
 static int32_t af_editor_clamp_layer(int32_t value) {
@@ -224,6 +418,16 @@ static AfResult af_editor_default_project(AfEditorState *editor) {
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_project_add_clip(&editor->project, &clip);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        uint64_t emitter_id = 0U;
+        result = af_project_allocate_animation_id(&editor->project, &emitter_id);
+        if (result == AF_RESULT_SUCCESS) {
+            AfParticleEmitter emitter = af_particle_emitter_default(emitter_id, ellipse.id);
+            emitter.type = AF_PARTICLE_EMITTER_CIRCLE;
+            emitter.output = AF_PARTICLE_OUTPUT_UI_BILLBOARD;
+            result = af_project_add_emitter(&editor->project, &emitter);
+        }
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_scene_evaluate_world(&editor->project.scene);
@@ -633,24 +837,25 @@ static const AfEditorContextMenuInfo *af_editor_context_info(AfEditorContextMenu
          .items = {"SAVE PROJECT", "COMPILE PACKAGE", "TOGGLE GRID", "TOGGLE SNAP", "UNDO", "REDO"},
          .item_count = 6U},
         {.title = "RECTANGLE",
-         .items = {"DUPLICATE", "RENAME", "MAKE ROUNDED", "FIT TO CANVAS", "BRING FORWARD",
-                   "DELETE"},
-         .item_count = 6U},
+         .items = {"DUPLICATE", "RENAME", "MAKE ROUNDED", "FIT TO CANVAS", "TOGGLE PARTICLES",
+                   "BRING FORWARD", "DELETE"},
+         .item_count = 7U},
         {.title = "ROUNDED RECTANGLE",
-         .items = {"DUPLICATE", "RENAME", "INCREASE RADIUS", "MAKE RECTANGLE", "BRING FORWARD",
-                   "DELETE"},
-         .item_count = 6U},
+         .items = {"DUPLICATE", "RENAME", "INCREASE RADIUS", "MAKE RECTANGLE", "TOGGLE PARTICLES",
+                   "BRING FORWARD", "DELETE"},
+         .item_count = 7U},
         {.title = "ELLIPSE",
-         .items = {"DUPLICATE", "RENAME", "MAKE CIRCLE", "FIT TO CANVAS", "BRING FORWARD",
-                   "DELETE"},
-         .item_count = 6U},
+         .items = {"DUPLICATE", "RENAME", "MAKE CIRCLE", "FIT TO CANVAS", "TOGGLE PARTICLES",
+                   "BRING FORWARD", "DELETE"},
+         .item_count = 7U},
         {.title = "VECTOR PATH",
-         .items = {"DUPLICATE", "RENAME", "TOGGLE FILL RULE", "EDIT POINTS", "REVERSE CONTOUR",
-                   "DELETE"},
-         .item_count = 6U},
+         .items = {"DUPLICATE", "RENAME", "TOGGLE FILL RULE", "EDIT POINTS", "TOGGLE PARTICLES",
+                   "REVERSE CONTOUR", "DELETE"},
+         .item_count = 7U},
         {.title = "GROUP",
-         .items = {"DUPLICATE", "RENAME", "ADD RECT CHILD", "UNPARENT", "DELETE"},
-         .item_count = 5U}};
+         .items = {"DUPLICATE", "RENAME", "ADD RECT CHILD", "UNPARENT", "TOGGLE PARTICLES",
+                   "DELETE"},
+         .item_count = 6U}};
     return menu > AF_EDITOR_CONTEXT_NONE && menu <= AF_EDITOR_CONTEXT_GROUP ? &menus[menu] : NULL;
 }
 
@@ -1103,6 +1308,7 @@ static void af_editor_update_preview(AfEditorState *editor) {
     editor->preview_scene.paths = &editor->project.path_data;
     editor->preview_scene.styles = &editor->project.style_data;
     editor->preview_scene.layouts = &editor->project.layout_data;
+    editor->preview_scene.particles = &editor->project.particle_data;
     if (editor->project.scene.count != 0U) {
         memcpy(editor->preview_nodes, editor->project.scene.nodes,
                (size_t)editor->project.scene.count * sizeof(*editor->preview_nodes));
@@ -1190,7 +1396,7 @@ static void af_editor_render_hierarchy(AfEditorState *editor, int height) {
     const float top = AF_EDITOR_TOOLBAR_HEIGHT + 8.0F;
     af_editor_add_text(editor, 14.0F, 15.0F, "SCENE HIERARCHY", 1.5F, editor->left_width - 28.0F,
                        (AfColor){0.78F, 0.81F, 0.88F, 1.0F}, 100125);
-    af_editor_add_text(editor, 14.0F, 30.0F, "RIGHT CLICK FOR ACTIONS", 0.75F,
+    af_editor_add_text(editor, 14.0F, 30.0F, "HOVER HELP / ALT DETAILS / RIGHT CLICK ACTIONS", 0.6F,
                        editor->left_width - 28.0F, (AfColor){0.43F, 0.47F, 0.56F, 1.0F}, 100125);
     if ((float)height > top + AF_EDITOR_STATUS_HEIGHT) {
         visible_rows =
@@ -1208,6 +1414,8 @@ static void af_editor_render_hierarchy(AfEditorState *editor, int height) {
                                              : (AfColor){0.12F, 0.13F, 0.155F, 1.0F};
         if (node->id == editor->selected_id) {
             row_color = (AfColor){0.16F, 0.34F, 0.58F, 1.0F};
+        } else if (af_editor_selection_contains(editor, node->id)) {
+            row_color = (AfColor){0.12F, 0.25F, 0.4F, 1.0F};
         }
         af_editor_add_rect(editor, 6.0F, y, editor->left_width - 12.0F, AF_EDITOR_ROW_HEIGHT - 2.0F,
                            row_color, 100110);
@@ -1266,29 +1474,108 @@ static void af_editor_render_toolbar(AfEditorState *editor) {
                        (AfColor){0.69F, 0.72F, 0.8F, 1.0F}, 100130);
 }
 
+static void af_editor_render_color_picker(AfEditorState *editor, float x,
+                                          const AfSceneNode *selected) {
+    const AfColor color = selected == NULL ? (AfColor){0.5F, 0.5F, 0.5F, 1.0F} : selected->fill;
+    float hue = editor->color_hue;
+    float saturation = 0.0F;
+    float value = 0.0F;
+    char first_values[32];
+    char second_values[32];
+    af_editor_color_hsv(color, &hue, &saturation, &value);
+    if (saturation > 0.0001F) {
+        editor->color_hue = hue;
+    } else {
+        hue = editor->color_hue;
+    }
+    af_editor_add_text(editor, x, 58.0F, "COLOR PICKER", 0.9F, 100.0F,
+                       (AfColor){0.61F, 0.65F, 0.73F, 1.0F}, 100125);
+    af_editor_add_text(editor, x + 106.0F, 59.0F, "SV / HUE / ALPHA", 0.55F, 118.0F,
+                       (AfColor){0.46F, 0.5F, 0.58F, 1.0F}, 100125);
+    for (uint32_t row = 0U; row < 8U; ++row) {
+        for (uint32_t column = 0U; column < 12U; ++column) {
+            const float cell_width = AF_EDITOR_COLOR_SV_WIDTH / 12.0F;
+            const float cell_height = AF_EDITOR_COLOR_SV_HEIGHT / 8.0F;
+            const float cell_saturation = ((float)column + 0.5F) / 12.0F;
+            const float cell_value = 1.0F - ((float)row + 0.5F) / 8.0F;
+            af_editor_add_rect(editor, x + (float)column * cell_width,
+                               AF_EDITOR_COLOR_SV_Y + (float)row * cell_height, cell_width + 0.4F,
+                               cell_height + 0.4F,
+                               af_editor_hsv_color(hue, cell_saturation, cell_value, 1.0F), 100120);
+        }
+    }
+    for (uint32_t row = 0U; row < 12U; ++row) {
+        const float segment_height = AF_EDITOR_COLOR_SV_HEIGHT / 12.0F;
+        af_editor_add_rect(
+            editor, x + AF_EDITOR_COLOR_HUE_X, AF_EDITOR_COLOR_SV_Y + (float)row * segment_height,
+            AF_EDITOR_COLOR_HUE_WIDTH, segment_height + 0.4F,
+            af_editor_hsv_color(((float)row + 0.5F) / 12.0F, 1.0F, 1.0F, 1.0F), 100120);
+    }
+    for (uint32_t column = 0U; column < 12U; ++column) {
+        const float segment_width = (AF_EDITOR_COLOR_HUE_X + AF_EDITOR_COLOR_HUE_WIDTH) / 12.0F;
+        const AfColor checker = (column & 1U) != 0U ? (AfColor){0.18F, 0.19F, 0.22F, 1.0F}
+                                                    : (AfColor){0.38F, 0.4F, 0.44F, 1.0F};
+        AfColor alpha_color = color;
+        alpha_color.a = ((float)column + 0.5F) / 12.0F;
+        af_editor_add_rect(editor, x + (float)column * segment_width, AF_EDITOR_COLOR_ALPHA_Y,
+                           segment_width + 0.4F, AF_EDITOR_COLOR_ALPHA_HEIGHT, checker, 100120);
+        af_editor_add_rect(editor, x + (float)column * segment_width, AF_EDITOR_COLOR_ALPHA_Y,
+                           segment_width + 0.4F, AF_EDITOR_COLOR_ALPHA_HEIGHT, alpha_color, 100125);
+    }
+    {
+        const float marker_x = x + saturation * AF_EDITOR_COLOR_SV_WIDTH;
+        const float marker_y = AF_EDITOR_COLOR_SV_Y + (1.0F - value) * AF_EDITOR_COLOR_SV_HEIGHT;
+        const AfColor marker = value > 0.55F ? (AfColor){0.03F, 0.04F, 0.06F, 1.0F}
+                                             : (AfColor){0.96F, 0.97F, 1.0F, 1.0F};
+        af_editor_add_rect(editor, marker_x - 5.0F, marker_y - 5.0F, 10.0F, 2.0F, marker, 100140);
+        af_editor_add_rect(editor, marker_x - 5.0F, marker_y + 3.0F, 10.0F, 2.0F, marker, 100140);
+        af_editor_add_rect(editor, marker_x - 5.0F, marker_y - 5.0F, 2.0F, 10.0F, marker, 100140);
+        af_editor_add_rect(editor, marker_x + 3.0F, marker_y - 5.0F, 2.0F, 10.0F, marker, 100140);
+    }
+    af_editor_add_rect(editor, x + AF_EDITOR_COLOR_HUE_X - 2.0F,
+                       AF_EDITOR_COLOR_SV_Y + hue * AF_EDITOR_COLOR_SV_HEIGHT - 1.0F,
+                       AF_EDITOR_COLOR_HUE_WIDTH + 4.0F, 3.0F, (AfColor){0.96F, 0.97F, 1.0F, 1.0F},
+                       100140);
+    af_editor_add_rect(editor,
+                       x + color.a * (AF_EDITOR_COLOR_HUE_X + AF_EDITOR_COLOR_HUE_WIDTH) - 1.0F,
+                       AF_EDITOR_COLOR_ALPHA_Y - 2.0F, 3.0F, AF_EDITOR_COLOR_ALPHA_HEIGHT + 4.0F,
+                       (AfColor){0.96F, 0.97F, 1.0F, 1.0F}, 100140);
+    af_editor_add_rect(editor, x + 176.0F, AF_EDITOR_COLOR_SV_Y, 48.0F, 36.0F,
+                       (AfColor){0.16F, 0.17F, 0.2F, 1.0F}, 100120);
+    af_editor_add_rect(editor, x + 180.0F, AF_EDITOR_COLOR_SV_Y + 4.0F, 40.0F, 28.0F, color,
+                       100130);
+    (void)snprintf(first_values, sizeof(first_values), "R%03u G%03u",
+                   (uint32_t)roundf(color.r * 255.0F), (uint32_t)roundf(color.g * 255.0F));
+    (void)snprintf(second_values, sizeof(second_values), "B%03u A%03u",
+                   (uint32_t)roundf(color.b * 255.0F), (uint32_t)roundf(color.a * 255.0F));
+    af_editor_add_text(editor, x + 176.0F, 121.0F, first_values, 0.58F, 56.0F,
+                       (AfColor){0.69F, 0.72F, 0.8F, 1.0F}, 100130);
+    af_editor_add_text(editor, x + 176.0F, 140.0F, second_values, 0.58F, 56.0F,
+                       (AfColor){0.69F, 0.72F, 0.8F, 1.0F}, 100130);
+    af_editor_add_text(editor, x + 176.0F, 173.0F, "DRAG", 0.58F, 48.0F,
+                       (AfColor){0.46F, 0.5F, 0.58F, 1.0F}, 100130);
+}
+
 static void af_editor_render_inspector(AfEditorState *editor, int width) {
-    static const AfColor palette[] = {{0.22F, 0.58F, 0.96F, 1.0F},
-                                      {0.94F, 0.35F, 0.27F, 1.0F},
-                                      {0.32F, 0.86F, 0.54F, 1.0F},
-                                      {0.78F, 0.42F, 0.96F, 1.0F},
-                                      {0.95F, 0.78F, 0.26F, 1.0F}};
     const float x = (float)width - editor->right_width + 18.0F;
     const AfSceneNode *selected = af_scene_find_const(&editor->project.scene, editor->selected_id);
     const char *selected_name = af_project_name(&editor->project, editor->selected_id);
+    char selection_name[64];
     uint32_t index = 0U;
+    if (editor->selected_count > 1U) {
+        (void)snprintf(selection_name, sizeof(selection_name), "%u OBJECTS SELECTED",
+                       editor->selected_count);
+        selected_name = selection_name;
+    }
     af_editor_add_text(editor, x, 15.0F, "INSPECTOR", 1.5F, editor->right_width - 36.0F,
                        (AfColor){0.78F, 0.81F, 0.88F, 1.0F}, 100125);
     af_editor_add_text(editor, x, 35.0F, selected_name == NULL ? "NO SELECTION" : selected_name,
                        1.0F, editor->right_width - 36.0F, (AfColor){0.5F, 0.55F, 0.65F, 1.0F},
                        100125);
-    af_editor_add_text(editor, x, 58.0F, "FILL COLOR", 0.9F, editor->right_width - 36.0F,
-                       (AfColor){0.61F, 0.65F, 0.73F, 1.0F}, 100125);
-    for (index = 0U; index < sizeof(palette) / sizeof(palette[0]); ++index) {
-        af_editor_add_rect(editor, x + (float)index * 34.0F, 76.0F, 26.0F, 26.0F, palette[index],
-                           100120);
-    }
+    af_editor_render_color_picker(editor, x, selected);
     for (index = 0U; index < 4U; ++index) {
-        const float y = 132.0F + (float)index * 48.0F;
+        const float y =
+            AF_EDITOR_INSPECTOR_SCALAR_Y + (float)index * AF_EDITOR_INSPECTOR_SCALAR_STEP;
         char value[64];
         af_editor_add_rect(editor, x, y, 30.0F, 26.0F, (AfColor){0.24F, 0.26F, 0.32F, 1.0F},
                            100120);
@@ -1322,10 +1609,13 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
     }
     if (selected != NULL) {
         const AfStyle *style = af_style_find_node_const(&editor->project.style_data, selected->id);
-        af_editor_add_rect(editor, x, 342.0F, editor->right_width - 36.0F, 12.0F,
+        const AfParticleEmitter *emitter =
+            af_project_find_node_emitter(&editor->project, selected->id);
+        af_editor_add_rect(editor, x, AF_EDITOR_STYLE_BAR_Y, editor->right_width - 36.0F, 12.0F,
                            (AfColor){0.18F, 0.2F, 0.24F, 1.0F}, 100120);
-        af_editor_add_rect(editor, x, 342.0F, (editor->right_width - 36.0F) * selected->opacity,
-                           12.0F, selected->fill, 100130);
+        af_editor_add_rect(editor, x, AF_EDITOR_STYLE_BAR_Y,
+                           (editor->right_width - 36.0F) * selected->opacity, 12.0F, selected->fill,
+                           100130);
         for (index = 0U; index < 6U; ++index) {
             static const char *const style_labels[] = {"ON", "-W", "+W", "FILL", "CAP", "JOIN"};
             static const char *const layout_labels[] = {"ANCH", "WIDTH", "HEIGHT",
@@ -1335,21 +1625,56 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
                                   (index == 3U && style->fill.type != AF_PAINT_SOLID))) {
                 button = (AfColor){0.22F, 0.58F, 0.96F, 1.0F};
             }
-            af_editor_add_rect(editor, x + (float)index * 38.0F, 370.0F, 32.0F, 28.0F, button,
-                               100120);
-            af_editor_add_rect(editor, x + (float)index * 38.0F, 406.0F, 32.0F, 28.0F,
-                               (AfColor){0.28F, 0.3F, 0.37F, 1.0F}, 100120);
-            af_editor_add_text(editor, x + (float)index * 38.0F + 4.0F, 379.0F, style_labels[index],
-                               0.65F, 26.0F, (AfColor){0.82F, 0.84F, 0.9F, 1.0F}, 100135);
-            af_editor_add_text(editor, x + (float)index * 38.0F + 3.0F, 415.0F,
-                               layout_labels[index], 0.58F, 27.0F,
+            af_editor_add_rect(editor, x + (float)index * 38.0F, AF_EDITOR_STYLE_ROW_Y, 32.0F,
+                               28.0F, button, 100120);
+            af_editor_add_rect(editor, x + (float)index * 38.0F, AF_EDITOR_LAYOUT_ROW_Y, 32.0F,
+                               28.0F, (AfColor){0.28F, 0.3F, 0.37F, 1.0F}, 100120);
+            af_editor_add_text(editor, x + (float)index * 38.0F + 4.0F,
+                               AF_EDITOR_STYLE_ROW_Y + 9.0F, style_labels[index], 0.65F, 26.0F,
+                               (AfColor){0.82F, 0.84F, 0.9F, 1.0F}, 100135);
+            af_editor_add_text(editor, x + (float)index * 38.0F + 3.0F,
+                               AF_EDITOR_LAYOUT_ROW_Y + 9.0F, layout_labels[index], 0.58F, 27.0F,
                                (AfColor){0.82F, 0.84F, 0.9F, 1.0F}, 100135);
         }
-        af_editor_add_text(editor, x, 357.0F, "STYLE", 0.8F, 48.0F,
+        af_editor_add_text(editor, x, AF_EDITOR_STYLE_LABEL_Y, "STYLE", 0.8F, 48.0F,
                            (AfColor){0.55F, 0.59F, 0.68F, 1.0F}, 100125);
-        af_editor_add_text(editor, x + 62.0F, 357.0F, "LAYOUT CONTROLS BELOW", 0.55F,
-                           editor->right_width - 98.0F, (AfColor){0.45F, 0.49F, 0.58F, 1.0F},
+        af_editor_add_text(editor, x + 62.0F, AF_EDITOR_STYLE_LABEL_Y, "LAYOUT CONTROLS BELOW",
+                           0.55F, editor->right_width - 98.0F, (AfColor){0.45F, 0.49F, 0.58F, 1.0F},
                            100125);
+        af_editor_add_text(editor, x, AF_EDITOR_PARTICLE_LABEL_Y, "PARTICLE EMITTER", 0.85F,
+                           editor->right_width - 36.0F,
+                           emitter == NULL ? (AfColor){0.45F, 0.49F, 0.58F, 1.0F}
+                                           : (AfColor){0.45F, 0.78F, 1.0F, 1.0F},
+                           100125);
+        if (emitter == NULL) {
+            af_editor_add_text(editor, x, AF_EDITOR_PARTICLE_LABEL_Y + 21.0F,
+                               "RIGHT CLICK > TOGGLE PARTICLES", 0.62F, editor->right_width - 36.0F,
+                               (AfColor){0.52F, 0.56F, 0.64F, 1.0F}, 100125);
+        } else {
+            static const char *const type_names[] = {"POINT", "LINE", "RECT", "CIRCLE", "PATH"};
+            char labels[4][64];
+            (void)snprintf(labels[0], sizeof(labels[0]), "RATE %.0f / S",
+                           (double)emitter->spawn_rate);
+            (void)snprintf(labels[1], sizeof(labels[1]), "LIFE %.2f - %.2f",
+                           (double)emitter->lifetime_min, (double)emitter->lifetime_max);
+            (void)snprintf(labels[2], sizeof(labels[2]), "CAPACITY %u", emitter->capacity);
+            (void)snprintf(labels[3], sizeof(labels[3]), "SHAPE %s", type_names[emitter->type]);
+            for (uint32_t row = 0U; row < 4U; ++row) {
+                const float row_y =
+                    AF_EDITOR_PARTICLE_ROW_Y + (float)row * AF_EDITOR_PARTICLE_ROW_STEP;
+                af_editor_add_rect(editor, x, row_y, 28.0F, 24.0F,
+                                   (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
+                af_editor_add_rect(editor, x + 34.0F, row_y, 28.0F, 24.0F,
+                                   (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
+                af_editor_add_text(editor, x + 9.0F, row_y + 6.0F, "-", 0.8F, 10.0F,
+                                   (AfColor){0.85F, 0.87F, 0.92F, 1.0F}, 100135);
+                af_editor_add_text(editor, x + 42.0F, row_y + 6.0F, "+", 0.8F, 12.0F,
+                                   (AfColor){0.85F, 0.87F, 0.92F, 1.0F}, 100135);
+                af_editor_add_text(editor, x + 72.0F, row_y + 7.0F, labels[row], 0.72F,
+                                   editor->right_width - 108.0F,
+                                   (AfColor){0.7F, 0.74F, 0.82F, 1.0F}, 100130);
+            }
+        }
     }
 }
 
@@ -1529,41 +1854,543 @@ static void af_editor_render_context_menu(AfEditorState *editor, int width, int 
     }
 }
 
-static void af_editor_render_gizmo(AfEditorState *editor, AfAffine2 camera) {
-    const AfSceneNode *selected = af_scene_find_const(&editor->preview_scene, editor->selected_id);
-    AfAffine2 world = {0};
-    AfVec2 origin = {0};
+static bool af_editor_point_in_rect(AfVec2 point, float x, float y, float width, float height) {
+    return point.x >= x && point.x < x + width && point.y >= y && point.y < y + height;
+}
+
+static AfEditorTooltip af_editor_context_tooltip(const char *label, uint64_t id) {
+    AfEditorTooltip tooltip = {.id = id,
+                               .title = label,
+                               .summary = "Run this context action.",
+                               .details = "The action applies to the current editor context.",
+                               .shortcut = "Right click opens context actions"};
+    if (strstr(label, "DUPLICATE") != NULL) {
+        tooltip.summary = "Create an independent copy of the selection.";
+        tooltip.details = "Copies the object or selected keyframes and assigns stable new IDs.";
+        tooltip.shortcut = "Shortcut: Ctrl+D";
+    } else if (strstr(label, "RENAME") != NULL) {
+        tooltip.summary = "Rename the selected scene object.";
+        tooltip.details = "Starts inline name editing; Enter confirms and Escape cancels.";
+        tooltip.shortcut = "Shortcut: F2";
+    } else if (strstr(label, "DELETE") != NULL) {
+        tooltip.summary = "Delete the selected item safely.";
+        tooltip.details = "Deletes the current object or selected keys through undo history.";
+        tooltip.shortcut = "Shortcut: Delete";
+    } else if (strstr(label, "PARTICLES") != NULL) {
+        tooltip.summary = "Attach or remove a GPU particle emitter.";
+        tooltip.details = "Uses this object's shape as the emitter source with bounded GPU memory.";
+        tooltip.shortcut = "Edit emitter values in the Inspector";
+    } else if (strstr(label, "ADD KEYFRAME") != NULL) {
+        tooltip.summary = "Key the selected property at the playhead.";
+        tooltip.details =
+            "Creates a key on the active clip and property track at the current time.";
+        tooltip.shortcut = "Shortcut: K";
+    } else if (strstr(label, "KEYFRAME") != NULL) {
+        tooltip.summary = "Edit the currently selected animation keys.";
+        tooltip.details = "The operation is bounded, undoable, and keeps stable keyframe IDs.";
+        tooltip.shortcut = "Ctrl+C / Ctrl+V / Delete";
+    } else if (strstr(label, "ADD RECTANGLE") != NULL || strstr(label, "RECT CHILD") != NULL) {
+        tooltip.summary = "Create a new rectangle object.";
+        tooltip.details = "Adds an editable rectangle at the canvas center or under this group.";
+        tooltip.shortcut = "Shortcut: 1";
+    } else if (strstr(label, "ADD ROUNDED") != NULL) {
+        tooltip.summary = "Create a rounded rectangle object.";
+        tooltip.details = "Adds a rectangle with an editable corner radius at the canvas center.";
+        tooltip.shortcut = "Shortcut: 2";
+    } else if (strstr(label, "ADD ELLIPSE") != NULL) {
+        tooltip.summary = "Create a new ellipse object.";
+        tooltip.details =
+            "Adds an editable ellipse at the canvas center; equal bounds make a circle.";
+        tooltip.shortcut = "Shortcut: 3";
+    } else if (strstr(label, "ADD PATH") != NULL) {
+        tooltip.summary = "Create a new vector path.";
+        tooltip.details =
+            "Adds an editable Bézier path with direct point and control-handle editing.";
+        tooltip.shortcut = "Shortcut: 4";
+    } else if (strstr(label, "GRID") != NULL) {
+        tooltip.summary = "Show or hide the canvas grid.";
+        tooltip.details = "The grid is a visual guide and is not included in runtime packages.";
+        tooltip.shortcut = "Shortcut: G";
+    } else if (strstr(label, "SNAP") != NULL) {
+        tooltip.summary = "Toggle position and timeline snapping.";
+        tooltip.details = "Rounds object moves and timeline edits to the active grid increments.";
+        tooltip.shortcut = "Shortcut: N";
+    } else if (strstr(label, "SAVE") != NULL) {
+        tooltip.summary = "Save the editable Arcflow project.";
+        tooltip.details =
+            "Writes scene, animation, style, layout, path, and particle authoring data.";
+        tooltip.shortcut = "Shortcut: Ctrl+S";
+    } else if (strstr(label, "COMPILE") != NULL) {
+        tooltip.summary = "Compile the project into a runtime package.";
+        tooltip.details = "Validates authoring data and writes the bounded package used by Player.";
+        tooltip.shortcut = "Shortcut: F5";
+    } else if (strstr(label, "UNDO") != NULL) {
+        tooltip.summary = "Undo the most recent editor command.";
+        tooltip.details = "Restores the previous bounded command snapshot without changing IDs.";
+        tooltip.shortcut = "Shortcut: Ctrl+Z";
+    } else if (strstr(label, "REDO") != NULL) {
+        tooltip.summary = "Redo the most recently undone command.";
+        tooltip.details = "Reapplies the command at the current history position.";
+        tooltip.shortcut = "Shortcut: Ctrl+Y";
+    } else if (strstr(label, "FORWARD") != NULL || strstr(label, "BACKWARD") != NULL) {
+        tooltip.summary = "Change the object's drawing order.";
+        tooltip.details = "Moves the object one layer while preserving its scene hierarchy.";
+        tooltip.shortcut = "Shortcuts: [ and ]";
+    } else if (strstr(label, "UNPARENT") != NULL) {
+        tooltip.summary = "Move the object out of its parent group.";
+        tooltip.details = "Reparents to the scene root while rejecting cyclic hierarchies.";
+        tooltip.shortcut = "Shortcut: U";
+    } else if (strstr(label, "CURVE") != NULL) {
+        tooltip.summary = "Show or hide the animation curve editor.";
+        tooltip.details = "Displays easing curves and tangent handles for selected cubic keys.";
+        tooltip.shortcut = "Shortcut: F6";
+    } else if (strstr(label, "CLIP") != NULL) {
+        tooltip.summary = "Create or manage an animation clip.";
+        tooltip.details = "Clips contain bounded tracks, keys, duration, looping, and events.";
+        tooltip.shortcut = "New clip: Alt+C";
+    } else if (strstr(label, "RESET") != NULL) {
+        tooltip.summary = "Restore default values for this section.";
+        tooltip.details = "Creates one undoable command for the selected object's values.";
+        tooltip.shortcut = "Undo available with Ctrl+Z";
+    } else if (strstr(label, "PATH") != NULL || strstr(label, "POINTS") != NULL ||
+               strstr(label, "CONTOUR") != NULL || strstr(label, "FILL RULE") != NULL) {
+        tooltip.summary = "Modify this vector path.";
+        tooltip.details = "Edits bounded path commands while invalidating only affected geometry.";
+        tooltip.shortcut = "Path shortcuts: I, C, O, F, Shift+R";
+    }
+    return tooltip;
+}
+
+static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, int height) {
+    const AfVec2 mouse = editor->mouse_position;
+    const float panel_x = (float)width - editor->right_width + 18.0F;
+    const float timeline_top = af_editor_timeline_top(editor, height);
+    const float center_right = (float)width - editor->right_width;
+    AfEditorTooltip tooltip = {0};
+    if (editor->drag_mode != AF_EDITOR_DRAG_NONE || editor->rename_active) {
+        return tooltip;
+    }
+    if (editor->context_menu != AF_EDITOR_CONTEXT_NONE) {
+        const AfEditorContextMenuInfo *info = af_editor_context_info(editor->context_menu);
+        const AfVec2 origin = af_editor_context_origin(editor, width, height);
+        const float first_y = origin.y + AF_EDITOR_CONTEXT_HEADER_HEIGHT + 4.0F;
+        if (info != NULL && mouse.x >= origin.x && mouse.x < origin.x + AF_EDITOR_CONTEXT_WIDTH &&
+            mouse.y >= first_y) {
+            const uint32_t item = (uint32_t)((mouse.y - first_y) / AF_EDITOR_CONTEXT_ITEM_HEIGHT);
+            if (item < info->item_count) {
+                return af_editor_context_tooltip(info->items[item],
+                                                 UINT64_C(0x10000) +
+                                                     (uint64_t)editor->context_menu * 16U + item);
+            }
+        }
+        return tooltip;
+    }
+    if (fabsf(mouse.x - editor->left_width) <= 5.0F) {
+        return (AfEditorTooltip){.id = 1U,
+                                 .title = "Resize Scene Hierarchy",
+                                 .summary = "Drag to change the left panel width.",
+                                 .details =
+                                     "The canvas and timeline resize around the docked panel.",
+                                 .shortcut = "Drag the vertical divider"};
+    }
+    if (fabsf(mouse.x - center_right) <= 5.0F) {
+        return (AfEditorTooltip){.id = 2U,
+                                 .title = "Resize Inspector",
+                                 .summary = "Drag to change the right panel width.",
+                                 .details =
+                                     "Inspector text and controls adapt to the available width.",
+                                 .shortcut = "Drag the vertical divider"};
+    }
+    if (fabsf(mouse.y - timeline_top) <= 5.0F && mouse.x >= editor->left_width &&
+        mouse.x < center_right) {
+        return (AfEditorTooltip){.id = 3U,
+                                 .title = "Resize Timeline",
+                                 .summary = "Drag to change the timeline height.",
+                                 .details =
+                                     "Expands the dope sheet or curve editor without hiding docks.",
+                                 .shortcut = "Drag the horizontal divider"};
+    }
+    if (mouse.y < AF_EDITOR_TOOLBAR_HEIGHT && mouse.x >= editor->left_width) {
+        const float local_x = mouse.x - editor->left_width - 14.0F;
+        static const AfEditorTooltip tools[] = {
+            {.id = 10U,
+             .title = "Rectangle Tool",
+             .summary = "Create a rectangle at the canvas center.",
+             .details = "The new object is selected immediately and every edit is undoable.",
+             .shortcut = "Shortcut: 1"},
+            {.id = 11U,
+             .title = "Rounded Rectangle Tool",
+             .summary = "Create a rectangle with rounded corners.",
+             .details = "Change its radius later with the Inspector or object context menu.",
+             .shortcut = "Shortcut: 2"},
+            {.id = 12U,
+             .title = "Ellipse Tool",
+             .summary = "Create an ellipse at the canvas center.",
+             .details = "Use equal width and height for a circle; its fill remains editable.",
+             .shortcut = "Shortcut: 3"},
+            {.id = 13U,
+             .title = "Vector Path Tool",
+             .summary = "Create an editable Bézier path.",
+             .details = "Select it to edit anchors and controls or use its object context menu.",
+             .shortcut = "Shortcut: 4"},
+            {.id = 14U,
+             .title = "Canvas Grid",
+             .summary = "Show or hide the canvas grid.",
+             .details = "The guide follows canvas zoom and is excluded from exported packages.",
+             .shortcut = "Shortcut: G"},
+            {.id = 15U,
+             .title = "Snapping",
+             .summary = "Enable or disable editing snap increments.",
+             .details = "Affects object movement and timeline edits for predictable alignment.",
+             .shortcut = "Shortcut: N"}};
+        if (local_x >= 0.0F && local_x < 34.0F) {
+            return tools[0];
+        }
+        if (local_x >= 42.0F && local_x < 76.0F) {
+            return tools[1];
+        }
+        if (local_x >= 84.0F && local_x < 118.0F) {
+            return tools[2];
+        }
+        if (local_x >= 126.0F && local_x < 160.0F) {
+            return tools[3];
+        }
+        if (local_x >= 172.0F && local_x < 260.0F) {
+            return mouse.y < 22.0F ? tools[4] : tools[5];
+        }
+        return tooltip;
+    }
+    if (mouse.x >= center_right) {
+        if (af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_COLOR_SV_Y, AF_EDITOR_COLOR_SV_WIDTH,
+                                    AF_EDITOR_COLOR_SV_HEIGHT)) {
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x20000),
+                .title = "Saturation / Value",
+                .summary = "Drag to choose color intensity and brightness.",
+                .details =
+                    "Horizontal movement changes saturation; vertical movement changes value.",
+                .shortcut = "One drag creates one undoable fill edit"};
+        }
+        if (af_editor_point_in_rect(mouse, panel_x + AF_EDITOR_COLOR_HUE_X, AF_EDITOR_COLOR_SV_Y,
+                                    AF_EDITOR_COLOR_HUE_WIDTH, AF_EDITOR_COLOR_SV_HEIGHT)) {
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x20001),
+                .title = "Hue",
+                .summary = "Drag to choose the base color family.",
+                .details = "Hue is preserved while saturation, value, and alpha stay unchanged.",
+                .shortcut = "Drag the vertical rainbow strip"};
+        }
+        if (af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_COLOR_ALPHA_Y,
+                                    AF_EDITOR_COLOR_HUE_X + AF_EDITOR_COLOR_HUE_WIDTH,
+                                    AF_EDITOR_COLOR_ALPHA_HEIGHT)) {
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x20002),
+                .title = "Fill Alpha",
+                .summary = "Drag to set color transparency.",
+                .details = "Alpha changes the fill color while object opacity remains independent.",
+                .shortcut = "Left is transparent; right is opaque"};
+        }
+        for (uint32_t row = 0U; row < 4U; ++row) {
+            const float row_y =
+                AF_EDITOR_INSPECTOR_SCALAR_Y + (float)row * AF_EDITOR_INSPECTOR_SCALAR_STEP;
+            static const char *const titles[] = {"Opacity", "Corner Radius", "Layer Order",
+                                                 "Rotation"};
+            static const char *const summaries[] = {
+                "Decrease or increase object opacity.", "Decrease or increase corner rounding.",
+                "Move the object backward or forward.", "Rotate the object in small increments."};
+            static const char *const details[] = {
+                "Opacity is clamped from fully transparent to fully visible.",
+                "Radius is bounded by the selected shape and remains animatable.",
+                "Layer order changes drawing order without changing the parent hierarchy.",
+                "Rotation edits merge while repeated and can be animated on the timeline."};
+            static const char *const shortcuts[] = {"Value range: 0% to 100%",
+                                                    "Inspector or object context menu",
+                                                    "Shortcuts: [ and ]", "Shortcuts: Q and E"};
+            if (af_editor_point_in_rect(mouse, panel_x, row_y, 70.0F, 26.0F)) {
+                return (AfEditorTooltip){.id = UINT64_C(0x21000) + row,
+                                         .title = titles[row],
+                                         .summary = summaries[row],
+                                         .details = details[row],
+                                         .shortcut = shortcuts[row]};
+            }
+        }
+        if (mouse.y >= AF_EDITOR_STYLE_ROW_Y && mouse.y < AF_EDITOR_STYLE_ROW_Y + 28.0F &&
+            mouse.x >= panel_x) {
+            const uint32_t item = (uint32_t)((mouse.x - panel_x) / 38.0F);
+            static const char *const titles[] = {"Stroke",    "Stroke Width -", "Stroke Width +",
+                                                 "Fill Mode", "Line Cap",       "Line Join"};
+            static const char *const summaries[] = {
+                "Toggle the vector stroke.",       "Make the stroke thinner.",
+                "Make the stroke thicker.",        "Cycle the fill paint mode.",
+                "Cycle the stroke end-cap style.", "Cycle the stroke corner-join style."};
+            if (item < 6U) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x22000) + item,
+                    .title = titles[item],
+                    .summary = summaries[item],
+                    .details = "Applies to the selected vector style and is undoable.",
+                    .shortcut = "Style data is compiled into the runtime package"};
+            }
+        }
+        if (mouse.y >= AF_EDITOR_LAYOUT_ROW_Y && mouse.y < AF_EDITOR_LAYOUT_ROW_Y + 28.0F &&
+            mouse.x >= panel_x) {
+            const uint32_t item = (uint32_t)((mouse.x - panel_x) / 38.0F);
+            static const char *const titles[] = {"Anchors",         "Width Sizing",
+                                                 "Height Sizing",   "Flow Direction",
+                                                 "Child Alignment", "Aspect Constraint"};
+            static const char *const summaries[] = {"Cycle responsive anchor presets.",
+                                                    "Cycle fixed, percent, and content width.",
+                                                    "Cycle fixed, percent, and content height.",
+                                                    "Cycle free, row, and column flow.",
+                                                    "Cycle how child objects align.",
+                                                    "Cycle aspect-ratio constraints."};
+            if (item < 6U) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x23000) + item,
+                    .title = titles[item],
+                    .summary = summaries[item],
+                    .details = "Responsive layout is evaluated against the current canvas.",
+                    .shortcut = "Click repeatedly to cycle available modes"};
+            }
+        }
+        if (mouse.y >= AF_EDITOR_PARTICLE_ROW_Y &&
+            mouse.y < AF_EDITOR_PARTICLE_ROW_Y + 4.0F * AF_EDITOR_PARTICLE_ROW_STEP &&
+            mouse.x >= panel_x && mouse.x < panel_x + 65.0F) {
+            const uint32_t row =
+                (uint32_t)((mouse.y - AF_EDITOR_PARTICLE_ROW_Y) / AF_EDITOR_PARTICLE_ROW_STEP);
+            static const char *const titles[] = {"Particle Spawn Rate", "Particle Lifetime",
+                                                 "Particle Capacity", "Emitter Shape"};
+            static const char *const summaries[] = {
+                "Change particles emitted per second.", "Change the particle lifetime range.",
+                "Change this emitter's bounded GPU capacity.", "Cycle the particle source shape."};
+            static const char *const details[] = {
+                "Spawn uses a fixed-step accumulator and deterministic per-emitter random seed.",
+                "Color, size, position, velocity, and rotation evolve over this lifetime.",
+                "Total project capacity cannot exceed the fixed runtime GPU particle pool.",
+                "Sources include point, line, rectangle, circle, and vector path."};
+            if (row < 4U) {
+                return (AfEditorTooltip){.id = UINT64_C(0x24000) + row,
+                                         .title = titles[row],
+                                         .summary = summaries[row],
+                                         .details = details[row],
+                                         .shortcut = "Use - and + to change the value"};
+            }
+        }
+        return (AfEditorTooltip){
+            .id = UINT64_C(0x25000),
+            .title = "Inspector",
+            .summary = "Edit the selected object's properties.",
+            .details = "Right click for reset, ordering, duplication, and delete actions.",
+            .shortcut = "Changes are stored in bounded undo history"};
+    }
+    if (mouse.y >= timeline_top) {
+        const float local_x = mouse.x - editor->left_width;
+        if (mouse.y < timeline_top + 40.0F) {
+            if (local_x >= 10.0F && local_x < 36.0F) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x30000),
+                    .title = "Play / Pause",
+                    .summary = "Preview the active animation clip.",
+                    .details = "Playback advances the playhead and respects the clip loop region.",
+                    .shortcut = "Shortcut: Space"};
+            }
+            if (local_x >= 42.0F && local_x < 68.0F) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x30001),
+                    .title = "Stop",
+                    .summary = "Stop preview and return to time zero.",
+                    .details =
+                        "The scene updates immediately to the first evaluated animation frame.",
+                    .shortcut = "Shortcut: Home moves the playhead to zero"};
+            }
+            if (local_x >= 73.0F && local_x < 107.0F) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x30002),
+                    .title = "Curve Editor",
+                    .summary = "Toggle curve and dope-sheet views.",
+                    .details = "Curve view exposes cubic Bézier tangent handles for selected keys.",
+                    .shortcut = "Shortcut: F6"};
+            }
+            if (local_x >= 116.0F && local_x < 236.0F) {
+                const uint32_t property = (uint32_t)((local_x - 116.0F) / 20.0F);
+                static const char *const titles[] = {"Position Track", "Rotation Track",
+                                                     "Scale Track",    "Opacity Track",
+                                                     "Fill Track",     "Corner Radius Track"};
+                if (property < 6U) {
+                    return (AfEditorTooltip){
+                        .id = UINT64_C(0x30100) + property,
+                        .title = titles[property],
+                        .summary = "Choose the property used by new keyframes.",
+                        .details =
+                            "The active object, clip, and property identify the animation track.",
+                        .shortcut = "Shortcut: K adds a key at the playhead"};
+                }
+            }
+            for (uint32_t index = 0U; index < editor->project.clip_count && index < 8U; ++index) {
+                const float x = center_right - 74.0F * (float)(index + 1U);
+                if (mouse.x >= x && mouse.x < x + 68.0F) {
+                    return (AfEditorTooltip){
+                        .id = UINT64_C(0x30200) + index,
+                        .title = editor->project.clips[index].name,
+                        .summary = "Select this animation clip.",
+                        .details =
+                            "Switches the visible tracks and returns its playhead to time zero.",
+                        .shortcut = "New clip: Alt+C"};
+                }
+            }
+        }
+        if (mouse.y < timeline_top + AF_EDITOR_TIMELINE_RULER_HEIGHT) {
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x30300),
+                .title = "Timeline Ruler",
+                .summary = "Click or drag to scrub the playhead.",
+                .details = "Drag green loop handles to set the bounded playback region.",
+                .shortcut = "Wheel zooms; Shift+wheel pans"};
+        }
+        return (AfEditorTooltip){
+            .id = UINT64_C(0x30400),
+            .title = editor->curve_visible ? "Animation Curves" : "Dope Sheet",
+            .summary = editor->curve_visible ? "Edit easing curves and tangent handles."
+                                             : "Select, box-select, and move keyframes.",
+            .details = editor->curve_visible
+                           ? "Cubic keys expose bounded in and out tangent controls."
+                           : "Ctrl toggles key selection; drag moves keys with optional snapping.",
+            .shortcut = "Right click for keyframe actions"};
+    }
+    if (mouse.x < editor->left_width && mouse.y >= AF_EDITOR_TOOLBAR_HEIGHT + 8.0F) {
+        const uint32_t row =
+            (uint32_t)((mouse.y - AF_EDITOR_TOOLBAR_HEIGHT - 8.0F) / AF_EDITOR_ROW_HEIGHT);
+        const uint32_t hierarchy_index = editor->hierarchy_scroll + row;
+        if (hierarchy_index < editor->hierarchy_count) {
+            const uint32_t node_index = editor->hierarchy_order[hierarchy_index];
+            const AfSceneNode *node = &editor->project.scene.nodes[node_index];
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x4000000000000000) | node->id,
+                .title = editor->project.names[node_index],
+                .summary = "Select this object in the scene hierarchy.",
+                .details = "Shift-click a group to reparent; right click for object actions.",
+                .shortcut = "F2 rename / Ctrl+D duplicate / Delete"};
+        }
+        return tooltip;
+    }
+    return tooltip;
+}
+
+static void af_editor_render_tooltip(AfEditorState *editor, int width, int height) {
+    const AfEditorTooltip tooltip = af_editor_find_tooltip(editor, width, height);
+    const uint64_t ticks = SDL_GetTicksNS();
+    const bool detailed = editor->tooltip_smoke || (SDL_GetModState() & SDL_KMOD_ALT) != 0U;
+    const float popup_width = detailed ? AF_EDITOR_TOOLTIP_DETAIL_WIDTH : AF_EDITOR_TOOLTIP_WIDTH;
+    const float popup_height = detailed ? 142.0F : 78.0F;
+    float x = editor->mouse_position.x + 16.0F;
+    float y = editor->mouse_position.y + 18.0F;
+    if (tooltip.id == 0U || tooltip.title == NULL) {
+        editor->hovered_tooltip_id = 0U;
+        return;
+    }
+    if (editor->hovered_tooltip_id != tooltip.id) {
+        editor->hovered_tooltip_id = tooltip.id;
+        editor->tooltip_started_ticks = ticks;
+        if (!detailed) {
+            return;
+        }
+    }
+    if (!detailed && ticks - editor->tooltip_started_ticks < AF_EDITOR_TOOLTIP_DELAY_NS) {
+        return;
+    }
+    x = af_editor_clamp(x, 8.0F, (float)width - popup_width - 8.0F);
+    y = af_editor_clamp(y, 8.0F, (float)height - popup_height - 8.0F);
+    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
+                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 5.0F, .ty = y + 6.0F},
+                        (AfVec2){popup_width, popup_height}, (AfColor){0.0F, 0.0F, 0.0F, 0.5F},
+                        8.0F, 300000);
+    af_editor_add_shape(
+        editor, AF_NODE_ROUNDED_RECTANGLE, (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = y},
+        (AfVec2){popup_width, popup_height}, (AfColor){0.085F, 0.095F, 0.12F, 0.99F}, 8.0F, 300010);
+    af_editor_add_rect(editor, x, y, 4.0F, popup_height,
+                       detailed ? (AfColor){0.72F, 0.46F, 1.0F, 1.0F}
+                                : (AfColor){0.28F, 0.68F, 1.0F, 1.0F},
+                       300020);
+    af_editor_add_text(editor, x + 14.0F, y + 12.0F, tooltip.title, 1.25F, popup_width - 28.0F,
+                       (AfColor){0.92F, 0.94F, 0.98F, 1.0F}, 300030);
+    af_editor_add_text(editor, x + 14.0F, y + 34.0F, tooltip.summary, 0.82F, popup_width - 28.0F,
+                       (AfColor){0.7F, 0.75F, 0.84F, 1.0F}, 300030);
+    if (detailed) {
+        af_editor_add_rect(editor, x + 14.0F, y + 57.0F, popup_width - 28.0F, 1.0F,
+                           (AfColor){0.25F, 0.28F, 0.35F, 1.0F}, 300025);
+        af_editor_add_text(editor, x + 14.0F, y + 67.0F, "MORE DETAILS", 0.7F, popup_width - 28.0F,
+                           (AfColor){0.72F, 0.54F, 0.98F, 1.0F}, 300030);
+        af_editor_add_text(editor, x + 14.0F, y + 87.0F, tooltip.details, 0.78F,
+                           popup_width - 28.0F, (AfColor){0.76F, 0.8F, 0.87F, 1.0F}, 300030);
+        af_editor_add_text(editor, x + 14.0F, y + 114.0F, tooltip.shortcut, 0.75F,
+                           popup_width - 28.0F, (AfColor){0.42F, 0.76F, 1.0F, 1.0F}, 300030);
+    } else {
+        af_editor_add_text(editor, x + 14.0F, y + 58.0F, "HOLD ALT FOR MORE DETAILS", 0.62F,
+                           popup_width - 28.0F, (AfColor){0.48F, 0.66F, 0.9F, 1.0F}, 300030);
+    }
+}
+
+static bool af_editor_screen_bounds(const AfSceneNode *node, AfAffine2 camera, float *minimum_x,
+                                    float *minimum_y, float *maximum_x, float *maximum_y) {
+    AfAffine2 world;
     AfVec2 corners[4] = {0};
+    if (node == NULL || node->type == AF_NODE_GROUP || !node->world_visible ||
+        node->bounds.x <= 0.0F || node->bounds.y <= 0.0F) {
+        return false;
+    }
+    world = af_affine_multiply(camera, node->world_transform);
+    corners[0] = af_affine_transform_point(world, (AfVec2){0.0F, 0.0F});
+    corners[1] = af_affine_transform_point(world, (AfVec2){node->bounds.x, 0.0F});
+    corners[2] = af_affine_transform_point(world, node->bounds);
+    corners[3] = af_affine_transform_point(world, (AfVec2){0.0F, node->bounds.y});
+    *minimum_x = *maximum_x = corners[0].x;
+    *minimum_y = *maximum_y = corners[0].y;
+    for (uint32_t index = 1U; index < 4U; ++index) {
+        *minimum_x = fminf(*minimum_x, corners[index].x);
+        *minimum_y = fminf(*minimum_y, corners[index].y);
+        *maximum_x = fmaxf(*maximum_x, corners[index].x);
+        *maximum_y = fmaxf(*maximum_y, corners[index].y);
+    }
+    return true;
+}
+
+static void af_editor_render_outline(AfEditorState *editor, const AfSceneNode *node,
+                                     AfAffine2 camera, AfColor color, int32_t layer) {
     float minimum_x = 0.0F;
     float minimum_y = 0.0F;
     float maximum_x = 0.0F;
     float maximum_y = 0.0F;
-    uint32_t index = 0U;
+    if (!af_editor_screen_bounds(node, camera, &minimum_x, &minimum_y, &maximum_x, &maximum_y)) {
+        return;
+    }
+    af_editor_add_rect(editor, minimum_x - 2.0F, minimum_y - 2.0F, maximum_x - minimum_x + 4.0F,
+                       2.0F, color, layer);
+    af_editor_add_rect(editor, minimum_x - 2.0F, maximum_y, maximum_x - minimum_x + 4.0F, 2.0F,
+                       color, layer);
+    af_editor_add_rect(editor, minimum_x - 2.0F, minimum_y, 2.0F, maximum_y - minimum_y, color,
+                       layer);
+    af_editor_add_rect(editor, maximum_x, minimum_y, 2.0F, maximum_y - minimum_y, color, layer);
+}
+
+static void af_editor_render_selection_outlines(AfEditorState *editor, AfAffine2 camera) {
+    for (uint32_t index = 0U; index < editor->selected_count; ++index) {
+        const uint64_t id = editor->selected_ids[index];
+        if (id != editor->selected_id) {
+            af_editor_render_outline(editor, af_scene_find_const(&editor->preview_scene, id),
+                                     camera, (AfColor){0.25F, 0.72F, 1.0F, 0.95F}, 89990);
+        }
+    }
+}
+
+static void af_editor_render_gizmo(AfEditorState *editor, AfAffine2 camera) {
+    const AfSceneNode *selected = af_scene_find_const(&editor->preview_scene, editor->selected_id);
+    AfVec2 origin;
     if (selected == NULL || selected->type == AF_NODE_GROUP) {
         return;
     }
-    world = af_affine_multiply(camera, selected->world_transform);
-    corners[0] = af_affine_transform_point(world, (AfVec2){0.0F, 0.0F});
-    corners[1] = af_affine_transform_point(world, (AfVec2){selected->bounds.x, 0.0F});
-    corners[2] = af_affine_transform_point(world, selected->bounds);
-    corners[3] = af_affine_transform_point(world, (AfVec2){0.0F, selected->bounds.y});
-    minimum_x = maximum_x = corners[0].x;
-    minimum_y = maximum_y = corners[0].y;
-    for (index = 1U; index < 4U; ++index) {
-        minimum_x = fminf(minimum_x, corners[index].x);
-        minimum_y = fminf(minimum_y, corners[index].y);
-        maximum_x = fmaxf(maximum_x, corners[index].x);
-        maximum_y = fmaxf(maximum_y, corners[index].y);
-    }
-    af_editor_add_rect(editor, minimum_x - 2.0F, minimum_y - 2.0F, maximum_x - minimum_x + 4.0F,
-                       2.0F, (AfColor){0.98F, 0.8F, 0.22F, 1.0F}, 90000);
-    af_editor_add_rect(editor, minimum_x - 2.0F, maximum_y, maximum_x - minimum_x + 4.0F, 2.0F,
-                       (AfColor){0.98F, 0.8F, 0.22F, 1.0F}, 90000);
-    af_editor_add_rect(editor, minimum_x - 2.0F, minimum_y, 2.0F, maximum_y - minimum_y,
-                       (AfColor){0.98F, 0.8F, 0.22F, 1.0F}, 90000);
-    af_editor_add_rect(editor, maximum_x, minimum_y, 2.0F, maximum_y - minimum_y,
-                       (AfColor){0.98F, 0.8F, 0.22F, 1.0F}, 90000);
-    origin = corners[0];
+    af_editor_render_outline(editor, selected, camera, (AfColor){0.98F, 0.8F, 0.22F, 1.0F}, 90000);
+    origin = af_affine_transform_point(af_affine_multiply(camera, selected->world_transform),
+                                       (AfVec2){0});
     af_editor_add_rect(editor, origin.x, origin.y - 2.0F, 58.0F, 4.0F,
                        (AfColor){0.96F, 0.25F, 0.28F, 1.0F}, 90010);
     af_editor_add_rect(editor, origin.x - 2.0F, origin.y, 4.0F, 58.0F,
@@ -1572,6 +2399,25 @@ static void af_editor_render_gizmo(AfEditorState *editor, AfAffine2 camera) {
                        (AfColor){0.96F, 0.25F, 0.28F, 1.0F}, 90020);
     af_editor_add_rect(editor, origin.x - 6.0F, origin.y + 50.0F, 12.0F, 12.0F,
                        (AfColor){0.28F, 0.86F, 0.38F, 1.0F}, 90020);
+}
+
+static void af_editor_render_canvas_box(AfEditorState *editor) {
+    const float minimum_x = fminf(editor->canvas_box_start.x, editor->canvas_box_current.x);
+    const float minimum_y = fminf(editor->canvas_box_start.y, editor->canvas_box_current.y);
+    const float maximum_x = fmaxf(editor->canvas_box_start.x, editor->canvas_box_current.x);
+    const float maximum_y = fmaxf(editor->canvas_box_start.y, editor->canvas_box_current.y);
+    const AfColor border = {0.28F, 0.74F, 1.0F, 1.0F};
+    if (editor->drag_mode != AF_EDITOR_DRAG_CANVAS_BOX) {
+        return;
+    }
+    af_editor_add_rect(editor, minimum_x, minimum_y, maximum_x - minimum_x, maximum_y - minimum_y,
+                       (AfColor){0.2F, 0.62F, 1.0F, 0.16F}, 90030);
+    af_editor_add_rect(editor, minimum_x, minimum_y, maximum_x - minimum_x, 2.0F, border, 90040);
+    af_editor_add_rect(editor, minimum_x, maximum_y - 2.0F, maximum_x - minimum_x, 2.0F, border,
+                       90040);
+    af_editor_add_rect(editor, minimum_x, minimum_y, 2.0F, maximum_y - minimum_y, border, 90040);
+    af_editor_add_rect(editor, maximum_x - 2.0F, minimum_y, 2.0F, maximum_y - minimum_y, border,
+                       90040);
 }
 
 static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera) {
@@ -1648,7 +2494,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     for (index = 0U; index < editor->preview_scene.count; ++index) {
         const AfSceneNode *source = &editor->preview_scene.nodes[index];
         AfSceneNode *target = NULL;
-        if (source->type == AF_NODE_GROUP || editor->render_scene.count >= AF_MAX_NODES) {
+        if (editor->render_scene.count >= AF_MAX_NODES) {
             continue;
         }
         target = &editor->render_scene.nodes[editor->render_scene.count++];
@@ -1656,8 +2502,12 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
         target->world_transform = af_affine_multiply(camera, source->world_transform);
         target->layer_order = af_editor_clamp_layer(source->layer_order);
     }
+    af_editor_render_selection_outlines(editor, camera);
     af_editor_render_gizmo(editor, camera);
-    af_editor_render_path_points(editor, camera);
+    if (editor->selected_count == 1U) {
+        af_editor_render_path_points(editor, camera);
+    }
+    af_editor_render_canvas_box(editor);
     af_editor_add_rect(editor, 0.0F, 0.0F, editor->left_width, (float)height,
                        (AfColor){0.085F, 0.092F, 0.115F, 1.0F}, 100000);
     af_editor_add_rect(editor, (float)width - editor->right_width, 0.0F, editor->right_width,
@@ -1681,6 +2531,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
                        (float)width - editor->left_width - editor->right_width - 24.0F,
                        (AfColor){0.62F, 0.67F, 0.76F, 1.0F}, 100140);
     af_editor_render_context_menu(editor, width, height);
+    af_editor_render_tooltip(editor, width, height);
 }
 
 static void af_editor_update_title(AfEditorState *editor) {
@@ -1695,6 +2546,11 @@ static void af_editor_update_title(AfEditorState *editor) {
         (void)snprintf(title, sizeof(title),
                        "Arcflow Editor | Rename: %s | Enter commit, Esc cancel",
                        editor->rename_buffer);
+    } else if (editor->selected_count > 1U) {
+        (void)snprintf(title, sizeof(title),
+                       "Arcflow Editor%s | %u objects selected | drag, arrows, color, style, "
+                       "rotate, scale, layer, duplicate and delete apply to all | %s",
+                       editor->dirty ? " *" : "", editor->selected_count, editor->status);
     } else if (selected != NULL && name != NULL) {
         (void)snprintf(
             title, sizeof(title),
@@ -2105,7 +2961,7 @@ static AfResult af_editor_create_primitive(AfEditorState *editor, AfNodeType typ
             af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
     }
     if (result == AF_RESULT_SUCCESS) {
-        editor->selected_id = id;
+        af_editor_select_only(editor, id);
         editor->selected_path_command = UINT32_MAX;
         editor->dirty = true;
         af_editor_status(editor, "Primitive created");
@@ -2163,7 +3019,7 @@ static AfResult af_editor_create_path(AfEditorState *editor, int width, int heig
             af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
     }
     if (result == AF_RESULT_SUCCESS) {
-        editor->selected_id = id;
+        af_editor_select_only(editor, id);
         editor->selected_path_command = 1U;
         editor->dirty = true;
         af_editor_status(editor, "Editable path created");
@@ -2462,33 +3318,55 @@ static AfResult af_editor_toggle_path_fill_rule(AfEditorState *editor) {
 }
 
 static AfResult af_editor_delete_selection(AfEditorState *editor) {
+    uint64_t roots[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    uint32_t root_count = 0U;
     AfEditorCommand command = {0};
     AfResult result = AF_RESULT_NOT_FOUND;
     if (editor->selected_id == 0U) {
         return result;
     }
-    result = af_editor_command_delete(&editor->project, editor->selected_id, &command);
+    for (uint32_t index = 0U; index < editor->selected_count; ++index) {
+        const uint64_t id = editor->selected_ids[index];
+        if (!af_editor_selection_has_selected_ancestor(editor, id)) {
+            roots[root_count++] = id;
+        }
+    }
+    if (root_count == 0U) {
+        roots[root_count++] = editor->selected_id;
+    }
+    result = af_editor_command_delete_many(&editor->project, roots, root_count, &command);
     if (result == AF_RESULT_SUCCESS) {
         result =
             af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
     }
     if (result == AF_RESULT_SUCCESS) {
-        editor->selected_id = 0U;
+        af_editor_select_only(editor, 0U);
         editor->selected_path_command = UINT32_MAX;
         editor->dirty = true;
-        af_editor_status(editor, "Node deleted");
+        af_editor_status(editor, root_count == 1U ? "Object deleted" : "Objects deleted");
     }
     return result;
 }
 
 static void af_editor_reconcile_selection(AfEditorState *editor) {
+    uint32_t selection_write = 0U;
     uint32_t write_index = 0U;
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
+    for (uint32_t index = 0U; index < editor->selected_count; ++index) {
+        if (af_scene_find_const(&editor->project.scene, editor->selected_ids[index]) != NULL) {
+            editor->selected_ids[selection_write++] = editor->selected_ids[index];
+        }
+    }
+    editor->selected_count = selection_write;
     if (af_scene_find_const(&editor->project.scene, editor->selected_id) == NULL) {
-        editor->selected_id = 0U;
+        editor->selected_id =
+            editor->selected_count == 0U ? 0U : editor->selected_ids[editor->selected_count - 1U];
         editor->selected_path_command = UINT32_MAX;
-    } else {
+    } else if (!af_editor_selection_contains(editor, editor->selected_id)) {
+        af_editor_selection_add(editor, editor->selected_id);
+    }
+    if (editor->selected_id != 0U) {
         const AfPath *path =
             af_path_find_node_const(&editor->project.path_data, editor->selected_id);
         if (path == NULL) {
@@ -2496,6 +3374,8 @@ static void af_editor_reconcile_selection(AfEditorState *editor) {
         } else if (editor->selected_path_command >= path->command_count) {
             editor->selected_path_command = 0U;
         }
+    } else {
+        editor->selected_path_command = UINT32_MAX;
     }
     if (clip == NULL) {
         editor->selected_clip_id =
@@ -2520,8 +3400,11 @@ static void af_editor_reconcile_selection(AfEditorState *editor) {
 static AfResult af_editor_duplicate_selection(AfEditorState *editor) {
     AfProjectNodeSnapshot originals[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     AfProjectNodeSnapshot copies[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    uint64_t roots[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    uint64_t new_roots[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     uint64_t old_ids[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     uint64_t new_ids[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    uint32_t root_count = 0U;
     uint32_t count = 0U;
     uint32_t index = 0U;
     AfEditorCommand command = {0};
@@ -2529,8 +3412,23 @@ static AfResult af_editor_duplicate_selection(AfEditorState *editor) {
     if (editor->selected_id == 0U) {
         return result;
     }
-    result = af_project_collect_subtree(&editor->project, editor->selected_id, originals,
-                                        AF_EDITOR_COMMAND_MAX_SNAPSHOTS, &count);
+    for (index = 0U; index < editor->selected_count; ++index) {
+        const uint64_t id = editor->selected_ids[index];
+        if (!af_editor_selection_has_selected_ancestor(editor, id)) {
+            roots[root_count++] = id;
+        }
+    }
+    if (root_count == 0U) {
+        roots[root_count++] = editor->selected_id;
+    }
+    result = AF_RESULT_SUCCESS;
+    for (index = 0U; result == AF_RESULT_SUCCESS && index < root_count; ++index) {
+        uint32_t subtree_count = 0U;
+        result =
+            af_project_collect_subtree(&editor->project, roots[index], &originals[count],
+                                       AF_EDITOR_COMMAND_MAX_SNAPSHOTS - count, &subtree_count);
+        count += subtree_count;
+    }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < count; ++index) {
         old_ids[index] = originals[index].node.id;
         result = af_project_allocate_id(&editor->project, &new_ids[index]);
@@ -2539,8 +3437,19 @@ static AfResult af_editor_duplicate_selection(AfEditorState *editor) {
         uint32_t parent_index = 0U;
         copies[index] = originals[index];
         copies[index].node.id = new_ids[index];
+        copies[index].style.id = new_ids[index];
+        copies[index].style.node_id = new_ids[index];
+        copies[index].layout.node_id = new_ids[index];
         copies[index].index = editor->project.scene.count + index;
-        if (index == 0U) {
+        bool is_root = false;
+        for (uint32_t root_index = 0U; root_index < root_count; ++root_index) {
+            if (originals[index].node.id == roots[root_index]) {
+                new_roots[root_index] = new_ids[index];
+                is_root = true;
+                break;
+            }
+        }
+        if (is_root) {
             copies[index].node.local_transform.position.x += 16.0F;
             copies[index].node.local_transform.position.y += 16.0F;
         }
@@ -2552,6 +3461,13 @@ static AfResult af_editor_duplicate_selection(AfEditorState *editor) {
         }
         (void)snprintf(copies[index].name, sizeof(copies[index].name), "Copy %.56s",
                        originals[index].name);
+        if (copies[index].has_emitter) {
+            result = af_project_allocate_animation_id(&editor->project, &copies[index].emitter.id);
+            copies[index].emitter.node_id = new_ids[index];
+            if (copies[index].emitter.type == AF_PARTICLE_EMITTER_VECTOR_PATH) {
+                copies[index].emitter.path_id = new_ids[index];
+            }
+        }
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_editor_command_duplicate(copies, count, &command);
@@ -2590,13 +3506,16 @@ static AfResult af_editor_duplicate_selection(AfEditorState *editor) {
             af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
     }
     if (result == AF_RESULT_SUCCESS) {
-        editor->selected_id = new_ids[0];
+        af_editor_select_only(editor, 0U);
+        for (index = 0U; index < root_count; ++index) {
+            af_editor_selection_add(editor, new_roots[index]);
+        }
         editor->selected_path_command =
             af_path_find_node_const(&editor->project.path_data, editor->selected_id) != NULL
                 ? 0U
                 : UINT32_MAX;
         editor->dirty = true;
-        af_editor_status(editor, "Node duplicated");
+        af_editor_status(editor, root_count == 1U ? "Object duplicated" : "Objects duplicated");
     }
     return result;
 }
@@ -2650,65 +3569,93 @@ static void af_editor_append_text(AfEditorState *editor, const char *text) {
 
 static void af_editor_modify_scalar(AfEditorState *editor, AfEditorMergeKey merge_key, float amount,
                                     int property) {
-    AfProjectNodeSnapshot before = {0};
-    AfSceneNode *node = af_scene_find(&editor->project.scene, editor->selected_id);
-    if (node == NULL ||
-        af_project_snapshot(&editor->project, node->id, &before) != AF_RESULT_SUCCESS) {
+    if (editor->selected_id == 0U) {
         return;
     }
-    switch (property) {
-    case 0:
-        node->opacity = af_editor_clamp(node->opacity + amount, 0.0F, 1.0F);
-        break;
-    case 1:
-        node->corner_radius = fmaxf(0.0F, node->corner_radius + amount);
-        break;
-    case 2:
-        if ((amount > 0.0F && node->layer_order < INT32_MAX) ||
-            (amount < 0.0F && node->layer_order > INT32_MIN)) {
-            node->layer_order += amount > 0.0F ? 1 : -1;
+    af_editor_begin_selection_modify(editor, false);
+    for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
+        AfSceneNode *node =
+            af_scene_find(&editor->project.scene, editor->selection_drag_before[index].node.id);
+        if (node == NULL) {
+            continue;
         }
-        break;
-    case 3:
-        node->local_transform.rotation += amount;
-        break;
-    case 4:
-        node->local_transform.scale.x = fmaxf(0.05F, node->local_transform.scale.x + amount);
-        node->local_transform.scale.y = fmaxf(0.05F, node->local_transform.scale.y + amount);
-        break;
-    default:
-        return;
+        switch (property) {
+        case 0:
+            node->opacity = af_editor_clamp(node->opacity + amount, 0.0F, 1.0F);
+            break;
+        case 1:
+            node->corner_radius = fmaxf(0.0F, node->corner_radius + amount);
+            break;
+        case 2:
+            if ((amount > 0.0F && node->layer_order < INT32_MAX) ||
+                (amount < 0.0F && node->layer_order > INT32_MIN)) {
+                node->layer_order += amount > 0.0F ? 1 : -1;
+            }
+            break;
+        case 3:
+            node->local_transform.rotation += amount;
+            break;
+        case 4:
+            node->local_transform.scale.x = fmaxf(0.05F, node->local_transform.scale.x + amount);
+            node->local_transform.scale.y = fmaxf(0.05F, node->local_transform.scale.y + amount);
+            break;
+        default:
+            return;
+        }
     }
     (void)af_scene_evaluate_world(&editor->project.scene);
-    (void)af_editor_commit_modify(editor, &before, merge_key, true);
+    (void)af_editor_commit_selection_modify(editor, merge_key, true);
 }
 
-static void af_editor_set_fill(AfEditorState *editor, AfColor color) {
-    AfProjectNodeSnapshot before = {0};
-    AfSceneNode *node = af_scene_find(&editor->project.scene, editor->selected_id);
-    if (node == NULL ||
-        af_project_snapshot(&editor->project, node->id, &before) != AF_RESULT_SUCCESS) {
-        return;
-    }
-    node->fill = color;
-    {
+static void af_editor_apply_fill(AfEditorState *editor, AfColor color) {
+    for (uint32_t index = 0U; index < editor->selected_count; ++index) {
+        AfSceneNode *node = af_scene_find(&editor->project.scene, editor->selected_ids[index]);
+        if (node == NULL) {
+            continue;
+        }
+        node->fill = color;
         AfStyle *style = af_project_find_node_style(&editor->project, node->id);
         if (style != NULL) {
             style->fill = af_paint_solid(color);
             (void)af_style_mark_paint_changed(style);
         }
     }
-    (void)af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_FILL, false);
+    editor->dirty = true;
 }
 
-static void af_editor_modify_style(AfEditorState *editor, uint32_t action) {
-    AfProjectNodeSnapshot before = {0};
+static void af_editor_update_color_picker(AfEditorState *editor, int width, float x, float y) {
     AfSceneNode *node = af_scene_find(&editor->project.scene, editor->selected_id);
-    AfStyle *style = af_project_find_node_style(&editor->project, editor->selected_id);
-    if (node == NULL || style == NULL ||
-        af_project_snapshot(&editor->project, node->id, &before) != AF_RESULT_SUCCESS) {
+    const float panel_x = (float)width - editor->right_width + 18.0F;
+    float hue = editor->color_hue;
+    float saturation = 0.0F;
+    float value = 0.0F;
+    AfColor color;
+    if (node == NULL) {
         return;
     }
+    color = node->fill;
+    af_editor_color_hsv(color, &hue, &saturation, &value);
+    if (saturation <= 0.0001F) {
+        hue = editor->color_hue;
+    }
+    if (editor->drag_mode == AF_EDITOR_DRAG_COLOR_SV) {
+        saturation = af_editor_clamp((x - panel_x) / AF_EDITOR_COLOR_SV_WIDTH, 0.0F, 1.0F);
+        value = 1.0F -
+                af_editor_clamp((y - AF_EDITOR_COLOR_SV_Y) / AF_EDITOR_COLOR_SV_HEIGHT, 0.0F, 1.0F);
+    } else if (editor->drag_mode == AF_EDITOR_DRAG_COLOR_HUE) {
+        hue = af_editor_clamp((y - AF_EDITOR_COLOR_SV_Y) / AF_EDITOR_COLOR_SV_HEIGHT, 0.0F, 1.0F);
+        editor->color_hue = hue;
+    } else if (editor->drag_mode == AF_EDITOR_DRAG_COLOR_ALPHA) {
+        color.a = af_editor_clamp(
+            (x - panel_x) / (AF_EDITOR_COLOR_HUE_X + AF_EDITOR_COLOR_HUE_WIDTH), 0.0F, 1.0F);
+    }
+    {
+        AfColor result = af_editor_hsv_color(hue, saturation, value, color.a);
+        af_editor_apply_fill(editor, result);
+    }
+}
+
+static void af_editor_apply_style_action(AfSceneNode *node, AfStyle *style, uint32_t action) {
     if (action == 0U) {
         style->stroke.enabled = !style->stroke.enabled;
         (void)af_style_mark_stroke_geometry_changed(style);
@@ -2742,20 +3689,27 @@ static void af_editor_modify_style(AfEditorState *editor, uint32_t action) {
         style->stroke.join = (AfStrokeJoin)(((uint32_t)style->stroke.join + 1U) % 3U);
         (void)af_style_mark_stroke_geometry_changed(style);
     }
-    (void)af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_STYLE, false);
 }
 
-static void af_editor_modify_layout(AfEditorState *editor, uint32_t action) {
-    AfProjectNodeSnapshot before = {0};
-    const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
-    const AfLayoutNode *existing =
-        af_layout_find_const(&editor->project.layout_data, editor->selected_id);
-    AfLayoutNode layout;
-    if (node == NULL ||
-        af_project_snapshot(&editor->project, node->id, &before) != AF_RESULT_SUCCESS) {
+static void af_editor_modify_style(AfEditorState *editor, uint32_t action) {
+    if (editor->selected_id == 0U) {
         return;
     }
-    layout = existing == NULL ? af_layout_node_default(node->id) : *existing;
+    af_editor_begin_selection_modify(editor, false);
+    for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
+        const uint64_t id = editor->selection_drag_before[index].node.id;
+        AfSceneNode *node = af_scene_find(&editor->project.scene, id);
+        AfStyle *style = af_project_find_node_style(&editor->project, id);
+        if (node != NULL && style != NULL) {
+            af_editor_apply_style_action(node, style, action);
+        }
+    }
+    (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_STYLE, false);
+}
+
+static AfLayoutNode af_editor_next_layout(const AfSceneNode *node, const AfLayoutNode *existing,
+                                          uint32_t action) {
+    AfLayoutNode layout = existing == NULL ? af_layout_node_default(node->id) : *existing;
     if (action == 0U) {
         static const AfVec2 anchors[3] = {{0.0F, 0.0F}, {0.5F, 0.5F}, {1.0F, 1.0F}};
         uint32_t next = 0U;
@@ -2782,29 +3736,51 @@ static void af_editor_modify_layout(AfEditorState *editor, uint32_t action) {
         layout.aspect = (AfAspectConstraint)(((uint32_t)layout.aspect + 1U) % 4U);
         layout.aspect_ratio = node->bounds.y > 0.0F ? node->bounds.x / node->bounds.y : 1.0F;
     }
-    if (af_project_set_layout(&editor->project, &layout) == AF_RESULT_SUCCESS) {
-        (void)af_scene_evaluate_world(&editor->project.scene);
-        (void)af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_STYLE, false);
+    return layout;
+}
+
+static void af_editor_modify_layout(AfEditorState *editor, uint32_t action) {
+    if (editor->selected_id == 0U) {
+        return;
     }
+    af_editor_begin_selection_modify(editor, false);
+    for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
+        const uint64_t id = editor->selection_drag_before[index].node.id;
+        const AfSceneNode *node = af_scene_find_const(&editor->project.scene, id);
+        const AfLayoutNode *existing = af_layout_find_const(&editor->project.layout_data, id);
+        if (node != NULL) {
+            const AfLayoutNode layout = af_editor_next_layout(node, existing, action);
+            if (af_project_set_layout(&editor->project, &layout) != AF_RESULT_SUCCESS) {
+                return;
+            }
+        }
+    }
+    (void)af_scene_evaluate_world(&editor->project.scene);
+    (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_STYLE, false);
 }
 
 static void af_editor_nudge(AfEditorState *editor, float x, float y) {
-    AfProjectNodeSnapshot before = {0};
-    AfSceneNode *node = af_scene_find(&editor->project.scene, editor->selected_id);
-    if (node == NULL ||
-        af_project_snapshot(&editor->project, node->id, &before) != AF_RESULT_SUCCESS) {
+    if (editor->selected_id == 0U) {
         return;
     }
-    node->local_transform.position.x += x;
-    node->local_transform.position.y += y;
-    if (editor->snapping) {
-        node->local_transform.position.x =
-            roundf(node->local_transform.position.x / editor->grid_step) * editor->grid_step;
-        node->local_transform.position.y =
-            roundf(node->local_transform.position.y / editor->grid_step) * editor->grid_step;
+    af_editor_begin_selection_modify(editor, true);
+    for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
+        AfSceneNode *node =
+            af_scene_find(&editor->project.scene, editor->selection_drag_before[index].node.id);
+        if (node == NULL) {
+            continue;
+        }
+        node->local_transform.position.x += x;
+        node->local_transform.position.y += y;
+        if (editor->snapping) {
+            node->local_transform.position.x =
+                roundf(node->local_transform.position.x / editor->grid_step) * editor->grid_step;
+            node->local_transform.position.y =
+                roundf(node->local_transform.position.y / editor->grid_step) * editor->grid_step;
+        }
     }
     (void)af_scene_evaluate_world(&editor->project.scene);
-    (void)af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_TRANSFORM, true);
+    (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_TRANSFORM, true);
 }
 
 static void af_editor_reparent(AfEditorState *editor, uint64_t parent_id) {
@@ -2825,35 +3801,103 @@ static void af_editor_reparent(AfEditorState *editor, uint64_t parent_id) {
 }
 
 static void af_editor_handle_inspector(AfEditorState *editor, int width, float x, float y) {
-    static const AfColor palette[] = {{0.22F, 0.58F, 0.96F, 1.0F},
-                                      {0.94F, 0.35F, 0.27F, 1.0F},
-                                      {0.32F, 0.86F, 0.54F, 1.0F},
-                                      {0.78F, 0.42F, 0.96F, 1.0F},
-                                      {0.95F, 0.78F, 0.26F, 1.0F}};
     const float panel_x = (float)width - editor->right_width + 18.0F;
-    if (y >= 370.0F && y <= 398.0F) {
+    AfParticleEmitter *emitter =
+        af_project_find_node_emitter(&editor->project, editor->selected_id);
+    if (af_scene_find_const(&editor->project.scene, editor->selected_id) != NULL &&
+        ((x >= panel_x && x <= panel_x + AF_EDITOR_COLOR_SV_WIDTH && y >= AF_EDITOR_COLOR_SV_Y &&
+          y <= AF_EDITOR_COLOR_SV_Y + AF_EDITOR_COLOR_SV_HEIGHT) ||
+         (x >= panel_x + AF_EDITOR_COLOR_HUE_X &&
+          x <= panel_x + AF_EDITOR_COLOR_HUE_X + AF_EDITOR_COLOR_HUE_WIDTH &&
+          y >= AF_EDITOR_COLOR_SV_Y && y <= AF_EDITOR_COLOR_SV_Y + AF_EDITOR_COLOR_SV_HEIGHT) ||
+         (x >= panel_x && x <= panel_x + AF_EDITOR_COLOR_HUE_X + AF_EDITOR_COLOR_HUE_WIDTH &&
+          y >= AF_EDITOR_COLOR_ALPHA_Y &&
+          y <= AF_EDITOR_COLOR_ALPHA_Y + AF_EDITOR_COLOR_ALPHA_HEIGHT))) {
+        af_editor_begin_selection_modify(editor, false);
+        if (editor->selection_drag_count == 0U) {
+            return;
+        }
+        if (y >= AF_EDITOR_COLOR_ALPHA_Y) {
+            editor->drag_mode = AF_EDITOR_DRAG_COLOR_ALPHA;
+        } else if (x >= panel_x + AF_EDITOR_COLOR_HUE_X) {
+            editor->drag_mode = AF_EDITOR_DRAG_COLOR_HUE;
+        } else {
+            editor->drag_mode = AF_EDITOR_DRAG_COLOR_SV;
+        }
+        af_editor_update_color_picker(editor, width, x, y);
+        return;
+    }
+    if (emitter != NULL && y >= AF_EDITOR_PARTICLE_ROW_Y &&
+        y < AF_EDITOR_PARTICLE_ROW_Y + 4.0F * AF_EDITOR_PARTICLE_ROW_STEP) {
+        AfProjectNodeSnapshot before = {0};
+        const uint32_t row =
+            (uint32_t)((y - AF_EDITOR_PARTICLE_ROW_Y) / AF_EDITOR_PARTICLE_ROW_STEP);
+        const bool decrease = x < panel_x + 31.0F;
+        if (x <= panel_x + 65.0F && row < 4U &&
+            af_project_snapshot(&editor->project, editor->selected_id, &before) ==
+                AF_RESULT_SUCCESS) {
+            if (row == 0U) {
+                emitter->spawn_rate = fmaxf(0.0F, emitter->spawn_rate + (decrease ? -8.0F : 8.0F));
+            } else if (row == 1U) {
+                const float amount = decrease ? -0.1F : 0.1F;
+                emitter->lifetime_min = fmaxf(0.1F, emitter->lifetime_min + amount);
+                emitter->lifetime_max =
+                    fmaxf(emitter->lifetime_min, emitter->lifetime_max + amount);
+            } else if (row == 2U) {
+                const uint32_t amount = 256U;
+                if (decrease) {
+                    emitter->capacity =
+                        emitter->capacity > amount ? emitter->capacity - amount : 1U;
+                } else {
+                    const uint32_t total =
+                        af_particle_total_capacity(&editor->project.particle_data);
+                    emitter->capacity = total <= AF_MAX_PARTICLES - amount
+                                            ? emitter->capacity + amount
+                                            : emitter->capacity;
+                }
+                emitter->burst_count = emitter->burst_count > emitter->capacity
+                                           ? emitter->capacity
+                                           : emitter->burst_count;
+            } else {
+                int type = (int)emitter->type + (decrease ? -1 : 1);
+                type = type < 0 ? (int)AF_PARTICLE_EMITTER_VECTOR_PATH
+                                : (type > (int)AF_PARTICLE_EMITTER_VECTOR_PATH ? 0 : type);
+                if (type == (int)AF_PARTICLE_EMITTER_VECTOR_PATH &&
+                    af_path_find_node_const(&editor->project.path_data, editor->selected_id) ==
+                        NULL) {
+                    type =
+                        decrease ? (int)AF_PARTICLE_EMITTER_CIRCLE : (int)AF_PARTICLE_EMITTER_POINT;
+                }
+                emitter->type = (AfParticleEmitterType)type;
+                emitter->path_id =
+                    emitter->type == AF_PARTICLE_EMITTER_VECTOR_PATH
+                        ? af_path_find_node_const(&editor->project.path_data, editor->selected_id)
+                              ->id
+                        : 0U;
+            }
+            (void)af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_PARTICLE, true);
+            editor->dirty = true;
+            af_editor_status(editor, "Particle emitter updated");
+        }
+        return;
+    }
+    if (y >= AF_EDITOR_STYLE_ROW_Y && y <= AF_EDITOR_STYLE_ROW_Y + 28.0F) {
         const int action = (int)((x - panel_x) / 38.0F);
         if (action >= 0 && action < 6) {
             af_editor_modify_style(editor, (uint32_t)action);
         }
         return;
     }
-    if (y >= 406.0F && y <= 434.0F) {
+    if (y >= AF_EDITOR_LAYOUT_ROW_Y && y <= AF_EDITOR_LAYOUT_ROW_Y + 28.0F) {
         const int action = (int)((x - panel_x) / 38.0F);
         if (action >= 0 && action < 6) {
             af_editor_modify_layout(editor, (uint32_t)action);
         }
         return;
     }
-    if (y >= 76.0F && y <= 102.0F) {
-        const int palette_index = (int)((x - panel_x) / 34.0F);
-        if (palette_index >= 0 && palette_index < 5) {
-            af_editor_set_fill(editor, palette[palette_index]);
-        }
-        return;
-    }
     for (int row = 0; row < 4; ++row) {
-        const float row_y = 132.0F + (float)row * 48.0F;
+        const float row_y =
+            AF_EDITOR_INSPECTOR_SCALAR_Y + (float)row * AF_EDITOR_INSPECTOR_SCALAR_STEP;
         if (y >= row_y && y <= row_y + 26.0F) {
             const float amount = x < panel_x + 35.0F ? -1.0F : 1.0F;
             if (row == 0) {
@@ -2871,28 +3915,33 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
 }
 
 static void af_editor_reset_selected(AfEditorState *editor, bool appearance) {
-    AfProjectNodeSnapshot before = {0};
-    AfSceneNode *node = af_scene_find(&editor->project.scene, editor->selected_id);
-    if (node == NULL ||
-        af_project_snapshot(&editor->project, node->id, &before) != AF_RESULT_SUCCESS) {
+    if (editor->selected_id == 0U) {
         return;
     }
-    if (appearance) {
-        AfStyle *style = af_project_find_node_style(&editor->project, node->id);
-        const AfSceneNode defaults = af_editor_default_node(node->type, node->id, (AfVec2){0});
-        node->opacity = 1.0F;
-        node->fill = defaults.fill;
-        node->corner_radius = defaults.corner_radius;
-        if (style != NULL) {
-            *style = af_style_default(style->id, node->id, defaults.fill);
+    af_editor_begin_selection_modify(editor, false);
+    for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
+        AfSceneNode *node =
+            af_scene_find(&editor->project.scene, editor->selection_drag_before[index].node.id);
+        if (node == NULL) {
+            continue;
         }
-    } else {
-        node->local_transform = (AfTransform2D){.scale = {1.0F, 1.0F}};
+        if (appearance) {
+            AfStyle *style = af_project_find_node_style(&editor->project, node->id);
+            const AfSceneNode defaults = af_editor_default_node(node->type, node->id, (AfVec2){0});
+            node->opacity = 1.0F;
+            node->fill = defaults.fill;
+            node->corner_radius = defaults.corner_radius;
+            if (style != NULL) {
+                *style = af_style_default(style->id, node->id, defaults.fill);
+            }
+        } else {
+            node->local_transform = (AfTransform2D){.scale = {1.0F, 1.0F}};
+        }
     }
     (void)af_scene_evaluate_world(&editor->project.scene);
-    if (af_editor_commit_modify(editor, &before,
-                                appearance ? AF_EDITOR_MERGE_STYLE : AF_EDITOR_MERGE_TRANSFORM,
-                                false) == AF_RESULT_SUCCESS) {
+    if (af_editor_commit_selection_modify(
+            editor, appearance ? AF_EDITOR_MERGE_STYLE : AF_EDITOR_MERGE_TRANSFORM, false) ==
+        AF_RESULT_SUCCESS) {
         af_editor_status(editor, appearance ? "Appearance reset" : "Transform reset");
     }
 }
@@ -2988,6 +4037,46 @@ static void af_editor_fit_selected_to_canvas(AfEditorState *editor, int width, i
     }
 }
 
+static void af_editor_toggle_selected_particles(AfEditorState *editor) {
+    const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
+    AfParticleEmitter *existing =
+        af_project_find_node_emitter(&editor->project, editor->selected_id);
+    AfProjectNodeSnapshot before = {0};
+    AfResult result = AF_RESULT_SUCCESS;
+    if (node == NULL ||
+        af_project_snapshot(&editor->project, node->id, &before) != AF_RESULT_SUCCESS) {
+        return;
+    }
+    if (existing != NULL) {
+        result = af_project_remove_emitter(&editor->project, existing->id);
+        af_editor_status(editor, result == AF_RESULT_SUCCESS ? "Particle emitter removed"
+                                                             : "Particle emitter removal failed");
+    } else {
+        uint64_t id = 0U;
+        result = af_project_allocate_animation_id(&editor->project, &id);
+        if (result == AF_RESULT_SUCCESS) {
+            AfParticleEmitter emitter = af_particle_emitter_default(id, node->id);
+            if (node->type == AF_NODE_RECTANGLE || node->type == AF_NODE_ROUNDED_RECTANGLE) {
+                emitter.type = AF_PARTICLE_EMITTER_RECTANGLE;
+            } else if (node->type == AF_NODE_ELLIPSE) {
+                emitter.type = AF_PARTICLE_EMITTER_CIRCLE;
+            } else if (node->type == AF_NODE_PATH) {
+                const AfPath *path = af_path_find_node_const(&editor->project.path_data, node->id);
+                emitter.type = AF_PARTICLE_EMITTER_VECTOR_PATH;
+                emitter.path_id = path == NULL ? 0U : path->id;
+            }
+            emitter.output = AF_PARTICLE_OUTPUT_UI_BILLBOARD;
+            result = af_project_add_emitter(&editor->project, &emitter);
+        }
+        af_editor_status(editor, result == AF_RESULT_SUCCESS ? "Particle emitter added"
+                                                             : "Particle emitter creation failed");
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        (void)af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_PARTICLE, false);
+        editor->dirty = true;
+    }
+}
+
 static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_t item, int width,
                                                   int height) {
     const AfEditorContextMenu menu = editor->context_menu;
@@ -2999,14 +4088,18 @@ static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_
         af_editor_begin_rename(editor);
         return;
     }
+    if (item == 4U) {
+        af_editor_toggle_selected_particles(editor);
+        return;
+    }
     if (menu == AF_EDITOR_CONTEXT_RECTANGLE) {
         if (item == 2U) {
             af_editor_convert_selected(editor, AF_NODE_ROUNDED_RECTANGLE);
         } else if (item == 3U) {
             af_editor_fit_selected_to_canvas(editor, width, height);
-        } else if (item == 4U) {
-            af_editor_modify_scalar(editor, AF_EDITOR_MERGE_LAYER, 1.0F, 2);
         } else if (item == 5U) {
+            af_editor_modify_scalar(editor, AF_EDITOR_MERGE_LAYER, 1.0F, 2);
+        } else if (item == 6U) {
             (void)af_editor_delete_selection(editor);
         }
     } else if (menu == AF_EDITOR_CONTEXT_ROUNDED_RECTANGLE) {
@@ -3014,9 +4107,9 @@ static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_
             af_editor_modify_scalar(editor, AF_EDITOR_MERGE_RADIUS, 4.0F, 1);
         } else if (item == 3U) {
             af_editor_convert_selected(editor, AF_NODE_RECTANGLE);
-        } else if (item == 4U) {
-            af_editor_modify_scalar(editor, AF_EDITOR_MERGE_LAYER, 1.0F, 2);
         } else if (item == 5U) {
+            af_editor_modify_scalar(editor, AF_EDITOR_MERGE_LAYER, 1.0F, 2);
+        } else if (item == 6U) {
             (void)af_editor_delete_selection(editor);
         }
     } else if (menu == AF_EDITOR_CONTEXT_ELLIPSE) {
@@ -3024,9 +4117,9 @@ static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_
             af_editor_make_selected_circle(editor);
         } else if (item == 3U) {
             af_editor_fit_selected_to_canvas(editor, width, height);
-        } else if (item == 4U) {
-            af_editor_modify_scalar(editor, AF_EDITOR_MERGE_LAYER, 1.0F, 2);
         } else if (item == 5U) {
+            af_editor_modify_scalar(editor, AF_EDITOR_MERGE_LAYER, 1.0F, 2);
+        } else if (item == 6U) {
             (void)af_editor_delete_selection(editor);
         }
     } else if (menu == AF_EDITOR_CONTEXT_PATH) {
@@ -3035,9 +4128,9 @@ static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_
         } else if (item == 3U) {
             editor->selected_path_command = 0U;
             af_editor_status(editor, "Path points ready for editing");
-        } else if (item == 4U) {
-            (void)af_editor_reverse_path_contour(editor);
         } else if (item == 5U) {
+            (void)af_editor_reverse_path_contour(editor);
+        } else if (item == 6U) {
             (void)af_editor_delete_selection(editor);
         }
     } else if (menu == AF_EDITOR_CONTEXT_GROUP) {
@@ -3050,7 +4143,7 @@ static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_
             }
         } else if (item == 3U) {
             af_editor_reparent(editor, AF_INVALID_NODE_ID);
-        } else if (item == 4U) {
+        } else if (item == 5U) {
             (void)af_editor_delete_selection(editor);
         }
     }
@@ -3161,8 +4254,13 @@ static void af_editor_open_context_menu(AfEditorState *editor, int width, int he
             const uint32_t row = (uint32_t)((y - hierarchy_top) / AF_EDITOR_ROW_HEIGHT);
             const uint32_t hierarchy_index = editor->hierarchy_scroll + row;
             if (hierarchy_index < editor->hierarchy_count) {
-                editor->selected_id =
+                const uint64_t clicked =
                     editor->project.scene.nodes[editor->hierarchy_order[hierarchy_index]].id;
+                if (!af_editor_selection_contains(editor, clicked)) {
+                    af_editor_select_only(editor, clicked);
+                } else {
+                    editor->selected_id = clicked;
+                }
                 af_editor_reconcile_selection(editor);
                 editor->context_menu = af_editor_context_for_node(
                     af_scene_find_const(&editor->project.scene, editor->selected_id));
@@ -3179,7 +4277,11 @@ static void af_editor_open_context_menu(AfEditorState *editor, int width, int he
         const uint64_t hit = af_editor_hit_test(
             editor, af_editor_screen_to_project(editor, width, height, (AfVec2){x, y}));
         if (hit != 0U) {
-            editor->selected_id = hit;
+            if (!af_editor_selection_contains(editor, hit)) {
+                af_editor_select_only(editor, hit);
+            } else {
+                editor->selected_id = hit;
+            }
             af_editor_reconcile_selection(editor);
             editor->context_menu = af_editor_context_for_node(
                 af_scene_find_const(&editor->project.scene, editor->selected_id));
@@ -3560,6 +4662,78 @@ static void af_editor_commit_path_drag(AfEditorState *editor) {
     }
 }
 
+static void af_editor_canvas_box_select(AfEditorState *editor, int width, int height) {
+    const AfAffine2 camera = af_editor_camera(editor, width, height);
+    const float box_minimum_x = fminf(editor->canvas_box_start.x, editor->canvas_box_current.x);
+    const float box_minimum_y = fminf(editor->canvas_box_start.y, editor->canvas_box_current.y);
+    const float box_maximum_x = fmaxf(editor->canvas_box_start.x, editor->canvas_box_current.x);
+    const float box_maximum_y = fmaxf(editor->canvas_box_start.y, editor->canvas_box_current.y);
+    if (!editor->canvas_box_additive) {
+        af_editor_select_only(editor, 0U);
+    }
+    for (uint32_t index = 0U; index < editor->preview_scene.count; ++index) {
+        const AfSceneNode *node = &editor->preview_scene.nodes[index];
+        float minimum_x = 0.0F;
+        float minimum_y = 0.0F;
+        float maximum_x = 0.0F;
+        float maximum_y = 0.0F;
+        if (af_editor_screen_bounds(node, camera, &minimum_x, &minimum_y, &maximum_x, &maximum_y) &&
+            maximum_x >= box_minimum_x && minimum_x <= box_maximum_x &&
+            maximum_y >= box_minimum_y && minimum_y <= box_maximum_y) {
+            af_editor_selection_add(editor, node->id);
+        }
+    }
+    editor->selected_path_command =
+        af_path_find_node_const(&editor->project.path_data, editor->selected_id) != NULL
+            ? 0U
+            : UINT32_MAX;
+    if (editor->selected_count == 0U) {
+        af_editor_status(editor, "Selection cleared");
+    } else {
+        char status[64];
+        (void)snprintf(status, sizeof(status), "%u objects selected", editor->selected_count);
+        af_editor_status(editor, status);
+    }
+}
+
+static void af_editor_prepare_selection_smoke(AfEditorState *editor, int width, int height) {
+    const AfAffine2 camera = af_editor_camera(editor, width, height);
+    bool found = false;
+    float box_minimum_x = 0.0F;
+    float box_minimum_y = 0.0F;
+    float box_maximum_x = 0.0F;
+    float box_maximum_y = 0.0F;
+    for (uint32_t index = 0U; index < editor->preview_scene.count; ++index) {
+        float minimum_x = 0.0F;
+        float minimum_y = 0.0F;
+        float maximum_x = 0.0F;
+        float maximum_y = 0.0F;
+        if (!af_editor_screen_bounds(&editor->preview_scene.nodes[index], camera, &minimum_x,
+                                     &minimum_y, &maximum_x, &maximum_y)) {
+            continue;
+        }
+        if (!found) {
+            box_minimum_x = minimum_x;
+            box_minimum_y = minimum_y;
+            box_maximum_x = maximum_x;
+            box_maximum_y = maximum_y;
+            found = true;
+        } else {
+            box_minimum_x = fminf(box_minimum_x, minimum_x);
+            box_minimum_y = fminf(box_minimum_y, minimum_y);
+            box_maximum_x = fmaxf(box_maximum_x, maximum_x);
+            box_maximum_y = fmaxf(box_maximum_y, maximum_y);
+        }
+    }
+    if (found) {
+        editor->canvas_box_start = (AfVec2){box_minimum_x - 8.0F, box_minimum_y - 8.0F};
+        editor->canvas_box_current = (AfVec2){box_maximum_x + 8.0F, box_maximum_y + 8.0F};
+        editor->canvas_box_additive = false;
+        af_editor_canvas_box_select(editor, width, height);
+        editor->drag_mode = AF_EDITOR_DRAG_CANVAS_BOX;
+    }
+}
+
 static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
                                  const SDL_MouseButtonEvent *event, SDL_Keymod modifiers) {
     const float x = event->x;
@@ -3610,13 +4784,15 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
                 editor->project.scene.nodes[editor->hierarchy_order[hierarchy_index]].id;
             if ((modifiers & SDL_KMOD_SHIFT) != 0U && editor->selected_id != 0U) {
                 af_editor_reparent(editor, clicked);
+            } else if ((modifiers & SDL_KMOD_CTRL) != 0U) {
+                af_editor_selection_toggle(editor, clicked);
             } else {
-                editor->selected_id = clicked;
-                editor->selected_path_command =
-                    af_path_find_node_const(&editor->project.path_data, clicked) != NULL
-                        ? 0U
-                        : UINT32_MAX;
+                af_editor_select_only(editor, clicked);
             }
+            editor->selected_path_command =
+                af_path_find_node_const(&editor->project.path_data, editor->selected_id) != NULL
+                    ? 0U
+                    : UINT32_MAX;
         }
         return;
     }
@@ -3630,7 +4806,7 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
             (void)af_editor_create_primitive(editor, AF_NODE_ELLIPSE, width, height);
         } else if (toolbar_x >= 126.0F && toolbar_x < 160.0F) {
             (void)af_editor_create_path(editor, width, height);
-        } else if (toolbar_x >= 172.0F && toolbar_x < 220.0F) {
+        } else if (toolbar_x >= 172.0F && toolbar_x < 260.0F) {
             if (y < 22.0F) {
                 editor->grid_visible = !editor->grid_visible;
             } else {
@@ -3650,7 +4826,8 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         const AfSceneNode *selected =
             af_scene_find_const(&editor->project.scene, editor->selected_id);
         AfVec2 origin = {0};
-        if (af_editor_path_mouse_down(editor, width, height, (AfVec2){x, y})) {
+        if (editor->selected_count <= 1U &&
+            af_editor_path_mouse_down(editor, width, height, (AfVec2){x, y})) {
             return;
         }
         if (selected != NULL) {
@@ -3663,24 +4840,43 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
             }
         }
         if (editor->drag_mode == AF_EDITOR_DRAG_NONE) {
-            const uint64_t previous_selection = editor->selected_id;
-            editor->selected_id = af_editor_hit_test(
+            const uint64_t hit = af_editor_hit_test(
                 editor, af_editor_screen_to_project(editor, width, height, (AfVec2){x, y}));
-            if (editor->selected_id != previous_selection) {
+            const bool control = (modifiers & SDL_KMOD_CTRL) != 0U;
+            const bool additive = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) != 0U;
+            if (hit != 0U) {
+                if (control) {
+                    af_editor_selection_toggle(editor, hit);
+                } else if ((modifiers & SDL_KMOD_SHIFT) != 0U) {
+                    af_editor_selection_add(editor, hit);
+                } else if (!af_editor_selection_contains(editor, hit)) {
+                    af_editor_select_only(editor, hit);
+                } else {
+                    editor->selected_id = hit;
+                }
                 editor->selected_path_command =
                     af_path_find_node_const(&editor->project.path_data, editor->selected_id) != NULL
                         ? 0U
                         : UINT32_MAX;
-            }
-            if (editor->selected_id != 0U) {
-                editor->drag_mode = AF_EDITOR_DRAG_MOVE;
+                if (af_editor_selection_contains(editor, hit)) {
+                    editor->drag_mode = AF_EDITOR_DRAG_MOVE;
+                }
+            } else {
+                if (!additive) {
+                    af_editor_select_only(editor, 0U);
+                    editor->selected_path_command = UINT32_MAX;
+                }
+                editor->canvas_box_start = (AfVec2){x, y};
+                editor->canvas_box_current = editor->canvas_box_start;
+                editor->canvas_box_additive = additive;
+                editor->drag_mode = AF_EDITOR_DRAG_CANVAS_BOX;
             }
         }
         if (editor->drag_mode == AF_EDITOR_DRAG_MOVE || editor->drag_mode == AF_EDITOR_DRAG_X ||
             editor->drag_mode == AF_EDITOR_DRAG_Y) {
             editor->drag_start_mouse =
                 af_editor_screen_to_project(editor, width, height, (AfVec2){x, y});
-            (void)af_project_snapshot(&editor->project, editor->selected_id, &editor->drag_before);
+            af_editor_begin_selection_modify(editor, true);
         }
     }
 }
@@ -3690,6 +4886,16 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
     editor->mouse_position = (AfVec2){event->x, event->y};
+    if (editor->drag_mode == AF_EDITOR_DRAG_COLOR_SV ||
+        editor->drag_mode == AF_EDITOR_DRAG_COLOR_HUE ||
+        editor->drag_mode == AF_EDITOR_DRAG_COLOR_ALPHA) {
+        af_editor_update_color_picker(editor, width, event->x, event->y);
+        return;
+    }
+    if (editor->drag_mode == AF_EDITOR_DRAG_CANVAS_BOX) {
+        editor->canvas_box_current = (AfVec2){event->x, event->y};
+        return;
+    }
     if (editor->drag_mode == AF_EDITOR_DRAG_TIMELINE_HEIGHT) {
         editor->timeline_height = af_editor_clamp(
             (float)height - AF_EDITOR_STATUS_HEIGHT - event->y, AF_EDITOR_TIMELINE_MIN_HEIGHT,
@@ -3793,44 +4999,55 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
     }
     if (editor->drag_mode == AF_EDITOR_DRAG_MOVE || editor->drag_mode == AF_EDITOR_DRAG_X ||
         editor->drag_mode == AF_EDITOR_DRAG_Y) {
-        AfSceneNode *node = af_scene_find(&editor->project.scene, editor->selected_id);
-        const AfSceneNode *parent = NULL;
-        AfAffine2 parent_inverse = af_affine_identity();
-        AfVec2 current =
+        const AfVec2 project_current =
             af_editor_screen_to_project(editor, width, height, (AfVec2){event->x, event->y});
-        AfVec2 start = editor->drag_start_mouse;
-        if (node == NULL) {
-            return;
-        }
-        if (node->parent_id != AF_INVALID_NODE_ID) {
-            parent = af_scene_find_const(&editor->project.scene, node->parent_id);
-            if (parent != NULL && af_affine_inverse(parent->world_transform, &parent_inverse)) {
-                current = af_affine_transform_point(parent_inverse, current);
-                start = af_affine_transform_point(parent_inverse, start);
+        for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
+            const AfProjectNodeSnapshot *before = &editor->selection_drag_before[index];
+            AfSceneNode *node = af_scene_find(&editor->project.scene, before->node.id);
+            AfVec2 current = project_current;
+            AfVec2 start = editor->drag_start_mouse;
+            if (node == NULL) {
+                continue;
             }
-        }
-        node->local_transform.position = editor->drag_before.node.local_transform.position;
-        if (editor->drag_mode != AF_EDITOR_DRAG_Y) {
-            node->local_transform.position.x += current.x - start.x;
-        }
-        if (editor->drag_mode != AF_EDITOR_DRAG_X) {
-            node->local_transform.position.y += current.y - start.y;
-        }
-        if (editor->snapping) {
-            node->local_transform.position.x =
-                roundf(node->local_transform.position.x / editor->grid_step) * editor->grid_step;
-            node->local_transform.position.y =
-                roundf(node->local_transform.position.y / editor->grid_step) * editor->grid_step;
+            if (before->node.parent_id != AF_INVALID_NODE_ID) {
+                const AfSceneNode *parent =
+                    af_scene_find_const(&editor->project.scene, before->node.parent_id);
+                AfAffine2 parent_inverse = af_affine_identity();
+                if (parent != NULL && af_affine_inverse(parent->world_transform, &parent_inverse)) {
+                    current = af_affine_transform_point(parent_inverse, current);
+                    start = af_affine_transform_point(parent_inverse, start);
+                }
+            }
+            node->local_transform.position = before->node.local_transform.position;
+            if (editor->drag_mode != AF_EDITOR_DRAG_Y) {
+                node->local_transform.position.x += current.x - start.x;
+            }
+            if (editor->drag_mode != AF_EDITOR_DRAG_X) {
+                node->local_transform.position.y += current.y - start.y;
+            }
+            if (editor->snapping) {
+                node->local_transform.position.x =
+                    roundf(node->local_transform.position.x / editor->grid_step) *
+                    editor->grid_step;
+                node->local_transform.position.y =
+                    roundf(node->local_transform.position.y / editor->grid_step) *
+                    editor->grid_step;
+            }
         }
         (void)af_scene_evaluate_world(&editor->project.scene);
     }
 }
 
-static void af_editor_mouse_up(AfEditorState *editor, int height) {
-    if (editor->drag_mode == AF_EDITOR_DRAG_MOVE || editor->drag_mode == AF_EDITOR_DRAG_X ||
-        editor->drag_mode == AF_EDITOR_DRAG_Y) {
-        (void)af_editor_commit_modify(editor, &editor->drag_before, AF_EDITOR_MERGE_TRANSFORM,
-                                      false);
+static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
+    if (editor->drag_mode == AF_EDITOR_DRAG_COLOR_SV ||
+        editor->drag_mode == AF_EDITOR_DRAG_COLOR_HUE ||
+        editor->drag_mode == AF_EDITOR_DRAG_COLOR_ALPHA) {
+        (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_FILL, false);
+    } else if (editor->drag_mode == AF_EDITOR_DRAG_MOVE || editor->drag_mode == AF_EDITOR_DRAG_X ||
+               editor->drag_mode == AF_EDITOR_DRAG_Y) {
+        (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_TRANSFORM, false);
+    } else if (editor->drag_mode == AF_EDITOR_DRAG_CANVAS_BOX) {
+        af_editor_canvas_box_select(editor, width, height);
     } else if (editor->drag_mode == AF_EDITOR_DRAG_KEYFRAMES) {
         af_editor_timeline_commit_keys(editor, AF_EDITOR_MERGE_KEYFRAME_TIME);
     } else if (editor->drag_mode == AF_EDITOR_DRAG_LOOP_START ||
@@ -4052,7 +5269,7 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
         if (editor->timeline_focus) {
             af_editor_clear_key_selection(editor);
         } else {
-            editor->selected_id = 0U;
+            af_editor_select_only(editor, 0U);
             editor->selected_path_command = UINT32_MAX;
         }
     }
@@ -4086,7 +5303,7 @@ static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int 
         af_editor_mouse_scale(editor, &button.x, &button.y);
         af_editor_mouse_down(editor, width, height, &button, SDL_GetModState());
     } else if (event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
-        af_editor_mouse_up(editor, height);
+        af_editor_mouse_up(editor, width, height);
     } else if (event->type == SDL_EVENT_MOUSE_MOTION) {
         SDL_MouseMotionEvent motion = event->motion;
         af_editor_mouse_scale(editor, &motion.x, &motion.y);
@@ -4109,10 +5326,20 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->resize_smoke = true;
         } else if (strcmp(arguments[index], "--context-smoke") == 0) {
             editor->context_smoke = true;
+        } else if (strcmp(arguments[index], "--tooltip-smoke") == 0) {
+            editor->tooltip_smoke = true;
+        } else if (strcmp(arguments[index], "--selection-smoke") == 0) {
+            editor->selection_smoke = true;
+        } else if (strcmp(arguments[index], "--output") == 0 && index + 1 < argument_count) {
+            (void)snprintf(editor->output_path, sizeof(editor->output_path), "%s",
+                           arguments[++index]);
         } else {
             (void)snprintf(editor->project_path, sizeof(editor->project_path), "%s",
                            arguments[index]);
         }
+    }
+    if (editor->output_path[0] != '\0' && editor->maximum_frames == 0U) {
+        editor->maximum_frames = editor->tooltip_smoke ? 2U : 1U;
     }
     af_editor_derive_package_path(editor);
 }
@@ -4125,6 +5352,7 @@ int af_editor_run(int argument_count, char **arguments) {
                             .zoom = 0.65F,
                             .pan = {48.0F, 42.0F},
                             .grid_step = 20.0F,
+                            .color_hue = 0.58F,
                             .grid_visible = true,
                             .snapping = true,
                             .timeline_height = AF_EDITOR_TIMELINE_DEFAULT_HEIGHT,
@@ -4217,9 +5445,11 @@ int af_editor_run(int argument_count, char **arguments) {
     af_scene_init(&editor.render_scene, editor.render_nodes, AF_MAX_NODES);
     af_scene_init(&editor.preview_scene, editor.preview_nodes, editor.project.scene.capacity);
     editor.render_scene.paths = &editor.render_path_data;
+    editor.render_scene.particles = &editor.project.particle_data;
     editor.preview_scene.paths = &editor.project.path_data;
     editor.preview_scene.styles = &editor.project.style_data;
     editor.preview_scene.layouts = &editor.project.layout_data;
+    editor.preview_scene.particles = &editor.project.particle_data;
     result = af_platform_window_create("Arcflow Editor", 1440, 840, &editor.window);
     if (result == AF_RESULT_SUCCESS) {
         result = af_vk_renderer_create(&editor.window, &editor.renderer);
@@ -4264,7 +5494,9 @@ int af_editor_run(int argument_count, char **arguments) {
         }
         af_editor_update_preview(&editor);
         af_editor_build_hierarchy(&editor);
-        if (editor.context_smoke) {
+        if (editor.selection_smoke) {
+            af_editor_prepare_selection_smoke(&editor, width, height);
+        } else if (editor.context_smoke) {
             const uint32_t context = (editor.rendered_frames / 2U) % 10U;
             editor.context_menu = (AfEditorContextMenu)(AF_EDITOR_CONTEXT_HIERARCHY + context);
             if (editor.context_menu == AF_EDITOR_CONTEXT_HIERARCHY) {
@@ -4286,10 +5518,19 @@ int af_editor_run(int argument_count, char **arguments) {
                 (AfVec2){editor.context_position.x + 52.0F,
                          editor.context_position.y + AF_EDITOR_CONTEXT_HEADER_HEIGHT +
                              AF_EDITOR_CONTEXT_ITEM_HEIGHT + 12.0F};
+        } else if (editor.tooltip_smoke) {
+            editor.context_menu = AF_EDITOR_CONTEXT_NONE;
+            editor.mouse_position = (AfVec2){editor.left_width + 31.0F, 20.0F};
         }
         af_editor_build_render_scene(&editor, width, height);
         af_editor_update_title(&editor);
-        result = af_vk_renderer_draw(editor.renderer, &editor.render_scene);
+        if (editor.output_path[0] != '\0' && editor.rendered_frames + 1U == editor.maximum_frames) {
+            result = af_vk_renderer_capture_next(editor.renderer, editor.output_path);
+        }
+        if (result == AF_RESULT_SUCCESS) {
+            result = af_vk_renderer_draw_timed(editor.renderer, &editor.render_scene,
+                                               fminf(delta_time, 0.1F));
+        }
         if (result != AF_RESULT_SUCCESS) {
             af_log(AF_LOG_ERROR, "Editor rendering failed: %s", af_result_string(result));
             goto cleanup;
