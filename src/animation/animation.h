@@ -17,7 +17,10 @@ typedef enum AfPropertyType {
     AF_PROPERTY_SCALE,
     AF_PROPERTY_OPACITY,
     AF_PROPERTY_FILL_COLOR,
-    AF_PROPERTY_CORNER_RADIUS
+    AF_PROPERTY_CORNER_RADIUS,
+    AF_PROPERTY_PATH_POINT,
+    AF_PROPERTY_PATH_CONTROL_IN,
+    AF_PROPERTY_PATH_CONTROL_OUT
 } AfPropertyType;
 
 typedef enum AfInterpolation {
@@ -39,6 +42,7 @@ typedef struct AfAnimationTrack {
     AfPropertyType property;
     uint32_t keyframe_start;
     uint32_t keyframe_count;
+    uint32_t element_index;
 } AfAnimationTrack;
 
 typedef struct AfAnimationClip {

@@ -29,6 +29,31 @@ static float af_cubic_ease(float progress, const float easing[4]) {
     return af_bezier(easing[1], easing[3], (low + high) * 0.5F);
 }
 
+static bool af_animation_path_property(AfPropertyType property) {
+    return property >= AF_PROPERTY_PATH_POINT && property <= AF_PROPERTY_PATH_CONTROL_OUT;
+}
+
+static bool af_animation_track_target_valid(const AfAnimationTrack *track, const AfScene *scene) {
+    const AfSceneNode *node = af_scene_find_const(scene, track->node_id);
+    const AfPath *path = NULL;
+    const AfPathCommand *command = NULL;
+    if (node == NULL) {
+        return false;
+    }
+    if (!af_animation_path_property(track->property)) {
+        return track->element_index == 0U;
+    }
+    path = af_path_find_node_const(scene->paths, track->node_id);
+    if (node->type != AF_NODE_PATH || path == NULL || track->element_index >= path->command_count) {
+        return false;
+    }
+    command = &scene->paths->commands[path->command_start + track->element_index];
+    if (command->type == AF_PATH_CLOSE) {
+        return false;
+    }
+    return track->property == AF_PROPERTY_PATH_POINT || command->type == AF_PATH_CUBIC;
+}
+
 AfResult af_animation_validate(const AfAnimationData *animation, const AfScene *scene) {
     uint32_t clip_index = 0U;
     uint32_t track_index = 0U;
@@ -57,8 +82,8 @@ AfResult af_animation_validate(const AfAnimationData *animation, const AfScene *
         uint32_t key_index = 0U;
         uint32_t other = 0U;
         float last_time = -INFINITY;
-        if (track->id == 0U || track->property > AF_PROPERTY_CORNER_RADIUS ||
-            af_scene_find_const(scene, track->node_id) == NULL ||
+        if (track->id == 0U || track->property > AF_PROPERTY_PATH_CONTROL_OUT ||
+            !af_animation_track_target_valid(track, scene) ||
             track->keyframe_start > animation->keyframe_count ||
             track->keyframe_count > animation->keyframe_count - track->keyframe_start) {
             return AF_RESULT_INVALID_ARGUMENT;
@@ -181,6 +206,25 @@ AfResult af_animation_apply(const AfAnimationData *animation, const AfAnimationC
         case AF_PROPERTY_CORNER_RADIUS:
             node->corner_radius = value[0] < 0.0F ? 0.0F : value[0];
             break;
+        case AF_PROPERTY_PATH_POINT:
+        case AF_PROPERTY_PATH_CONTROL_IN:
+        case AF_PROPERTY_PATH_CONTROL_OUT: {
+            AfPathData *paths = (AfPathData *)scene->paths;
+            AfPath *path = af_path_find_node(paths, track->node_id);
+            AfPathCommand *command = &paths->commands[path->command_start + track->element_index];
+            AfVec2 *target =
+                track->property == AF_PROPERTY_PATH_POINT
+                    ? &command->point
+                    : (track->property == AF_PROPERTY_PATH_CONTROL_IN ? &command->control2
+                                                                      : &command->control1);
+            if (target->x != value[0] || target->y != value[1]) {
+                *target = (AfVec2){value[0], value[1]};
+                if (af_path_mark_geometry_changed(path) != AF_RESULT_SUCCESS) {
+                    return AF_RESULT_LIMIT_EXCEEDED;
+                }
+            }
+            break;
+        }
         }
     }
     return af_scene_evaluate_world(scene);

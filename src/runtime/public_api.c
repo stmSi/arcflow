@@ -28,6 +28,7 @@ typedef struct AfRuntimeInstanceSlot {
     AfPlayback playback;
     AfCanvasInfo canvas;
     AfLayoutData layout;
+    AfPathData paths;
     AfParticleData particles;
     AfParticleEmitter particle_emitters[AF_MAX_PARTICLE_EMITTERS];
     AfComponentRuntime components;
@@ -129,6 +130,8 @@ void af_runtime_destroy(AfRuntime *runtime) {
     for (index = 0U; index < AF_RUNTIME_MAX_INSTANCES; ++index) {
         if (runtime->instance_handles[index].occupied != 0U) {
             af_deallocate(&runtime->allocator, runtime->instances[index].scene.nodes);
+            af_deallocate(&runtime->allocator, runtime->instances[index].paths.paths);
+            af_deallocate(&runtime->allocator, runtime->instances[index].paths.commands);
         }
     }
     for (index = 0U; index < AF_RUNTIME_MAX_PACKAGES; ++index) {
@@ -209,14 +212,35 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
                                     .canvas = {.width = 1280.0F, .height = 720.0F}};
     slot->scene.nodes = af_allocate_array(&runtime->allocator, loaded->scene.count,
                                           sizeof(AfSceneNode), alignof(AfSceneNode));
-    if (loaded->scene.count != 0U && slot->scene.nodes == NULL) {
+    slot->paths.paths = af_allocate_array(&runtime->allocator, loaded->path_data.path_count,
+                                          sizeof(AfPath), alignof(AfPath));
+    slot->paths.commands = af_allocate_array(&runtime->allocator, loaded->path_data.command_count,
+                                             sizeof(AfPathCommand), alignof(AfPathCommand));
+    if ((loaded->scene.count != 0U && slot->scene.nodes == NULL) ||
+        (loaded->path_data.path_count != 0U && slot->paths.paths == NULL) ||
+        (loaded->path_data.command_count != 0U && slot->paths.commands == NULL)) {
+        af_deallocate(&runtime->allocator, slot->paths.commands);
+        af_deallocate(&runtime->allocator, slot->paths.paths);
+        af_deallocate(&runtime->allocator, slot->scene.nodes);
         (void)af_handle_release(&runtime->instance_pool, handle);
         *slot = (AfRuntimeInstanceSlot){0};
         return AF_RESULT_OUT_OF_MEMORY;
     }
     slot->scene.count = loaded->scene.count;
     slot->scene.capacity = loaded->scene.count;
-    slot->scene.paths = &loaded->path_data;
+    slot->paths.path_count = loaded->path_data.path_count;
+    slot->paths.path_capacity = loaded->path_data.path_count;
+    slot->paths.command_count = loaded->path_data.command_count;
+    slot->paths.command_capacity = loaded->path_data.command_count;
+    if (slot->paths.path_count != 0U) {
+        memcpy(slot->paths.paths, loaded->path_data.paths,
+               (size_t)slot->paths.path_count * sizeof(AfPath));
+    }
+    if (slot->paths.command_count != 0U) {
+        memcpy(slot->paths.commands, loaded->path_data.commands,
+               (size_t)slot->paths.command_count * sizeof(AfPathCommand));
+    }
+    slot->scene.paths = &slot->paths;
     slot->scene.styles = &loaded->style_data;
     slot->particles = loaded->particle_data;
     slot->particles.emitters = slot->particle_emitters;
@@ -256,6 +280,8 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
                                                AF_MAX_STATE_INPUTS);
     }
     if (result != AF_RESULT_SUCCESS) {
+        af_deallocate(&runtime->allocator, slot->paths.commands);
+        af_deallocate(&runtime->allocator, slot->paths.paths);
         af_deallocate(&runtime->allocator, slot->scene.nodes);
         (void)af_handle_release(&runtime->instance_pool, handle);
         *slot = (AfRuntimeInstanceSlot){0};
@@ -273,6 +299,8 @@ AfResult af_instance_destroy(AfRuntime *runtime, AfInstanceHandle instance) {
         return result;
     }
     af_deallocate(&runtime->allocator, slot->scene.nodes);
+    af_deallocate(&runtime->allocator, slot->paths.paths);
+    af_deallocate(&runtime->allocator, slot->paths.commands);
     runtime->instances[index] = (AfRuntimeInstanceSlot){0};
     return af_handle_release(&runtime->instance_pool, instance);
 }
@@ -292,6 +320,14 @@ AfResult af_instance_update(AfRuntime *runtime, AfInstanceHandle instance, float
     if (loaded->scene.count != 0U) {
         memcpy(slot->scene.nodes, loaded->base_nodes,
                (size_t)loaded->scene.count * sizeof(AfSceneNode));
+    }
+    if (loaded->path_data.path_count != 0U) {
+        memcpy(slot->paths.paths, loaded->path_data.paths,
+               (size_t)loaded->path_data.path_count * sizeof(AfPath));
+    }
+    if (loaded->path_data.command_count != 0U) {
+        memcpy(slot->paths.commands, loaded->path_data.commands,
+               (size_t)loaded->path_data.command_count * sizeof(AfPathCommand));
     }
     if (loaded->animation.clip_count != 0U) {
         af_playback_update(&slot->playback, &loaded->animation.clips[0], delta_time);

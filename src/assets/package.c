@@ -599,6 +599,36 @@ static bool af_path_id_exists(const uint8_t *bytes, const AfSectionView *paths, 
     return false;
 }
 
+static bool af_track_target_valid(const uint8_t *bytes, const AfSectionView *nodes,
+                                  const AfSectionView *paths, const AfSectionView *path_commands,
+                                  uint64_t node_id, AfPropertyType property,
+                                  uint32_t element_index) {
+    if (!af_node_id_exists(bytes, nodes, node_id)) {
+        return false;
+    }
+    if (property < AF_PROPERTY_PATH_POINT) {
+        return element_index == 0U;
+    }
+    if (af_node_type_for_id(bytes, nodes, node_id) != AF_NODE_PATH) {
+        return false;
+    }
+    for (uint32_t index = 0U; index < paths->count; ++index) {
+        const uint8_t *path = bytes + paths->offset + (uint64_t)index * AF_PATH_RECORD_SIZE;
+        const uint32_t start = af_read_u32(path + 16U);
+        const uint32_t count = af_read_u32(path + 20U);
+        if (af_read_u64(path + 8U) != node_id || element_index >= count ||
+            start > path_commands->count || element_index >= path_commands->count - start) {
+            continue;
+        }
+        const uint32_t type =
+            af_read_u32(bytes + path_commands->offset +
+                        (uint64_t)(start + element_index) * AF_PATH_COMMAND_RECORD_SIZE);
+        return type != AF_PATH_CLOSE &&
+               (property == AF_PROPERTY_PATH_POINT || type == AF_PATH_CUBIC);
+    }
+    return false;
+}
+
 static bool af_particle_record_valid(const uint8_t *record, const uint8_t *bytes,
                                      const AfSectionView *nodes, const AfSectionView *paths) {
     const AfParticleEmitter emitter = af_read_particle(record);
@@ -1478,10 +1508,11 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
         uint32_t key_index = 0U;
         uint32_t other = 0U;
         float last_time = -INFINITY;
-        if (af_read_u64(record) == 0U ||
-            !af_node_id_exists(bytes, nodes, af_read_u64(record + 8U)) ||
-            af_read_u32(record + 16U) > AF_PROPERTY_CORNER_RADIUS || start > keys->count ||
-            count > keys->count - start || af_read_u32(record + 28U) != 0U) {
+        if (af_read_u64(record) == 0U || af_read_u32(record + 16U) > AF_PROPERTY_PATH_CONTROL_OUT ||
+            !af_track_target_valid(bytes, nodes, paths, path_commands, af_read_u64(record + 8U),
+                                   (AfPropertyType)af_read_u32(record + 16U),
+                                   af_read_u32(record + 28U)) ||
+            start > keys->count || count > keys->count - start) {
             return AF_RESULT_INVALID_PACKAGE;
         }
         for (other = index + 1U; other < tracks->count; ++other) {
@@ -2094,6 +2125,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
         af_write_u32(record + 16U, (uint32_t)track->property);
         af_write_u32(record + 20U, track->keyframe_start);
         af_write_u32(record + 24U, track->keyframe_count);
+        af_write_u32(record + 28U, track->element_index);
     }
     for (index = 0U; index < source->animation->keyframe_count; ++index) {
         const AfKeyframe *key = &source->animation->keyframes[index];
@@ -2343,7 +2375,8 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
                                .node_id = af_read_u64(record + 8U),
                                .property = (AfPropertyType)af_read_u32(record + 16U),
                                .keyframe_start = af_read_u32(record + 20U),
-                               .keyframe_count = af_read_u32(record + 24U)};
+                               .keyframe_count = af_read_u32(record + 24U),
+                               .element_index = af_read_u32(record + 28U)};
     }
     for (index = 0U; index < keys->count; ++index) {
         const uint8_t *record = bytes + keys->offset + (uint64_t)index * AF_KEYFRAME_RECORD_SIZE;

@@ -53,9 +53,11 @@
 #define AF_EDITOR_STYLE_ROW_Y 414.0F
 #define AF_EDITOR_LAYOUT_ROW_Y 450.0F
 #define AF_EDITOR_PARTICLE_LABEL_Y 493.0F
-#define AF_EDITOR_PARTICLE_ROW_Y 514.0F
-#define AF_EDITOR_PARTICLE_ROW_STEP 30.0F
-#define AF_EDITOR_PARTICLE_ROW_COUNT 10U
+#define AF_EDITOR_PARTICLE_PAGE_Y 510.0F
+#define AF_EDITOR_PARTICLE_ROW_Y 540.0F
+#define AF_EDITOR_PARTICLE_ROW_STEP 29.0F
+#define AF_EDITOR_PARTICLE_ROW_COUNT 8U
+#define AF_EDITOR_PARTICLE_PAGE_COUNT 7U
 #define AF_EDITOR_TEXT_FONT_ID 1U
 #define AF_EDITOR_TEXT_GLYPH_CAPACITY 512U
 #define AF_EDITOR_TEXT_LINE_CAPACITY 8U
@@ -99,7 +101,8 @@ typedef enum AfEditorContextMenu {
     AF_EDITOR_CONTEXT_ROUNDED_RECTANGLE,
     AF_EDITOR_CONTEXT_ELLIPSE,
     AF_EDITOR_CONTEXT_PATH,
-    AF_EDITOR_CONTEXT_GROUP
+    AF_EDITOR_CONTEXT_GROUP,
+    AF_EDITOR_CONTEXT_PARTICLE
 } AfEditorContextMenu;
 
 typedef struct AfEditorContextMenuInfo {
@@ -136,12 +139,14 @@ typedef struct AfEditorState {
     uint8_t hierarchy_depth[AF_EDITOR_PROJECT_CAPACITY];
     uint32_t hierarchy_count;
     uint32_t hierarchy_scroll;
+    uint64_t hierarchy_anchor_id;
     float left_width;
     float right_width;
     float zoom;
     AfVec2 pan;
     float grid_step;
     float color_hue;
+    uint32_t particle_page;
     bool grid_visible;
     bool snapping;
     AfVec2 mouse_position;
@@ -173,6 +178,9 @@ typedef struct AfEditorState {
     uint32_t selected_path_command;
     AfProjectPathSnapshot path_drag_before;
     AfPathCommand path_drag_commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    AfProjectKeyframeSnapshot path_key_drag_before;
+    uint64_t path_drag_key_id;
+    bool path_key_drag;
     bool timeline_focus;
     bool curve_visible;
     bool preview_playing;
@@ -191,6 +199,7 @@ typedef struct AfEditorState {
     char project_path[AF_EDITOR_PATH_CAPACITY];
     char package_path[AF_EDITOR_PATH_CAPACITY];
     char output_path[AF_EDITOR_PATH_CAPACITY];
+    char sequence_prefix[AF_EDITOR_PATH_CAPACITY];
     char status[AF_EDITOR_STATUS_CAPACITY];
     uint32_t maximum_frames;
     uint32_t rendered_frames;
@@ -198,9 +207,12 @@ typedef struct AfEditorState {
     bool context_smoke;
     bool tooltip_smoke;
     bool selection_smoke;
+    bool vfx_smoke;
     bool running;
     bool dirty;
 } AfEditorState;
+
+static void af_editor_prepare_render_paths(AfEditorState *editor);
 
 static float af_editor_clamp(float value, float minimum, float maximum) {
     return value < minimum ? minimum : (value > maximum ? maximum : value);
@@ -497,6 +509,38 @@ static void af_editor_build_hierarchy(AfEditorState *editor) {
     if (editor->hierarchy_scroll > editor->hierarchy_count) {
         editor->hierarchy_scroll = editor->hierarchy_count;
     }
+}
+
+static void af_editor_hierarchy_select_range(AfEditorState *editor, uint32_t clicked_index,
+                                             bool additive) {
+    uint32_t anchor_index = UINT32_MAX;
+    if (clicked_index >= editor->hierarchy_count) {
+        return;
+    }
+    for (uint32_t index = 0U; index < editor->hierarchy_count; ++index) {
+        if (editor->project.scene.nodes[editor->hierarchy_order[index]].id ==
+            editor->hierarchy_anchor_id) {
+            anchor_index = index;
+            break;
+        }
+    }
+    if (anchor_index == UINT32_MAX) {
+        anchor_index = clicked_index;
+    }
+    if (!additive) {
+        af_editor_select_only(editor, 0U);
+    }
+    const uint32_t first = anchor_index < clicked_index ? anchor_index : clicked_index;
+    const uint32_t last = anchor_index > clicked_index ? anchor_index : clicked_index;
+    for (uint32_t index = first; index <= last; ++index) {
+        af_editor_selection_add(editor,
+                                editor->project.scene.nodes[editor->hierarchy_order[index]].id);
+    }
+    editor->selected_id = editor->project.scene.nodes[editor->hierarchy_order[clicked_index]].id;
+    af_editor_status(editor, editor->selected_count == AF_EDITOR_COMMAND_MAX_SNAPSHOTS &&
+                                     last - first + 1U > AF_EDITOR_COMMAND_MAX_SNAPSHOTS
+                                 ? "Selection reached the bounded 64-object limit"
+                                 : "Hierarchy range selected");
 }
 
 static void af_editor_add_shape(AfEditorState *editor, AfNodeType type, AfAffine2 transform,
@@ -858,8 +902,13 @@ static const AfEditorContextMenuInfo *af_editor_context_info(AfEditorContextMenu
         {.title = "GROUP",
          .items = {"DUPLICATE", "RENAME", "ADD RECT CHILD", "UNPARENT", "TOGGLE PARTICLES",
                    "DELETE"},
-         .item_count = 6U}};
-    return menu > AF_EDITOR_CONTEXT_NONE && menu <= AF_EDITOR_CONTEXT_GROUP ? &menus[menu] : NULL;
+         .item_count = 6U},
+        {.title = "PARTICLE EMITTER",
+         .items = {"RESET EMITTER", "TRIGGER BURST", "TOGGLE ENABLED", "NEXT OUTPUT", "NEXT SHAPE",
+                   "OPEN LOD PAGE", "REMOVE EMITTER"},
+         .item_count = 7U}};
+    return menu > AF_EDITOR_CONTEXT_NONE && menu <= AF_EDITOR_CONTEXT_PARTICLE ? &menus[menu]
+                                                                               : NULL;
 }
 
 static AfEditorContextMenu af_editor_context_for_node(const AfSceneNode *node) {
@@ -913,8 +962,21 @@ static const AfProjectTrack *af_editor_selected_track(const AfEditorState *edito
     for (index = 0U; index < editor->project.track_count; ++index) {
         const AfProjectTrack *track = &editor->project.tracks[index];
         if (track->clip_id == editor->selected_clip_id && track->node_id == editor->selected_id &&
-            track->property == editor->selected_property) {
+            track->property == editor->selected_property &&
+            (track->property < AF_PROPERTY_PATH_POINT ||
+             track->element_index == editor->selected_path_command)) {
             return track;
+        }
+    }
+    return NULL;
+}
+
+static AfProjectKeyframe *af_editor_track_key_at(AfEditorState *editor, uint64_t track_id,
+                                                 float time) {
+    for (uint32_t index = 0U; index < editor->project.keyframe_count; ++index) {
+        AfProjectKeyframe *key = &editor->project.keyframes[index];
+        if (key->track_id == track_id && fabsf(key->keyframe.time - time) <= 0.0001F) {
+            return key;
         }
     }
     return NULL;
@@ -931,17 +993,18 @@ static bool af_editor_keyframe_selected(const AfEditorState *editor, uint64_t id
 }
 
 static AfColor af_editor_property_color(AfPropertyType property) {
-    static const AfColor colors[] = {{0.3F, 0.72F, 1.0F, 1.0F},  {1.0F, 0.56F, 0.3F, 1.0F},
-                                     {0.45F, 0.9F, 0.46F, 1.0F}, {0.78F, 0.58F, 1.0F, 1.0F},
-                                     {1.0F, 0.35F, 0.55F, 1.0F}, {0.96F, 0.8F, 0.28F, 1.0F}};
-    return property <= AF_PROPERTY_CORNER_RADIUS ? colors[property]
-                                                 : (AfColor){1.0F, 1.0F, 1.0F, 1.0F};
+    static const AfColor colors[] = {
+        {0.3F, 0.72F, 1.0F, 1.0F},  {1.0F, 0.56F, 0.3F, 1.0F},  {0.45F, 0.9F, 0.46F, 1.0F},
+        {0.78F, 0.58F, 1.0F, 1.0F}, {1.0F, 0.35F, 0.55F, 1.0F}, {0.96F, 0.8F, 0.28F, 1.0F},
+        {0.3F, 0.9F, 0.88F, 1.0F},  {0.55F, 0.7F, 1.0F, 1.0F},  {0.75F, 0.48F, 1.0F, 1.0F}};
+    return property <= AF_PROPERTY_PATH_CONTROL_OUT ? colors[property]
+                                                    : (AfColor){1.0F, 1.0F, 1.0F, 1.0F};
 }
 
 static const char *af_editor_property_name(AfPropertyType property) {
-    static const char *const names[] = {"POSITION", "ROTATION", "SCALE",
-                                        "OPACITY",  "FILL",     "RADIUS"};
-    return property <= AF_PROPERTY_CORNER_RADIUS ? names[property] : "UNKNOWN";
+    static const char *const names[] = {"POSITION", "ROTATION", "SCALE",     "OPACITY",   "FILL",
+                                        "RADIUS",   "ANCHOR",   "HANDLE IN", "HANDLE OUT"};
+    return property <= AF_PROPERTY_PATH_CONTROL_OUT ? names[property] : "UNKNOWN";
 }
 
 static uint32_t af_editor_track_row(const AfEditorState *editor, uint64_t track_id) {
@@ -973,6 +1036,11 @@ static float af_editor_curve_value(const AfProjectTrack *track, const AfProjectK
         break;
     case AF_PROPERTY_CORNER_RADIUS:
         value *= 0.01F;
+        break;
+    case AF_PROPERTY_PATH_POINT:
+    case AF_PROPERTY_PATH_CONTROL_IN:
+    case AF_PROPERTY_PATH_CONTROL_OUT:
+        value = 0.5F + value / 2560.0F;
         break;
     case AF_PROPERTY_OPACITY:
     case AF_PROPERTY_FILL_COLOR:
@@ -1152,9 +1220,9 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                        (AfColor){0.9F, 0.92F, 0.96F, 1.0F}, 100135);
     af_editor_add_text(editor, center_left + 76.0F, top + 19.0F, "CURVE", 0.45F, 31.0F,
                        (AfColor){0.9F, 0.92F, 0.96F, 1.0F}, 100135);
-    for (index = 0U; index < 6U; ++index) {
+    for (index = 0U; index < 9U; ++index) {
         const float x = center_left + 116.0F + (float)index * 20.0F;
-        static const char *const property_icons[] = {"P", "R", "S", "O", "F", "C"};
+        static const char *const property_icons[] = {"P", "R", "S", "O", "F", "C", "A", "I", "H"};
         af_editor_add_rect(editor, x, top + 12.0F, 15.0F, 18.0F,
                            index == (uint32_t)editor->selected_property
                                ? af_editor_property_color((AfPropertyType)index)
@@ -1163,7 +1231,7 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
         af_editor_add_text(editor, x + 5.0F, top + 18.0F, property_icons[index], 0.85F, 6.0F,
                            (AfColor){0.94F, 0.95F, 0.98F, 1.0F}, 100135);
     }
-    af_editor_add_text(editor, center_left + 242.0F, top + 18.0F, "TIMELINE", 0.9F, 58.0F,
+    af_editor_add_text(editor, center_left + 302.0F, top + 18.0F, "TIMELINE", 0.9F, 58.0F,
                        (AfColor){0.62F, 0.65F, 0.72F, 1.0F}, 100130);
     for (index = 0U; index < editor->project.clip_count && index < 8U; ++index) {
         const float x = center_right - 74.0F * (float)(index + 1U);
@@ -1218,7 +1286,9 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
             af_editor_add_rect(editor, center_left, y, AF_EDITOR_TIMELINE_HEADER_WIDTH,
                                AF_EDITOR_TIMELINE_TRACK_HEIGHT - 1.0F,
                                track->node_id == editor->selected_id &&
-                                       track->property == editor->selected_property
+                                       track->property == editor->selected_property &&
+                                       (track->property < AF_PROPERTY_PATH_POINT ||
+                                        track->element_index == editor->selected_path_command)
                                    ? (AfColor){0.16F, 0.27F, 0.42F, 1.0F}
                                    : (AfColor){0.11F, 0.12F, 0.15F, 1.0F},
                                100115);
@@ -1226,8 +1296,15 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                                af_editor_property_color(track->property), 100125);
             af_editor_add_text(editor, center_left + 23.0F, y + 8.0F,
                                af_editor_property_name(track->property), 1.0F,
-                               AF_EDITOR_TIMELINE_HEADER_WIDTH - 30.0F,
+                               AF_EDITOR_TIMELINE_HEADER_WIDTH - 54.0F,
                                (AfColor){0.72F, 0.75F, 0.82F, 1.0F}, 100125);
+            if (track->property >= AF_PROPERTY_PATH_POINT) {
+                char point_label[16];
+                (void)snprintf(point_label, sizeof(point_label), "#%u", track->element_index + 1U);
+                af_editor_add_text(editor, center_left + AF_EDITOR_TIMELINE_HEADER_WIDTH - 31.0F,
+                                   y + 8.0F, point_label, 0.72F, 27.0F,
+                                   (AfColor){0.45F, 0.72F, 0.82F, 1.0F}, 100125);
+            }
             af_editor_add_rect(editor, ruler_x, y, center_right - ruler_x,
                                AF_EDITOR_TIMELINE_TRACK_HEIGHT - 1.0F,
                                (row & 1U) != 0U ? (AfColor){0.095F, 0.105F, 0.13F, 1.0F}
@@ -1307,8 +1384,17 @@ static AfVec2 af_editor_screen_to_project(const AfEditorState *editor, int width
 }
 
 static void af_editor_update_preview(AfEditorState *editor) {
+    const AfPath *selected_path =
+        af_path_find_node_const(&editor->project.path_data, editor->selected_id);
+    if (selected_path == NULL && editor->selected_property >= AF_PROPERTY_PATH_POINT) {
+        editor->selected_property = AF_PROPERTY_POSITION;
+    } else if (selected_path != NULL &&
+               editor->selected_path_command >= selected_path->command_count) {
+        editor->selected_path_command = 0U;
+    }
     editor->preview_scene.count = editor->project.scene.count;
-    editor->preview_scene.paths = &editor->project.path_data;
+    af_editor_prepare_render_paths(editor);
+    editor->preview_scene.paths = &editor->render_path_data;
     editor->preview_scene.styles = &editor->project.style_data;
     editor->preview_scene.layouts = &editor->project.layout_data;
     editor->preview_scene.particles = &editor->project.particle_data;
@@ -1352,10 +1438,10 @@ static uint64_t af_editor_hit_test(AfEditorState *editor, AfVec2 project_point) 
         bool contains = false;
         if (node->type == AF_NODE_PATH) {
             AfAffine2 inverse = {0};
-            const AfPath *path = af_path_find_node_const(&editor->project.path_data, node->id);
+            const AfPath *path = af_path_find_node_const(&editor->render_path_data, node->id);
             contains = path != NULL && editor->path_scratch != NULL &&
                        af_affine_inverse(node->world_transform, &inverse) &&
-                       af_path_hit_test(&editor->project.path_data, path,
+                       af_path_hit_test(&editor->render_path_data, path,
                                         af_affine_transform_point(inverse, project_point), 0.25F,
                                         editor->path_scratch);
         } else {
@@ -1399,7 +1485,7 @@ static void af_editor_render_hierarchy(AfEditorState *editor, int height) {
     const float top = AF_EDITOR_TOOLBAR_HEIGHT + 8.0F;
     af_editor_add_text(editor, 14.0F, 15.0F, "SCENE HIERARCHY", 1.5F, editor->left_width - 28.0F,
                        (AfColor){0.78F, 0.81F, 0.88F, 1.0F}, 100125);
-    af_editor_add_text(editor, 14.0F, 30.0F, "HOVER HELP / ALT DETAILS / RIGHT CLICK ACTIONS", 0.6F,
+    af_editor_add_text(editor, 14.0F, 30.0F, "SHIFT RANGE / CTRL TOGGLE / RIGHT CLICK", 0.6F,
                        editor->left_width - 28.0F, (AfColor){0.43F, 0.47F, 0.56F, 1.0F}, 100125);
     if ((float)height > top + AF_EDITOR_STATUS_HEIGHT) {
         visible_rows =
@@ -1559,6 +1645,85 @@ static void af_editor_render_color_picker(AfEditorState *editor, float x,
                        (AfColor){0.46F, 0.5F, 0.58F, 1.0F}, 100130);
 }
 
+static void af_editor_particle_labels(const AfEditorState *editor, const AfParticleEmitter *emitter,
+                                      char labels[AF_EDITOR_PARTICLE_ROW_COUNT][64]) {
+    static const char *const type_names[] = {"POINT", "LINE", "RECT", "CIRCLE", "PATH"};
+    static const char *const output_names[] = {"BILLBOARD", "UI",   "FLIPBOOK", "TRAIL",
+                                               "RIBBON",    "MESH", "DECAL",    "HEAT",
+                                               "REFRACT",   "SOFT", "LIGHT"};
+    const AfVfxLodSettings *lod = &editor->project.particle_data.lod;
+    if (editor->particle_page == 0U) {
+        (void)snprintf(labels[0], 64U, "ENABLED %s", emitter->enabled ? "ON" : "OFF");
+        (void)snprintf(labels[1], 64U, "RATE %.0f / S", (double)emitter->spawn_rate);
+        (void)snprintf(labels[2], 64U, "LIFE MIN %.2f", (double)emitter->lifetime_min);
+        (void)snprintf(labels[3], 64U, "LIFE MAX %.2f", (double)emitter->lifetime_max);
+        (void)snprintf(labels[4], 64U, "CAPACITY %u", emitter->capacity);
+        (void)snprintf(labels[5], 64U, "SHAPE %s", type_names[emitter->type]);
+        (void)snprintf(labels[6], 64U, "BURST %u", emitter->burst_count);
+        (void)snprintf(labels[7], 64U, "SEED %u", emitter->seed);
+    } else if (editor->particle_page == 1U) {
+        (void)snprintf(labels[0], 64U, "VELOCITY X MIN %.0f", (double)emitter->velocity_min.x);
+        (void)snprintf(labels[1], 64U, "VELOCITY X MAX %.0f", (double)emitter->velocity_max.x);
+        (void)snprintf(labels[2], 64U, "VELOCITY Y MIN %.0f", (double)emitter->velocity_min.y);
+        (void)snprintf(labels[3], 64U, "VELOCITY Y MAX %.0f", (double)emitter->velocity_max.y);
+        (void)snprintf(labels[4], 64U, "GRAVITY X %.0f", (double)emitter->gravity.x);
+        (void)snprintf(labels[5], 64U, "GRAVITY Y %.0f", (double)emitter->gravity.y);
+        (void)snprintf(labels[6], 64U, "WIND X %.0f", (double)emitter->wind.x);
+        (void)snprintf(labels[7], 64U, "DRAG %.2f", (double)emitter->drag);
+    } else if (editor->particle_page == 2U) {
+        (void)snprintf(labels[0], 64U, "TURBULENCE %.0f", (double)emitter->turbulence_strength);
+        (void)snprintf(labels[1], 64U, "FREQUENCY %.2f", (double)emitter->turbulence_frequency);
+        (void)snprintf(labels[2], 64U, "RADIAL %.0f", (double)emitter->radial_force);
+        (void)snprintf(labels[3], 64U, "VORTEX %.0f", (double)emitter->vortex_force);
+        (void)snprintf(labels[4], 64U, "ATTRACT %.0f", (double)emitter->attractor_strength);
+        (void)snprintf(labels[5], 64U, "ATTRACT RADIUS %.0f", (double)emitter->attractor_radius);
+        (void)snprintf(labels[6], 64U, "REPULSE %.0f", (double)emitter->repulsor_strength);
+        (void)snprintf(labels[7], 64U, "VECTOR FIELD %.0f", (double)emitter->vector_field_strength);
+    } else if (editor->particle_page == 3U) {
+        (void)snprintf(labels[0], 64U, "PLANE %s", emitter->collision_plane_enabled ? "ON" : "OFF");
+        (void)snprintf(labels[1], 64U, "PLANE OFFSET %.0f",
+                       (double)emitter->collision_plane_offset);
+        (void)snprintf(labels[2], 64U, "BOUNCE %.2f", (double)emitter->collision_restitution);
+        (void)snprintf(labels[3], 64U, "FRICTION %.2f", (double)emitter->collision_friction);
+        (void)snprintf(labels[4], 64U, "DEPTH %s", emitter->depth_collision_enabled ? "ON" : "OFF");
+        (void)snprintf(labels[5], 64U, "DEPTH MIN %.0f", (double)emitter->depth_min);
+        (void)snprintf(labels[6], 64U, "DEPTH MAX %.0f", (double)emitter->depth_max);
+        (void)snprintf(labels[7], 64U, "DEPTH SPEED %.0f / %.0f",
+                       (double)emitter->depth_velocity_min, (double)emitter->depth_velocity_max);
+    } else if (editor->particle_page == 4U) {
+        (void)snprintf(labels[0], 64U, "OUTPUT %s", output_names[emitter->output]);
+        (void)snprintf(labels[1], 64U, "TRAIL LENGTH %.2f", (double)emitter->trail_length);
+        (void)snprintf(labels[2], 64U, "TRAIL WIDTH %.2f", (double)emitter->trail_width);
+        (void)snprintf(labels[3], 64U, "MESH SCALE %.2f", (double)emitter->mesh_scale);
+        (void)snprintf(labels[4], 64U, "DECAL ROT %.2f", (double)emitter->decal_rotation_offset);
+        (void)snprintf(labels[5], 64U, "DISTORTION %.2f", (double)emitter->distortion_strength);
+        (void)snprintf(labels[6], 64U, "SOFT FADE %.2f", (double)emitter->soft_fade_distance);
+        (void)snprintf(labels[7], 64U, "LIGHT RADIUS %.1f", (double)emitter->light_radius);
+    } else if (editor->particle_page == 5U) {
+        (void)snprintf(labels[0], 64U, "FLIP COLUMNS %u", emitter->flipbook_columns);
+        (void)snprintf(labels[1], 64U, "FLIP ROWS %u", emitter->flipbook_rows);
+        (void)snprintf(labels[2], 64U, "FLIP FPS %.1f",
+                       (double)emitter->flipbook_frames_per_second);
+        (void)snprintf(labels[3], 64U, "SUB EMITTER %llu",
+                       (unsigned long long)emitter->sub_emitter_id);
+        (void)snprintf(labels[4], 64U, "ON BIRTH %u", emitter->sub_emit_birth_count);
+        (void)snprintf(labels[5], 64U, "ON DEATH %u", emitter->sub_emit_death_count);
+        (void)snprintf(labels[6], 64U, "RECURSION %u", emitter->max_recursion_depth);
+        (void)snprintf(labels[7], 64U, "EVENT BURST %u", emitter->event_burst_count);
+    } else {
+        (void)snprintf(labels[0], 64U, "MAX PARTICLES %u", lod->maximum_particles);
+        (void)snprintf(labels[1], 64U, "SPAWN QUALITY %.0f%%",
+                       (double)(lod->spawn_rate_scale * 100.0F));
+        (void)snprintf(labels[2], 64U, "SIM QUALITY %.0f%%",
+                       (double)(lod->simulation_frequency_scale * 100.0F));
+        (void)snprintf(labels[3], 64U, "RENDERER %s", lod->renderer_enabled ? "ON" : "OFF");
+        (void)snprintf(labels[4], 64U, "DIST START %.0f", (double)lod->distance_start);
+        (void)snprintf(labels[5], 64U, "DIST END %.0f", (double)lod->distance_end);
+        (void)snprintf(labels[6], 64U, "HOST QUALITY %.0f%%", (double)(lod->host_quality * 100.0F));
+        (void)snprintf(labels[7], 64U, "VIEW DIST %.0f", (double)lod->view_distance);
+    }
+}
+
 static void af_editor_render_inspector(AfEditorState *editor, int width) {
     const float x = (float)width - editor->right_width + 18.0F;
     const AfSceneNode *selected = af_scene_find_const(&editor->project.scene, editor->selected_id);
@@ -1654,30 +1819,23 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
                                "RIGHT CLICK > TOGGLE PARTICLES", 0.62F, editor->right_width - 36.0F,
                                (AfColor){0.52F, 0.56F, 0.64F, 1.0F}, 100125);
         } else {
-            static const char *const type_names[] = {"POINT", "LINE", "RECT", "CIRCLE", "PATH"};
-            static const char *const output_names[] = {"BILLBOARD", "UI",   "FLIPBOOK", "TRAIL",
-                                                       "RIBBON",    "MESH", "DECAL",    "HEAT",
-                                                       "REFRACT",   "SOFT", "LIGHT"};
+            static const char *const page_names[] = {"EMIT", "MOVE",  "FORCE", "COLL",
+                                                     "LOOK", "SPAWN", "LOD"};
             char labels[AF_EDITOR_PARTICLE_ROW_COUNT][64];
             const AfVkVfxMetrics metrics = af_vk_renderer_vfx_metrics(editor->renderer);
-            (void)snprintf(labels[0], sizeof(labels[0]), "RATE %.0f / S",
-                           (double)emitter->spawn_rate);
-            (void)snprintf(labels[1], sizeof(labels[1]), "LIFE %.2f - %.2f",
-                           (double)emitter->lifetime_min, (double)emitter->lifetime_max);
-            (void)snprintf(labels[2], sizeof(labels[2]), "CAPACITY %u", emitter->capacity);
-            (void)snprintf(labels[3], sizeof(labels[3]), "SHAPE %s", type_names[emitter->type]);
-            (void)snprintf(labels[4], sizeof(labels[4]), "OUTPUT %s",
-                           output_names[emitter->output]);
-            (void)snprintf(labels[5], sizeof(labels[5]), "TURBULENCE %.0f",
-                           (double)emitter->turbulence_strength);
-            (void)snprintf(labels[6], sizeof(labels[6]), "RADIAL %.0f",
-                           (double)emitter->radial_force);
-            (void)snprintf(labels[7], sizeof(labels[7]), "VORTEX %.0f",
-                           (double)emitter->vortex_force);
-            (void)snprintf(labels[8], sizeof(labels[8]), "PLANE COLLISION %s",
-                           emitter->collision_plane_enabled ? "ON" : "OFF");
-            (void)snprintf(labels[9], sizeof(labels[9]), "EVENT BURST %u",
-                           emitter->event_burst_count);
+            editor->particle_page %= AF_EDITOR_PARTICLE_PAGE_COUNT;
+            af_editor_particle_labels(editor, emitter, labels);
+            for (uint32_t page = 0U; page < AF_EDITOR_PARTICLE_PAGE_COUNT; ++page) {
+                const float page_x = x + (float)page * 32.0F;
+                af_editor_add_rect(editor, page_x, AF_EDITOR_PARTICLE_PAGE_Y, 29.0F, 23.0F,
+                                   page == editor->particle_page
+                                       ? (AfColor){0.18F, 0.48F, 0.76F, 1.0F}
+                                       : (AfColor){0.2F, 0.22F, 0.27F, 1.0F},
+                                   100120);
+                af_editor_add_text(editor, page_x + 3.0F, AF_EDITOR_PARTICLE_PAGE_Y + 7.0F,
+                                   page_names[page], 0.5F, 24.0F,
+                                   (AfColor){0.86F, 0.89F, 0.95F, 1.0F}, 100135);
+            }
             for (uint32_t row = 0U; row < AF_EDITOR_PARTICLE_ROW_COUNT; ++row) {
                 const float row_y =
                     AF_EDITOR_PARTICLE_ROW_Y + (float)row * AF_EDITOR_PARTICLE_ROW_STEP;
@@ -2184,45 +2342,53 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                     .shortcut = "Click repeatedly to cycle available modes"};
             }
         }
+        if (mouse.y >= AF_EDITOR_PARTICLE_PAGE_Y && mouse.y < AF_EDITOR_PARTICLE_PAGE_Y + 23.0F &&
+            mouse.x >= panel_x) {
+            const uint32_t page = (uint32_t)((mouse.x - panel_x) / 32.0F);
+            static const char *const page_titles[] = {"Emission",  "Motion",    "Forces",
+                                                      "Collision", "Rendering", "Sub-Emitters",
+                                                      "VFX LOD"};
+            if (page < AF_EDITOR_PARTICLE_PAGE_COUNT) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x23800) + page,
+                    .title = page_titles[page],
+                    .summary = "Open this particle-control page.",
+                    .details =
+                        "Pages keep the complete VFX interface readable without panel overflow.",
+                    .shortcut = "Click a page, then use labeled - and + controls"};
+            }
+        }
         if (mouse.y >= AF_EDITOR_PARTICLE_ROW_Y &&
             mouse.y < AF_EDITOR_PARTICLE_ROW_Y +
                           AF_EDITOR_PARTICLE_ROW_COUNT * AF_EDITOR_PARTICLE_ROW_STEP &&
             mouse.x >= panel_x && mouse.x < panel_x + 65.0F) {
             const uint32_t row =
                 (uint32_t)((mouse.y - AF_EDITOR_PARTICLE_ROW_Y) / AF_EDITOR_PARTICLE_ROW_STEP);
-            static const char *const titles[] = {
-                "Particle Spawn Rate", "Particle Lifetime", "Particle Capacity", "Emitter Shape",
-                "Particle Output",     "Curl Turbulence",   "Radial Force",      "Vortex Force",
-                "Collision Plane",     "Event Burst"};
-            static const char *const summaries[] = {
-                "Change particles emitted per second.",
-                "Change the particle lifetime range.",
-                "Change this emitter's bounded GPU capacity.",
-                "Cycle the particle source shape.",
-                "Cycle the VFX renderer type.",
-                "Change deterministic curl-like turbulence.",
-                "Push particles toward or away from the force center.",
-                "Rotate particles around the force center.",
-                "Enable or disable the local collision plane.",
-                "Set the count used by a host-triggered burst."};
-            static const char *const details[] = {
-                "Spawn uses a fixed-step accumulator and deterministic per-emitter random seed.",
-                "Color, size, position, velocity, and rotation evolve over this lifetime.",
-                "Total project capacity cannot exceed the fixed runtime GPU particle pool.",
-                "Sources include point, line, rectangle, circle, and vector path.",
-                "Outputs include trails, ribbons, mesh proxies, decals, distortion, soft and "
-                "light.",
-                "The force is bounded and sampled analytically without per-frame allocation.",
-                "Positive values repel; negative values pull toward the local center.",
-                "The force is perpendicular to the radial direction and remains bounded.",
-                "Failed or non-finite collisions recycle particles without corrupting the pool.",
-                "Runtime events are sequence-numbered, one-shot, and capacity bounded."};
+            static const char *const
+                titles[AF_EDITOR_PARTICLE_PAGE_COUNT][AF_EDITOR_PARTICLE_ROW_COUNT] = {
+                    {"Emitter Enabled", "Spawn Rate", "Minimum Lifetime", "Maximum Lifetime",
+                     "Particle Capacity", "Emitter Shape", "Startup Burst", "Random Seed"},
+                    {"Minimum X Velocity", "Maximum X Velocity", "Minimum Y Velocity",
+                     "Maximum Y Velocity", "Horizontal Gravity", "Vertical Gravity",
+                     "Horizontal Wind", "Particle Drag"},
+                    {"Curl Turbulence", "Noise Frequency", "Radial Force", "Vortex Force",
+                     "Attractor Strength", "Attractor Radius", "Repulsor Strength",
+                     "Vector Field Strength"},
+                    {"Collision Plane", "Plane Offset", "Restitution", "Collision Friction",
+                     "Depth Collision", "Minimum Depth", "Maximum Depth", "Depth Velocity"},
+                    {"Particle Output", "Trail Length", "Trail Width", "Mesh Scale",
+                     "Decal Rotation", "Distortion", "Soft Fade", "Light Radius"},
+                    {"Flipbook Columns", "Flipbook Rows", "Flipbook Frame Rate", "Sub-Emitter",
+                     "Birth Spawn Count", "Death Spawn Count", "Recursion Limit", "Event Burst"},
+                    {"Maximum Particles", "Spawn Quality", "Simulation Quality", "VFX Renderer",
+                     "LOD Start Distance", "LOD End Distance", "Host Quality", "View Distance"}};
             if (row < AF_EDITOR_PARTICLE_ROW_COUNT) {
-                return (AfEditorTooltip){.id = UINT64_C(0x24000) + row,
-                                         .title = titles[row],
-                                         .summary = summaries[row],
-                                         .details = details[row],
-                                         .shortcut = "Use - and + to change the value"};
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x24000) + (uint64_t)editor->particle_page * 16U + row,
+                    .title = titles[editor->particle_page][row],
+                    .summary = "Adjust this particle-system parameter.",
+                    .details = "The value is bounded, validated, saved, compiled, and undoable.",
+                    .shortcut = "Use - and + to change the value"};
             }
         }
         return (AfEditorTooltip){
@@ -2260,18 +2426,23 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                     .details = "Curve view exposes cubic Bézier tangent handles for selected keys.",
                     .shortcut = "Shortcut: F6"};
             }
-            if (local_x >= 116.0F && local_x < 236.0F) {
+            if (local_x >= 116.0F && local_x < 296.0F) {
                 const uint32_t property = (uint32_t)((local_x - 116.0F) / 20.0F);
-                static const char *const titles[] = {"Position Track", "Rotation Track",
-                                                     "Scale Track",    "Opacity Track",
-                                                     "Fill Track",     "Corner Radius Track"};
-                if (property < 6U) {
+                static const char *const titles[] = {
+                    "Position Track",       "Rotation Track",
+                    "Scale Track",          "Opacity Track",
+                    "Fill Track",           "Corner Radius Track",
+                    "Path Anchor Track",    "Incoming Handle Track",
+                    "Outgoing Handle Track"};
+                if (property < 9U) {
                     return (AfEditorTooltip){
                         .id = UINT64_C(0x30100) + property,
                         .title = titles[property],
                         .summary = "Choose the property used by new keyframes.",
-                        .details =
-                            "The active object, clip, and property identify the animation track.",
+                        .details = property < 6U ? "The active object, clip, and property identify "
+                                                   "the animation track."
+                                                 : "Each vector command index owns independent "
+                                                   "anchor and Bézier handle tracks.",
                         .shortcut = "Shortcut: K adds a key at the playhead"};
                 }
             }
@@ -2317,8 +2488,8 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                 .id = UINT64_C(0x4000000000000000) | node->id,
                 .title = editor->project.names[node_index],
                 .summary = "Select this object in the scene hierarchy.",
-                .details = "Shift-click a group to reparent; right click for object actions.",
-                .shortcut = "F2 rename / Ctrl+D duplicate / Delete"};
+                .details = "Shift selects a contiguous range; Ctrl toggles individual objects.",
+                .shortcut = "Shift range / Ctrl toggle / Right click actions"};
         }
         return tooltip;
     }
@@ -2471,7 +2642,7 @@ static void af_editor_render_canvas_box(AfEditorState *editor) {
 
 static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera) {
     const AfSceneNode *selected = af_scene_find_const(&editor->preview_scene, editor->selected_id);
-    const AfPath *path = af_path_find_node_const(&editor->project.path_data, editor->selected_id);
+    const AfPath *path = af_path_find_node_const(&editor->render_path_data, editor->selected_id);
     AfAffine2 transform = {0};
     AfVec2 previous = {0};
     bool have_previous = false;
@@ -2481,15 +2652,38 @@ static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera
     transform = af_affine_multiply(camera, selected->world_transform);
     for (uint32_t index = 0U; index < path->command_count; ++index) {
         const AfPathCommand *command =
-            &editor->project.path_data.commands[path->command_start + index];
+            &editor->render_path_data.commands[path->command_start + index];
         const bool chosen = index == editor->selected_path_command;
         const AfColor point_color =
             chosen ? (AfColor){1.0F, 0.82F, 0.2F, 1.0F} : (AfColor){0.88F, 0.9F, 0.96F, 1.0F};
         if (command->type == AF_PATH_MOVE || command->type == AF_PATH_LINE ||
             command->type == AF_PATH_CUBIC) {
             const AfVec2 point = af_affine_transform_point(transform, command->point);
+            bool keyed = false;
+            char point_label[20];
+            for (uint32_t track_index = 0U; track_index < editor->project.track_count;
+                 ++track_index) {
+                const AfProjectTrack *track = &editor->project.tracks[track_index];
+                if (track->clip_id == editor->selected_clip_id &&
+                    track->node_id == editor->selected_id &&
+                    track->property == AF_PROPERTY_PATH_POINT && track->element_index == index) {
+                    keyed = true;
+                    break;
+                }
+            }
             af_editor_add_rect(editor, point.x - 4.0F, point.y - 4.0F, 8.0F, 8.0F, point_color,
                                90040);
+            (void)snprintf(point_label, sizeof(point_label), "P%u%s", index + 1U,
+                           keyed ? " KEY" : "");
+            af_editor_add_text(editor, point.x + 7.0F, point.y - 10.0F, point_label, 0.68F, 46.0F,
+                               keyed ? (AfColor){0.35F, 0.92F, 0.82F, 1.0F}
+                                     : (AfColor){0.68F, 0.72F, 0.8F, 1.0F},
+                               90045);
+            if (chosen) {
+                af_editor_add_text(editor, point.x + 7.0F, point.y + 8.0F,
+                                   "TIMELINE A / I / H  -  K KEY", 0.58F, 178.0F,
+                                   (AfColor){0.46F, 0.82F, 0.9F, 1.0F}, 90045);
+            }
             if (chosen && command->type == AF_PATH_CUBIC && have_previous) {
                 const AfVec2 first = af_affine_transform_point(transform, command->control1);
                 const AfVec2 second = af_affine_transform_point(transform, command->control2);
@@ -2502,6 +2696,10 @@ static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera
                                    (AfColor){0.34F, 0.7F, 1.0F, 1.0F}, 90040);
                 af_editor_add_rect(editor, second.x - 4.0F, second.y - 4.0F, 8.0F, 8.0F,
                                    (AfColor){0.34F, 0.7F, 1.0F, 1.0F}, 90040);
+                af_editor_add_text(editor, first.x + 7.0F, first.y - 7.0F, "OUT", 0.62F, 28.0F,
+                                   (AfColor){0.42F, 0.76F, 1.0F, 1.0F}, 90045);
+                af_editor_add_text(editor, second.x + 7.0F, second.y - 7.0F, "IN", 0.62F, 24.0F,
+                                   (AfColor){0.72F, 0.52F, 1.0F, 1.0F}, 90045);
             }
             previous = command->point;
             have_previous = true;
@@ -2533,7 +2731,6 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     AfAffine2 camera = af_editor_camera(editor, width, height);
     uint32_t index = 0U;
     editor->render_scene.count = 0U;
-    af_editor_prepare_render_paths(editor);
     af_editor_layout(editor, width, height, &canvas_x, &canvas_y, &canvas_width, &canvas_height);
     af_editor_add_rect(editor, canvas_x, canvas_y, canvas_width, canvas_height,
                        (AfColor){0.145F, 0.155F, 0.18F, 1.0F}, -100000);
@@ -2589,8 +2786,9 @@ static void af_editor_update_title(AfEditorState *editor) {
     const char *name = af_project_name(&editor->project, editor->selected_id);
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
-    static const char *const properties[] = {"position", "rotation", "scale",
-                                             "opacity",  "fill",     "radius"};
+    static const char *const properties[] = {"position", "rotation",  "scale",
+                                             "opacity",  "fill",      "radius",
+                                             "anchor",   "handle in", "handle out"};
     if (editor->rename_active) {
         (void)snprintf(title, sizeof(title),
                        "Arcflow Editor | Rename: %s | Enter commit, Esc cancel",
@@ -2664,8 +2862,8 @@ static void af_editor_select_keyframe(AfEditorState *editor, uint64_t id, bool t
     }
 }
 
-static void af_editor_property_value(const AfSceneNode *node, AfPropertyType property,
-                                     float value[4]) {
+static bool af_editor_property_value(const AfEditorState *editor, const AfSceneNode *node,
+                                     AfPropertyType property, float value[4]) {
     switch (property) {
     case AF_PROPERTY_POSITION:
         value[0] = node->local_transform.position.x;
@@ -2690,9 +2888,33 @@ static void af_editor_property_value(const AfSceneNode *node, AfPropertyType pro
     case AF_PROPERTY_CORNER_RADIUS:
         value[0] = node->corner_radius;
         break;
-    default:
+    case AF_PROPERTY_PATH_POINT:
+    case AF_PROPERTY_PATH_CONTROL_IN:
+    case AF_PROPERTY_PATH_CONTROL_OUT: {
+        const AfPath *path = af_path_find_node_const(&editor->render_path_data, node->id);
+        const AfPathCommand *path_command = NULL;
+        const AfVec2 *point = NULL;
+        if (path == NULL || editor->selected_path_command >= path->command_count) {
+            return false;
+        }
+        path_command =
+            &editor->render_path_data.commands[path->command_start + editor->selected_path_command];
+        if (path_command->type == AF_PATH_CLOSE ||
+            (property != AF_PROPERTY_PATH_POINT && path_command->type != AF_PATH_CUBIC)) {
+            return false;
+        }
+        point = property == AF_PROPERTY_PATH_POINT
+                    ? &path_command->point
+                    : (property == AF_PROPERTY_PATH_CONTROL_IN ? &path_command->control2
+                                                               : &path_command->control1);
+        value[0] = point->x;
+        value[1] = point->y;
         break;
     }
+    default:
+        return false;
+    }
+    return true;
 }
 
 static AfResult af_editor_add_keyframe(AfEditorState *editor) {
@@ -2717,10 +2939,14 @@ static AfResult af_editor_add_keyframe(AfEditorState *editor) {
         if (result != AF_RESULT_SUCCESS) {
             return result;
         }
-        new_track = (AfProjectTrack){.id = track_id,
-                                     .clip_id = clip->id,
-                                     .node_id = node->id,
-                                     .property = editor->selected_property};
+        new_track =
+            (AfProjectTrack){.id = track_id,
+                             .clip_id = clip->id,
+                             .node_id = node->id,
+                             .property = editor->selected_property,
+                             .element_index = editor->selected_property >= AF_PROPERTY_PATH_POINT
+                                                  ? editor->selected_path_command
+                                                  : 0U};
         command.track_after[0] =
             (AfProjectTrackSnapshot){.track = new_track, .index = editor->project.track_count};
         command.track_after_count = 1U;
@@ -2740,7 +2966,37 @@ static AfResult af_editor_add_keyframe(AfEditorState *editor) {
     new_key.keyframe.easing[0] = 0.42F;
     new_key.keyframe.easing[2] = 0.58F;
     new_key.keyframe.easing[3] = 1.0F;
-    af_editor_property_value(node, editor->selected_property, new_key.keyframe.value);
+    if (!af_editor_property_value(editor, node, editor->selected_property,
+                                  new_key.keyframe.value)) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    if (existing != NULL) {
+        AfProjectKeyframe *current =
+            af_editor_track_key_at(editor, existing->id, new_key.keyframe.time);
+        if (current != NULL) {
+            AfProjectKeyframeSnapshot before = {0};
+            if (af_project_keyframe_snapshot(&editor->project, current->id, &before) !=
+                AF_RESULT_SUCCESS) {
+                return AF_RESULT_NOT_FOUND;
+            }
+            command.keyframe_before_count = 1U;
+            command.keyframe_before[0] = before;
+            command.keyframe_after_count = 1U;
+            command.keyframe_after[0] = before;
+            memcpy(command.keyframe_after[0].keyframe.keyframe.value, new_key.keyframe.value,
+                   sizeof(new_key.keyframe.value));
+            result = af_editor_history_execute(&editor->history, &editor->project, &command, false,
+                                               false);
+            if (result == AF_RESULT_SUCCESS) {
+                editor->selected_keyframe_count = 1U;
+                editor->selected_keyframes[0] = current->id;
+                editor->timeline_focus = true;
+                editor->dirty = true;
+                af_editor_status(editor, "Keyframe updated");
+            }
+            return result;
+        }
+    }
     command.keyframe_after[0] =
         (AfProjectKeyframeSnapshot){.keyframe = new_key, .index = editor->project.keyframe_count};
     command.keyframe_after_count = 1U;
@@ -3025,6 +3281,24 @@ static AfPath *af_editor_selected_path(AfEditorState *editor) {
                : NULL;
 }
 
+static bool af_editor_selected_path_has_animation(const AfEditorState *editor) {
+    for (uint32_t index = 0U; index < editor->project.track_count; ++index) {
+        const AfProjectTrack *track = &editor->project.tracks[index];
+        if (track->node_id == editor->selected_id && track->property >= AF_PROPERTY_PATH_POINT) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool af_editor_require_static_path_topology(AfEditorState *editor) {
+    if (!af_editor_selected_path_has_animation(editor)) {
+        return true;
+    }
+    af_editor_status(editor, "Remove vector point tracks before changing path topology");
+    return false;
+}
+
 static AfResult af_editor_create_path(AfEditorState *editor, int width, int height) {
     static const AfPathCommand commands[] = {{.type = AF_PATH_MOVE, .point = {0.0F, 90.0F}},
                                              {.type = AF_PATH_CUBIC,
@@ -3156,8 +3430,9 @@ static AfResult af_editor_insert_path_point(AfEditorState *editor) {
     AfPath *path = af_editor_selected_path(editor);
     AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
     uint32_t selected = editor->selected_path_command;
-    if (path == NULL || path->command_count >= AF_EDITOR_COMMAND_MAX_PATH_COMMANDS ||
-        selected == 0U || selected >= path->command_count) {
+    if (!af_editor_require_static_path_topology(editor) || path == NULL ||
+        path->command_count >= AF_EDITOR_COMMAND_MAX_PATH_COMMANDS || selected == 0U ||
+        selected >= path->command_count) {
         return AF_RESULT_LIMIT_EXCEEDED;
     }
     memcpy(commands, &editor->project.path_data.commands[path->command_start],
@@ -3201,7 +3476,8 @@ static AfResult af_editor_delete_path_point(AfEditorState *editor) {
     uint32_t end = 0U;
     uint32_t segments = 0U;
     const uint32_t selected = editor->selected_path_command;
-    if (path == NULL || path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS ||
+    if (!af_editor_require_static_path_topology(editor) || path == NULL ||
+        path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS ||
         path->geometry_generation == UINT64_MAX || selected >= path->command_count) {
         return AF_RESULT_NOT_FOUND;
     }
@@ -3232,8 +3508,9 @@ static AfResult af_editor_convert_path_point(AfEditorState *editor) {
     AfPath *path = af_editor_selected_path(editor);
     AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
     const uint32_t selected = editor->selected_path_command;
-    if (path == NULL || path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS ||
-        selected == 0U || selected >= path->command_count) {
+    if (!af_editor_require_static_path_topology(editor) || path == NULL ||
+        path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS || selected == 0U ||
+        selected >= path->command_count) {
         return AF_RESULT_NOT_FOUND;
     }
     memcpy(commands, &editor->project.path_data.commands[path->command_start],
@@ -3263,7 +3540,8 @@ static AfResult af_editor_toggle_path_closed(AfEditorState *editor) {
     uint32_t start = 0U;
     uint32_t end = 0U;
     const uint32_t selected = editor->selected_path_command;
-    if (path == NULL || path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS ||
+    if (!af_editor_require_static_path_topology(editor) || path == NULL ||
+        path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS ||
         !af_editor_path_contour(&editor->project.path_data.commands[path->command_start],
                                 path->command_count, selected < path->command_count ? selected : 0U,
                                 &start, &end)) {
@@ -3299,7 +3577,8 @@ static AfResult af_editor_reverse_path_contour(AfEditorState *editor) {
     uint32_t segment_end = 0U;
     bool closed = false;
     const uint32_t selected = editor->selected_path_command;
-    if (path == NULL || path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS) {
+    if (!af_editor_require_static_path_topology(editor) || path == NULL ||
+        path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS) {
         return AF_RESULT_NOT_FOUND;
     }
     memcpy(commands, &editor->project.path_data.commands[path->command_start],
@@ -3338,7 +3617,8 @@ static AfResult af_editor_add_path_contour(AfEditorState *editor) {
     AfPath *path = af_editor_selected_path(editor);
     AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
     uint32_t count = 0U;
-    if (path == NULL || path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS - 3U) {
+    if (!af_editor_require_static_path_topology(editor) || path == NULL ||
+        path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS - 3U) {
         return AF_RESULT_LIMIT_EXCEEDED;
     }
     count = path->command_count;
@@ -3849,6 +4129,251 @@ static void af_editor_reparent(AfEditorState *editor, uint64_t parent_id) {
     }
 }
 
+static void af_editor_adjust_particle(AfEditorState *editor, AfParticleEmitter *emitter,
+                                      uint32_t row, bool decrease) {
+    const float sign = decrease ? -1.0F : 1.0F;
+    AfVfxLodSettings *lod = &editor->project.particle_data.lod;
+    if (editor->particle_page == 0U) {
+        if (row == 0U) {
+            emitter->enabled = !emitter->enabled;
+        } else if (row == 1U) {
+            emitter->spawn_rate = fmaxf(0.0F, emitter->spawn_rate + sign * 8.0F);
+        } else if (row == 2U) {
+            emitter->lifetime_min =
+                af_editor_clamp(emitter->lifetime_min + sign * 0.1F, 0.1F, emitter->lifetime_max);
+        } else if (row == 3U) {
+            emitter->lifetime_max =
+                fmaxf(emitter->lifetime_min, emitter->lifetime_max + sign * 0.1F);
+        } else if (row == 4U) {
+            const uint32_t step = 256U;
+            const uint32_t total = af_particle_total_capacity(&editor->project.particle_data);
+            if (decrease) {
+                emitter->capacity = emitter->capacity > step ? emitter->capacity - step : 1U;
+            } else if (total <= AF_MAX_PARTICLES - step &&
+                       emitter->capacity <= AF_MAX_PARTICLES_PER_EMITTER - step) {
+                emitter->capacity += step;
+            }
+            emitter->burst_count =
+                emitter->burst_count > emitter->capacity ? emitter->capacity : emitter->burst_count;
+            emitter->event_burst_count = emitter->event_burst_count > emitter->capacity
+                                             ? emitter->capacity
+                                             : emitter->event_burst_count;
+        } else if (row == 5U) {
+            int type = (int)emitter->type + (decrease ? -1 : 1);
+            type = type < 0 ? (int)AF_PARTICLE_EMITTER_VECTOR_PATH
+                            : (type > (int)AF_PARTICLE_EMITTER_VECTOR_PATH ? 0 : type);
+            const AfPath *path =
+                af_path_find_node_const(&editor->project.path_data, editor->selected_id);
+            if (type == (int)AF_PARTICLE_EMITTER_VECTOR_PATH && path == NULL) {
+                type = decrease ? (int)AF_PARTICLE_EMITTER_CIRCLE : (int)AF_PARTICLE_EMITTER_POINT;
+            }
+            emitter->type = (AfParticleEmitterType)type;
+            emitter->path_id = emitter->type == AF_PARTICLE_EMITTER_VECTOR_PATH ? path->id : 0U;
+        } else if (row == 6U) {
+            const uint32_t step = 16U;
+            emitter->burst_count =
+                decrease ? (emitter->burst_count > step ? emitter->burst_count - step : 0U)
+                         : (emitter->burst_count <=
+                                    emitter->capacity -
+                                        (emitter->capacity < step ? emitter->capacity : step)
+                                ? emitter->burst_count +
+                                      (emitter->capacity < step ? emitter->capacity : step)
+                                : emitter->capacity);
+        } else {
+            emitter->seed = decrease ? emitter->seed - 1U : emitter->seed + 1U;
+        }
+    } else if (editor->particle_page == 1U) {
+        float *value = row == 0U   ? &emitter->velocity_min.x
+                       : row == 1U ? &emitter->velocity_max.x
+                       : row == 2U ? &emitter->velocity_min.y
+                       : row == 3U ? &emitter->velocity_max.y
+                       : row == 4U ? &emitter->gravity.x
+                       : row == 5U ? &emitter->gravity.y
+                       : row == 6U ? &emitter->wind.x
+                                   : &emitter->drag;
+        *value += sign * (row == 7U ? 0.05F : 10.0F);
+        if (row == 0U) {
+            emitter->velocity_min.x = fminf(emitter->velocity_min.x, emitter->velocity_max.x);
+        } else if (row == 1U) {
+            emitter->velocity_max.x = fmaxf(emitter->velocity_max.x, emitter->velocity_min.x);
+        } else if (row == 2U) {
+            emitter->velocity_min.y = fminf(emitter->velocity_min.y, emitter->velocity_max.y);
+        } else if (row == 3U) {
+            emitter->velocity_max.y = fmaxf(emitter->velocity_max.y, emitter->velocity_min.y);
+        } else if (row == 7U) {
+            emitter->drag = fmaxf(0.0F, emitter->drag);
+        }
+    } else if (editor->particle_page == 2U) {
+        float *value = row == 0U   ? &emitter->turbulence_strength
+                       : row == 1U ? &emitter->turbulence_frequency
+                       : row == 2U ? &emitter->radial_force
+                       : row == 3U ? &emitter->vortex_force
+                       : row == 4U ? &emitter->attractor_strength
+                       : row == 5U ? &emitter->attractor_radius
+                       : row == 6U ? &emitter->repulsor_strength
+                                   : &emitter->vector_field_strength;
+        *value += sign * (row == 1U ? 0.01F : (row == 5U ? 10.0F : 20.0F));
+        if (row == 1U) {
+            *value = af_editor_clamp(*value, 0.0F, 100.0F);
+        } else if (row == 5U) {
+            *value = fmaxf(0.0F, *value);
+        } else {
+            *value = af_editor_clamp(*value, -AF_MAX_PARTICLE_FORCE, AF_MAX_PARTICLE_FORCE);
+        }
+        if (emitter->attractor_strength != 0.0F && emitter->attractor_radius <= 0.0F) {
+            emitter->attractor_radius = 100.0F;
+        }
+        if (emitter->repulsor_strength != 0.0F && emitter->repulsor_radius <= 0.0F) {
+            emitter->repulsor_radius = 100.0F;
+        }
+        if (emitter->vector_field_strength != 0.0F && emitter->vector_field_direction.x == 0.0F &&
+            emitter->vector_field_direction.y == 0.0F) {
+            emitter->vector_field_direction = (AfVec2){1.0F, 0.0F};
+        }
+    } else if (editor->particle_page == 3U) {
+        if (row == 0U) {
+            emitter->collision_plane_enabled = !emitter->collision_plane_enabled;
+            emitter->collision_plane_normal = (AfVec2){0.0F, -1.0F};
+        } else if (row == 1U) {
+            emitter->collision_plane_offset += sign * 10.0F;
+        } else if (row == 2U) {
+            emitter->collision_restitution =
+                af_editor_clamp(emitter->collision_restitution + sign * 0.05F, 0.0F, 1.0F);
+        } else if (row == 3U) {
+            emitter->collision_friction =
+                af_editor_clamp(emitter->collision_friction + sign * 0.05F, 0.0F, 1.0F);
+        } else if (row == 4U) {
+            emitter->depth_collision_enabled = !emitter->depth_collision_enabled;
+        } else if (row == 5U) {
+            emitter->depth_min = fminf(emitter->depth_min + sign * 0.1F, emitter->depth_max);
+        } else if (row == 6U) {
+            emitter->depth_max = fmaxf(emitter->depth_min, emitter->depth_max + sign * 0.1F);
+        } else {
+            emitter->depth_velocity_min += sign * 0.1F;
+            emitter->depth_velocity_max += sign * 0.1F;
+        }
+    } else if (editor->particle_page == 4U) {
+        if (row == 0U) {
+            int output = (int)emitter->output + (decrease ? -1 : 1);
+            output = output < 0 ? (int)AF_PARTICLE_OUTPUT_LIGHT_PROXY
+                                : (output > (int)AF_PARTICLE_OUTPUT_LIGHT_PROXY ? 0 : output);
+            emitter->output = (AfParticleOutputType)output;
+        } else {
+            float *value = row == 1U   ? &emitter->trail_length
+                           : row == 2U ? &emitter->trail_width
+                           : row == 3U ? &emitter->mesh_scale
+                           : row == 4U ? &emitter->decal_rotation_offset
+                           : row == 5U ? &emitter->distortion_strength
+                           : row == 6U ? &emitter->soft_fade_distance
+                                       : &emitter->light_radius;
+            *value += sign * (row <= 2U || row == 7U ? 1.0F : 0.1F);
+            if (row != 4U && row != 5U) {
+                *value = fmaxf(row == 3U ? 0.1F : 0.0F, *value);
+            }
+        }
+    } else if (editor->particle_page == 5U) {
+        if (row <= 2U) {
+            if (row == 0U) {
+                emitter->flipbook_columns = decrease && emitter->flipbook_columns > 1U
+                                                ? emitter->flipbook_columns - 1U
+                                                : (!decrease && emitter->flipbook_columns < 64U
+                                                       ? emitter->flipbook_columns + 1U
+                                                       : emitter->flipbook_columns);
+            } else if (row == 1U) {
+                emitter->flipbook_rows =
+                    decrease && emitter->flipbook_rows > 1U
+                        ? emitter->flipbook_rows - 1U
+                        : (!decrease && emitter->flipbook_rows < 64U ? emitter->flipbook_rows + 1U
+                                                                     : emitter->flipbook_rows);
+            } else {
+                emitter->flipbook_frames_per_second =
+                    fmaxf(0.0F, emitter->flipbook_frames_per_second + sign);
+            }
+        } else if (row == 3U) {
+            uint32_t current = 0U;
+            uint32_t candidate_count = 1U;
+            uint64_t candidates[AF_MAX_PARTICLE_EMITTERS + 1U] = {0U};
+            for (uint32_t index = 0U; index < editor->project.particle_data.count; ++index) {
+                const uint64_t id = editor->project.particle_data.emitters[index].id;
+                if (id != emitter->id) {
+                    candidates[candidate_count++] = id;
+                }
+            }
+            for (uint32_t index = 0U; index < candidate_count; ++index) {
+                if (candidates[index] == emitter->sub_emitter_id) {
+                    current = index;
+                }
+            }
+            current = decrease ? (current == 0U ? candidate_count - 1U : current - 1U)
+                               : (current + 1U) % candidate_count;
+            emitter->sub_emitter_id = candidates[current];
+            if (emitter->sub_emitter_id == 0U) {
+                emitter->sub_emit_birth_count = 0U;
+                emitter->sub_emit_death_count = 0U;
+            } else if (emitter->max_recursion_depth == 0U) {
+                emitter->max_recursion_depth = 1U;
+            }
+        } else if (row == 4U || row == 5U) {
+            uint32_t *value =
+                row == 4U ? &emitter->sub_emit_birth_count : &emitter->sub_emit_death_count;
+            if (emitter->sub_emitter_id != 0U) {
+                *value = decrease
+                             ? (*value > 0U ? *value - 1U : 0U)
+                             : (*value < AF_MAX_PARTICLE_SUB_EMIT_COUNT ? *value + 1U : *value);
+            }
+        } else if (row == 6U) {
+            emitter->max_recursion_depth =
+                decrease
+                    ? (emitter->max_recursion_depth > 0U ? emitter->max_recursion_depth - 1U : 0U)
+                    : (emitter->max_recursion_depth < AF_MAX_PARTICLE_RECURSION_DEPTH
+                           ? emitter->max_recursion_depth + 1U
+                           : emitter->max_recursion_depth);
+            if (emitter->sub_emitter_id != 0U && emitter->max_recursion_depth == 0U) {
+                emitter->max_recursion_depth = 1U;
+            }
+        } else {
+            const uint32_t step = 16U;
+            emitter->event_burst_count =
+                decrease
+                    ? (emitter->event_burst_count > step ? emitter->event_burst_count - step : 0U)
+                    : (emitter->event_burst_count <=
+                               emitter->capacity -
+                                   (emitter->capacity < step ? emitter->capacity : step)
+                           ? emitter->event_burst_count +
+                                 (emitter->capacity < step ? emitter->capacity : step)
+                           : emitter->capacity);
+            emitter->event_sequence =
+                emitter->event_sequence == UINT32_MAX ? 1U : emitter->event_sequence + 1U;
+        }
+    } else {
+        if (row == 0U) {
+            const uint32_t step = 1024U;
+            lod->maximum_particles =
+                decrease ? (lod->maximum_particles > step ? lod->maximum_particles - step : 1U)
+                         : (lod->maximum_particles <= AF_MAX_PARTICLES - step
+                                ? lod->maximum_particles + step
+                                : AF_MAX_PARTICLES);
+        } else if (row == 1U) {
+            lod->spawn_rate_scale =
+                af_editor_clamp(lod->spawn_rate_scale + sign * 0.1F, 0.0F, 1.0F);
+        } else if (row == 2U) {
+            lod->simulation_frequency_scale =
+                af_editor_clamp(lod->simulation_frequency_scale + sign * 0.1F, 0.1F, 1.0F);
+        } else if (row == 3U) {
+            lod->renderer_enabled = !lod->renderer_enabled;
+        } else if (row == 4U) {
+            lod->distance_start =
+                fmaxf(0.0F, fminf(lod->distance_end, lod->distance_start + sign * 10.0F));
+        } else if (row == 5U) {
+            lod->distance_end = fmaxf(lod->distance_start, lod->distance_end + sign * 10.0F);
+        } else if (row == 6U) {
+            lod->host_quality = af_editor_clamp(lod->host_quality + sign * 0.1F, 0.0F, 1.0F);
+        } else {
+            lod->view_distance = fmaxf(0.0F, lod->view_distance + sign * 10.0F);
+        }
+    }
+}
+
 static void af_editor_handle_inspector(AfEditorState *editor, int width, float x, float y) {
     const float panel_x = (float)width - editor->right_width + 18.0F;
     AfParticleEmitter *emitter =
@@ -3876,97 +4401,29 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
         af_editor_update_color_picker(editor, width, x, y);
         return;
     }
+    if (emitter != NULL && y >= AF_EDITOR_PARTICLE_PAGE_Y &&
+        y < AF_EDITOR_PARTICLE_PAGE_Y + 23.0F && x >= panel_x) {
+        const uint32_t page = (uint32_t)((x - panel_x) / 32.0F);
+        if (page < AF_EDITOR_PARTICLE_PAGE_COUNT) {
+            editor->particle_page = page;
+            af_editor_status(editor, "Particle editor page selected");
+        }
+        return;
+    }
     if (emitter != NULL && y >= AF_EDITOR_PARTICLE_ROW_Y &&
         y < AF_EDITOR_PARTICLE_ROW_Y + AF_EDITOR_PARTICLE_ROW_COUNT * AF_EDITOR_PARTICLE_ROW_STEP) {
         AfProjectNodeSnapshot before = {0};
         const uint32_t row =
             (uint32_t)((y - AF_EDITOR_PARTICLE_ROW_Y) / AF_EDITOR_PARTICLE_ROW_STEP);
-        const bool decrease = x < panel_x + 31.0F;
-        if (x <= panel_x + 65.0F && row < AF_EDITOR_PARTICLE_ROW_COUNT &&
+        if (x >= panel_x && x <= panel_x + 65.0F && row < AF_EDITOR_PARTICLE_ROW_COUNT &&
             af_project_snapshot(&editor->project, editor->selected_id, &before) ==
                 AF_RESULT_SUCCESS) {
-            if (row == 0U) {
-                emitter->spawn_rate = fmaxf(0.0F, emitter->spawn_rate + (decrease ? -8.0F : 8.0F));
-            } else if (row == 1U) {
-                const float amount = decrease ? -0.1F : 0.1F;
-                emitter->lifetime_min = fmaxf(0.1F, emitter->lifetime_min + amount);
-                emitter->lifetime_max =
-                    fmaxf(emitter->lifetime_min, emitter->lifetime_max + amount);
-            } else if (row == 2U) {
-                const uint32_t amount = 256U;
-                if (decrease) {
-                    emitter->capacity =
-                        emitter->capacity > amount ? emitter->capacity - amount : 1U;
-                } else {
-                    const uint32_t total =
-                        af_particle_total_capacity(&editor->project.particle_data);
-                    emitter->capacity = total <= AF_MAX_PARTICLES - amount
-                                            ? emitter->capacity + amount
-                                            : emitter->capacity;
-                }
-                emitter->burst_count = emitter->burst_count > emitter->capacity
-                                           ? emitter->capacity
-                                           : emitter->burst_count;
-            } else if (row == 3U) {
-                int type = (int)emitter->type + (decrease ? -1 : 1);
-                type = type < 0 ? (int)AF_PARTICLE_EMITTER_VECTOR_PATH
-                                : (type > (int)AF_PARTICLE_EMITTER_VECTOR_PATH ? 0 : type);
-                if (type == (int)AF_PARTICLE_EMITTER_VECTOR_PATH &&
-                    af_path_find_node_const(&editor->project.path_data, editor->selected_id) ==
-                        NULL) {
-                    type =
-                        decrease ? (int)AF_PARTICLE_EMITTER_CIRCLE : (int)AF_PARTICLE_EMITTER_POINT;
-                }
-                emitter->type = (AfParticleEmitterType)type;
-                emitter->path_id =
-                    emitter->type == AF_PARTICLE_EMITTER_VECTOR_PATH
-                        ? af_path_find_node_const(&editor->project.path_data, editor->selected_id)
-                              ->id
-                        : 0U;
-            } else if (row == 4U) {
-                int output = (int)emitter->output + (decrease ? -1 : 1);
-                output = output < 0 ? (int)AF_PARTICLE_OUTPUT_LIGHT_PROXY
-                                    : (output > (int)AF_PARTICLE_OUTPUT_LIGHT_PROXY ? 0 : output);
-                emitter->output = (AfParticleOutputType)output;
-            } else if (row == 5U) {
-                emitter->turbulence_strength =
-                    af_editor_clamp(emitter->turbulence_strength + (decrease ? -20.0F : 20.0F),
-                                    -AF_MAX_PARTICLE_FORCE, AF_MAX_PARTICLE_FORCE);
-            } else if (row == 6U) {
-                emitter->radial_force =
-                    af_editor_clamp(emitter->radial_force + (decrease ? -25.0F : 25.0F),
-                                    -AF_MAX_PARTICLE_FORCE, AF_MAX_PARTICLE_FORCE);
-            } else if (row == 7U) {
-                emitter->vortex_force =
-                    af_editor_clamp(emitter->vortex_force + (decrease ? -25.0F : 25.0F),
-                                    -AF_MAX_PARTICLE_FORCE, AF_MAX_PARTICLE_FORCE);
-            } else if (row == 8U) {
-                const AfSceneNode *node =
-                    af_scene_find_const(&editor->project.scene, editor->selected_id);
-                emitter->collision_plane_enabled = !emitter->collision_plane_enabled;
-                emitter->collision_plane_normal = (AfVec2){0.0F, -1.0F};
-                if (node != NULL) {
-                    emitter->collision_plane_offset = -(node->bounds.y + 80.0F);
-                }
-            } else {
-                if (decrease) {
-                    emitter->event_burst_count =
-                        emitter->event_burst_count > 16U ? emitter->event_burst_count - 16U : 0U;
-                } else {
-                    emitter->event_burst_count =
-                        emitter->event_burst_count <=
-                                emitter->capacity -
-                                    (emitter->capacity < 16U ? emitter->capacity : 16U)
-                            ? emitter->event_burst_count +
-                                  (emitter->capacity < 16U ? emitter->capacity : 16U)
-                            : emitter->capacity;
-                }
-                emitter->event_sequence =
-                    emitter->event_sequence == UINT32_MAX ? 1U : emitter->event_sequence + 1U;
+            af_editor_adjust_particle(editor, emitter, row, x < panel_x + 31.0F);
+            if (af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_PARTICLE, true) ==
+                AF_RESULT_SUCCESS) {
+                editor->dirty = true;
+                af_editor_status(editor, "Particle emitter updated");
             }
-            (void)af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_PARTICLE, true);
-            editor->dirty = true;
-            af_editor_status(editor, "Particle emitter updated");
         }
         return;
     }
@@ -4166,6 +4623,64 @@ static void af_editor_toggle_selected_particles(AfEditorState *editor) {
     }
 }
 
+static void af_editor_execute_particle_context_item(AfEditorState *editor, uint32_t item) {
+    AfParticleEmitter *emitter =
+        af_project_find_node_emitter(&editor->project, editor->selected_id);
+    AfProjectNodeSnapshot before = {0};
+    if (emitter == NULL) {
+        return;
+    }
+    if (item == 5U) {
+        editor->particle_page = 6U;
+        af_editor_status(editor, "VFX LOD controls opened");
+        return;
+    }
+    if (item == 6U) {
+        af_editor_toggle_selected_particles(editor);
+        return;
+    }
+    if (af_project_snapshot(&editor->project, editor->selected_id, &before) != AF_RESULT_SUCCESS) {
+        return;
+    }
+    if (item == 0U) {
+        const uint64_t id = emitter->id;
+        const uint64_t node_id = emitter->node_id;
+        const AfSceneNode *node = af_scene_find_const(&editor->project.scene, node_id);
+        *emitter = af_particle_emitter_default(id, node_id);
+        if (node != NULL &&
+            (node->type == AF_NODE_RECTANGLE || node->type == AF_NODE_ROUNDED_RECTANGLE)) {
+            emitter->type = AF_PARTICLE_EMITTER_RECTANGLE;
+        } else if (node != NULL && node->type == AF_NODE_ELLIPSE) {
+            emitter->type = AF_PARTICLE_EMITTER_CIRCLE;
+        } else if (node != NULL && node->type == AF_NODE_PATH) {
+            const AfPath *path = af_path_find_node_const(&editor->project.path_data, node_id);
+            emitter->type = AF_PARTICLE_EMITTER_VECTOR_PATH;
+            emitter->path_id = path == NULL ? 0U : path->id;
+        }
+    } else if (item == 1U) {
+        emitter->event_burst_count = emitter->burst_count != 0U
+                                         ? emitter->burst_count
+                                         : (emitter->capacity < 16U ? emitter->capacity : 16U);
+        emitter->event_sequence =
+            emitter->event_sequence == UINT32_MAX ? 1U : emitter->event_sequence + 1U;
+    } else if (item == 2U) {
+        emitter->enabled = !emitter->enabled;
+    } else if (item == 3U) {
+        emitter->output = (AfParticleOutputType)(((uint32_t)emitter->output + 1U) %
+                                                 ((uint32_t)AF_PARTICLE_OUTPUT_LIGHT_PROXY + 1U));
+    } else if (item == 4U) {
+        const uint32_t previous_page = editor->particle_page;
+        editor->particle_page = 0U;
+        af_editor_adjust_particle(editor, emitter, 5U, false);
+        editor->particle_page = previous_page;
+    }
+    if (af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_PARTICLE, false) ==
+        AF_RESULT_SUCCESS) {
+        editor->dirty = true;
+        af_editor_status(editor, "Particle context action applied");
+    }
+}
+
 static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_t item, int width,
                                                   int height) {
     const AfEditorContextMenu menu = editor->context_menu;
@@ -4264,6 +4779,8 @@ static void af_editor_execute_context_item(AfEditorState *editor, uint32_t item,
             editor->snapping = !editor->snapping;
             af_editor_status(editor, editor->snapping ? "Snapping enabled" : "Snapping disabled");
         }
+    } else if (editor->context_menu == AF_EDITOR_CONTEXT_PARTICLE) {
+        af_editor_execute_particle_context_item(editor, item);
     } else if (editor->context_menu == AF_EDITOR_CONTEXT_INSPECTOR) {
         if (item == 0U) {
             af_editor_reset_selected(editor, false);
@@ -4356,7 +4873,11 @@ static void af_editor_open_context_menu(AfEditorState *editor, int width, int he
             }
         }
     } else if (x >= (float)width - editor->right_width) {
-        editor->context_menu = AF_EDITOR_CONTEXT_INSPECTOR;
+        editor->context_menu =
+            y >= AF_EDITOR_PARTICLE_LABEL_Y && af_project_find_node_emitter_const(
+                                                   &editor->project, editor->selected_id) != NULL
+                ? AF_EDITOR_CONTEXT_PARTICLE
+                : AF_EDITOR_CONTEXT_INSPECTOR;
     } else if (y < AF_EDITOR_TOOLBAR_HEIGHT) {
         editor->context_menu = AF_EDITOR_CONTEXT_TOOLBAR;
     } else if (y >= timeline_top) {
@@ -4472,9 +4993,19 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
             editor->playhead = 0.0F;
         } else if (local_x >= 73.0F && local_x < 107.0F) {
             editor->curve_visible = !editor->curve_visible;
-        } else if (local_x >= 116.0F && local_x < 236.0F) {
+        } else if (local_x >= 116.0F && local_x < 296.0F) {
             const uint32_t property = (uint32_t)((local_x - 116.0F) / 20.0F);
-            if (property <= AF_PROPERTY_CORNER_RADIUS) {
+            const AfPath *path =
+                af_path_find_node_const(&editor->project.path_data, editor->selected_id);
+            const AfPathCommand *command =
+                path != NULL && editor->selected_path_command < path->command_count
+                    ? &editor->project.path_data
+                           .commands[path->command_start + editor->selected_path_command]
+                    : NULL;
+            if (property <= AF_PROPERTY_PATH_CONTROL_OUT &&
+                (property <= AF_PROPERTY_CORNER_RADIUS ||
+                 (command != NULL && command->type != AF_PATH_CLOSE &&
+                  (property == AF_PROPERTY_PATH_POINT || command->type == AF_PATH_CUBIC)))) {
                 editor->selected_property = (AfPropertyType)property;
                 af_editor_clear_key_selection(editor);
             }
@@ -4591,6 +5122,30 @@ static void af_editor_timeline_box_select(AfEditorState *editor, int height) {
 }
 
 static bool af_editor_begin_path_drag(AfEditorState *editor, AfPath *path, AfEditorDragMode mode) {
+    const AfProjectTrack *track = af_editor_selected_track(editor);
+    float key_time = editor->playhead;
+    AfProjectKeyframe *key = NULL;
+    editor->path_key_drag = false;
+    editor->path_drag_key_id = 0U;
+    if (editor->snapping) {
+        key_time = roundf(key_time * 10.0F) * 0.1F;
+    }
+    if (track != NULL && track->property >= AF_PROPERTY_PATH_POINT) {
+        key = af_editor_track_key_at(editor, track->id, key_time);
+        if (key == NULL && af_editor_add_keyframe(editor) == AF_RESULT_SUCCESS) {
+            track = af_editor_selected_track(editor);
+            key = track == NULL ? NULL : af_editor_track_key_at(editor, track->id, key_time);
+        }
+        if (key != NULL &&
+            af_project_keyframe_snapshot(&editor->project, key->id,
+                                         &editor->path_key_drag_before) == AF_RESULT_SUCCESS) {
+            editor->path_key_drag = true;
+            editor->path_drag_key_id = key->id;
+            editor->drag_mode = mode;
+            af_editor_status(editor, "Vector auto-key active at playhead");
+            return true;
+        }
+    }
     if (path == NULL || path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS ||
         path->geometry_generation == UINT64_MAX ||
         editor->selected_path_command >= path->command_count ||
@@ -4615,10 +5170,14 @@ static bool af_editor_path_mouse_down(AfEditorState *editor, int width, int heig
     }
     transform = af_affine_multiply(af_editor_camera(editor, width, height), node->world_transform);
     if (editor->selected_path_command < path->command_count) {
+        const AfPath *preview_path =
+            af_path_find_node_const(&editor->render_path_data, editor->selected_id);
         const AfPathCommand *selected =
-            &editor->project.path_data
-                 .commands[path->command_start + editor->selected_path_command];
-        if (selected->type == AF_PATH_CUBIC) {
+            preview_path == NULL
+                ? NULL
+                : &editor->render_path_data
+                       .commands[preview_path->command_start + editor->selected_path_command];
+        if (selected != NULL && selected->type == AF_PATH_CUBIC) {
             const AfVec2 first = af_affine_transform_point(transform, selected->control1);
             const AfVec2 second = af_affine_transform_point(transform, selected->control2);
             const float first_x = mouse.x - first.x;
@@ -4626,21 +5185,27 @@ static bool af_editor_path_mouse_down(AfEditorState *editor, int width, int heig
             const float second_x = mouse.x - second.x;
             const float second_y = mouse.y - second.y;
             if (first_x * first_x + first_y * first_y <= threshold_squared) {
+                editor->selected_property = AF_PROPERTY_PATH_CONTROL_OUT;
                 return af_editor_begin_path_drag(editor, path, AF_EDITOR_DRAG_PATH_CONTROL1);
             }
             if (second_x * second_x + second_y * second_y <= threshold_squared) {
+                editor->selected_property = AF_PROPERTY_PATH_CONTROL_IN;
                 return af_editor_begin_path_drag(editor, path, AF_EDITOR_DRAG_PATH_CONTROL2);
             }
         }
     }
     for (uint32_t index = path->command_count; index > 0U;) {
         const uint32_t command_index = --index;
+        const AfPath *preview_path =
+            af_path_find_node_const(&editor->render_path_data, editor->selected_id);
         const AfPathCommand *command =
-            &editor->project.path_data.commands[path->command_start + command_index];
+            preview_path == NULL
+                ? NULL
+                : &editor->render_path_data.commands[preview_path->command_start + command_index];
         AfVec2 point = {0};
         float x = 0.0F;
         float y = 0.0F;
-        if (command->type == AF_PATH_CLOSE) {
+        if (command == NULL || command->type == AF_PATH_CLOSE) {
             continue;
         }
         point = af_affine_transform_point(transform, command->point);
@@ -4648,6 +5213,7 @@ static bool af_editor_path_mouse_down(AfEditorState *editor, int width, int heig
         y = mouse.y - point.y;
         if (x * x + y * y <= threshold_squared) {
             editor->selected_path_command = command_index;
+            editor->selected_property = AF_PROPERTY_PATH_POINT;
             return af_editor_begin_path_drag(editor, path, AF_EDITOR_DRAG_PATH_POINT);
         }
     }
@@ -4663,7 +5229,6 @@ static void af_editor_drag_path_handle(AfEditorState *editor, int width, int hei
     const AfPathCommand *before = NULL;
     const uint32_t selected = editor->selected_path_command;
     if (node == NULL || path == NULL || selected >= path->command_count ||
-        path->command_count != editor->path_drag_before.path.command_count ||
         !af_affine_inverse(node->world_transform, &inverse)) {
         return;
     }
@@ -4677,6 +5242,18 @@ static void af_editor_drag_path_handle(AfEditorState *editor, int width, int hei
     if (editor->snapping) {
         point.x = roundf(point.x / editor->grid_step) * editor->grid_step;
         point.y = roundf(point.y / editor->grid_step) * editor->grid_step;
+    }
+    if (editor->path_key_drag) {
+        AfProjectKeyframe *key =
+            af_project_find_keyframe(&editor->project, editor->path_drag_key_id);
+        if (key != NULL) {
+            key->keyframe.value[0] = point.x;
+            key->keyframe.value[1] = point.y;
+        }
+        return;
+    }
+    if (path->command_count != editor->path_drag_before.path.command_count) {
+        return;
     }
     command = &editor->project.path_data.commands[path->command_start + selected];
     before = &editor->path_drag_commands[selected];
@@ -4722,6 +5299,29 @@ static void af_editor_commit_path_drag(AfEditorState *editor) {
     AfPath *path = af_editor_selected_path(editor);
     AfEditorCommand command = {0};
     AfResult result = AF_RESULT_NOT_FOUND;
+    if (editor->path_key_drag) {
+        AfProjectKeyframeSnapshot after = {0};
+        result = af_project_keyframe_snapshot(&editor->project, editor->path_drag_key_id, &after);
+        if (result == AF_RESULT_SUCCESS) {
+            result = af_editor_command_animation(AF_EDITOR_MERGE_KEYFRAME_VALUE,
+                                                 editor->path_drag_key_id, &command);
+        }
+        if (result == AF_RESULT_SUCCESS) {
+            command.keyframe_before_count = 1U;
+            command.keyframe_before[0] = editor->path_key_drag_before;
+            command.keyframe_after_count = 1U;
+            command.keyframe_after[0] = after;
+            result =
+                af_editor_history_execute(&editor->history, &editor->project, &command, true, true);
+        }
+        if (result == AF_RESULT_SUCCESS) {
+            editor->dirty = true;
+            af_editor_status(editor, "Vector keyframe edited");
+        }
+        editor->path_key_drag = false;
+        editor->path_drag_key_id = 0U;
+        return;
+    }
     if (path == NULL || path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS ||
         path->id != editor->path_drag_before.path.id) {
         return;
@@ -4871,12 +5471,15 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         if (hierarchy_index < editor->hierarchy_count) {
             const uint64_t clicked =
                 editor->project.scene.nodes[editor->hierarchy_order[hierarchy_index]].id;
-            if ((modifiers & SDL_KMOD_SHIFT) != 0U && editor->selected_id != 0U) {
-                af_editor_reparent(editor, clicked);
+            if ((modifiers & SDL_KMOD_SHIFT) != 0U) {
+                af_editor_hierarchy_select_range(editor, hierarchy_index,
+                                                 (modifiers & SDL_KMOD_CTRL) != 0U);
             } else if ((modifiers & SDL_KMOD_CTRL) != 0U) {
                 af_editor_selection_toggle(editor, clicked);
+                editor->hierarchy_anchor_id = clicked;
             } else {
                 af_editor_select_only(editor, clicked);
+                editor->hierarchy_anchor_id = clicked;
             }
             editor->selected_path_command =
                 af_path_find_node_const(&editor->project.path_data, editor->selected_id) != NULL
@@ -5419,6 +6022,11 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->tooltip_smoke = true;
         } else if (strcmp(arguments[index], "--selection-smoke") == 0) {
             editor->selection_smoke = true;
+        } else if (strcmp(arguments[index], "--vfx-smoke") == 0) {
+            editor->vfx_smoke = true;
+        } else if (strcmp(arguments[index], "--sequence") == 0 && index + 1 < argument_count) {
+            (void)snprintf(editor->sequence_prefix, sizeof(editor->sequence_prefix), "%s",
+                           arguments[++index]);
         } else if (strcmp(arguments[index], "--output") == 0 && index + 1 < argument_count) {
             (void)snprintf(editor->output_path, sizeof(editor->output_path), "%s",
                            arguments[++index]);
@@ -5429,6 +6037,8 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
     }
     if (editor->output_path[0] != '\0' && editor->maximum_frames == 0U) {
         editor->maximum_frames = editor->tooltip_smoke ? 2U : 1U;
+    } else if (editor->sequence_prefix[0] != '\0' && editor->maximum_frames == 0U) {
+        editor->maximum_frames = editor->vfx_smoke ? AF_EDITOR_PARTICLE_PAGE_COUNT : 60U;
     }
     af_editor_derive_package_path(editor);
 }
@@ -5583,10 +6193,18 @@ int af_editor_run(int argument_count, char **arguments) {
         }
         af_editor_update_preview(&editor);
         af_editor_build_hierarchy(&editor);
-        if (editor.selection_smoke) {
+        if (editor.vfx_smoke) {
+            for (uint32_t index = 0U; index < editor.project.particle_data.count; ++index) {
+                af_editor_select_only(&editor,
+                                      editor.project.particle_data.emitters[index].node_id);
+                break;
+            }
+            editor.particle_page = editor.rendered_frames % AF_EDITOR_PARTICLE_PAGE_COUNT;
+            af_editor_status(&editor, "Programmatic VFX inspector capture");
+        } else if (editor.selection_smoke) {
             af_editor_prepare_selection_smoke(&editor, width, height);
         } else if (editor.context_smoke) {
-            const uint32_t context = (editor.rendered_frames / 2U) % 10U;
+            const uint32_t context = (editor.rendered_frames / 2U) % 11U;
             editor.context_menu = (AfEditorContextMenu)(AF_EDITOR_CONTEXT_HIERARCHY + context);
             if (editor.context_menu == AF_EDITOR_CONTEXT_HIERARCHY) {
                 editor.context_position = (AfVec2){54.0F, 92.0F};
@@ -5600,6 +6218,9 @@ int af_editor_run(int argument_count, char **arguments) {
                                                    af_editor_timeline_top(&editor, height) + 58.0F};
             } else if (editor.context_menu == AF_EDITOR_CONTEXT_TOOLBAR) {
                 editor.context_position = (AfVec2){editor.left_width + 280.0F, 18.0F};
+            } else if (editor.context_menu == AF_EDITOR_CONTEXT_PARTICLE) {
+                editor.context_position =
+                    (AfVec2){(float)width - editor.right_width + 22.0F, AF_EDITOR_PARTICLE_PAGE_Y};
             } else {
                 editor.context_position = (AfVec2){620.0F, 190.0F};
             }
@@ -5613,7 +6234,13 @@ int af_editor_run(int argument_count, char **arguments) {
         }
         af_editor_build_render_scene(&editor, width, height);
         af_editor_update_title(&editor);
-        if (editor.output_path[0] != '\0' && editor.rendered_frames + 1U == editor.maximum_frames) {
+        if (editor.sequence_prefix[0] != '\0') {
+            char frame_path[AF_EDITOR_PATH_CAPACITY];
+            (void)snprintf(frame_path, sizeof(frame_path), "%.480s_%04u.png",
+                           editor.sequence_prefix, editor.rendered_frames + 1U);
+            result = af_vk_renderer_capture_next(editor.renderer, frame_path);
+        } else if (editor.output_path[0] != '\0' &&
+                   editor.rendered_frames + 1U == editor.maximum_frames) {
             result = af_vk_renderer_capture_next(editor.renderer, editor.output_path);
         }
         if (result == AF_RESULT_SUCCESS) {

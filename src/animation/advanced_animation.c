@@ -369,8 +369,9 @@ AfResult af_advanced_map_nested_time(const AfAdvancedAnimationData *advanced,
     return AF_RESULT_NOT_FOUND;
 }
 
-static void af_adv_apply_value(AfSceneNode *node, AfPropertyType property, const float value[4],
-                               float weight, bool additive) {
+static AfResult af_adv_apply_value(AfScene *scene, AfSceneNode *node, const AfAnimationTrack *track,
+                                   const float value[4], float weight, bool additive) {
+    const AfPropertyType property = track->property;
     if (property == AF_PROPERTY_POSITION) {
         node->local_transform.position.x =
             additive ? node->local_transform.position.x + value[0] * weight
@@ -405,7 +406,32 @@ static void af_adv_apply_value(AfSceneNode *node, AfPropertyType property, const
         node->corner_radius =
             fmaxf(0.0F, additive ? node->corner_radius + value[0] * weight
                                  : node->corner_radius * (1.0F - weight) + value[0] * weight);
+    } else if (property >= AF_PROPERTY_PATH_POINT && property <= AF_PROPERTY_PATH_CONTROL_OUT) {
+        AfPathData *paths = (AfPathData *)scene->paths;
+        AfPath *path = paths == NULL ? NULL : af_path_find_node(paths, track->node_id);
+        AfPathCommand *command = NULL;
+        AfVec2 *target = NULL;
+        if (path == NULL || track->element_index >= path->command_count) {
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
+        command = &paths->commands[path->command_start + track->element_index];
+        if (command->type == AF_PATH_CLOSE ||
+            (property != AF_PROPERTY_PATH_POINT && command->type != AF_PATH_CUBIC)) {
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
+        target = property == AF_PROPERTY_PATH_POINT
+                     ? &command->point
+                     : (property == AF_PROPERTY_PATH_CONTROL_IN ? &command->control2
+                                                                : &command->control1);
+        target->x = additive ? target->x + value[0] * weight
+                             : target->x * (1.0F - weight) + value[0] * weight;
+        target->y = additive ? target->y + value[1] * weight
+                             : target->y * (1.0F - weight) + value[1] * weight;
+        if (af_path_mark_geometry_changed(path) != AF_RESULT_SUCCESS) {
+            return AF_RESULT_LIMIT_EXCEEDED;
+        }
     }
+    return AF_RESULT_SUCCESS;
 }
 
 AfResult af_advanced_apply_layers(const AfAdvancedAnimationData *advanced,
@@ -447,8 +473,12 @@ AfResult af_advanced_apply_layers(const AfAdvancedAnimationData *advanced,
                 float value[4] = {0};
                 if (node != NULL && af_animation_sample_track(animation, track, layer->time,
                                                               value) == AF_RESULT_SUCCESS) {
-                    af_adv_apply_value(node, track->property, value,
-                                       layer->weight * transition_weight, layer->additive);
+                    const AfResult result =
+                        af_adv_apply_value(scene, node, track, value,
+                                           layer->weight * transition_weight, layer->additive);
+                    if (result != AF_RESULT_SUCCESS) {
+                        return result;
+                    }
                 }
             }
         }

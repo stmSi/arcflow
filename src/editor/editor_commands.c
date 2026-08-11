@@ -84,6 +84,7 @@ static AfResult af_editor_modify(AfProject *project, const AfProjectNodeSnapshot
             return AF_RESULT_NOT_FOUND;
         }
         project->scene.nodes[project_index] = snapshots[index].node;
+        project->particle_data.lod = snapshots[index].vfx_lod;
         memcpy(project->names[project_index], snapshots[index].name, AF_PROJECT_NAME_CAPACITY);
         *af_project_find_node_style(project, snapshots[index].node.id) = snapshots[index].style;
         if (snapshots[index].has_layout) {
@@ -103,6 +104,7 @@ static AfResult af_editor_modify(AfProject *project, const AfProjectNodeSnapshot
             const uint32_t project_index = af_project_find_index(project, rollback[index].node.id);
             if (project_index != UINT32_MAX) {
                 project->scene.nodes[project_index] = rollback[index].node;
+                project->particle_data.lod = rollback[index].vfx_lod;
                 memcpy(project->names[project_index], rollback[index].name,
                        AF_PROJECT_NAME_CAPACITY);
                 *af_project_find_node_style(project, rollback[index].node.id) =

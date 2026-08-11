@@ -85,6 +85,8 @@ typedef struct AfPathGeometryCache {
 
 const AfPath *af_path_find_const(const AfPathData *data, uint64_t path_id);
 const AfPath *af_path_find_node_const(const AfPathData *data, uint64_t node_id);
+AfPath *af_path_find(AfPathData *data, uint64_t path_id);
+AfPath *af_path_find_node(AfPathData *data, uint64_t node_id);
 AfResult af_path_data_validate(const AfPathData *data);
 AfResult af_path_flatten(const AfPathData *data, const AfPath *path, float tolerance,
                          AfFlattenedPath *out_flattened);

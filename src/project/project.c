@@ -221,6 +221,27 @@ uint32_t af_project_find_index(const AfProject *project, uint64_t id) {
     return UINT32_MAX;
 }
 
+static bool af_project_track_target_valid(const AfProject *project, const AfProjectTrack *track) {
+    const AfSceneNode *node = af_scene_find_const(&project->scene, track->node_id);
+    const AfPath *path = NULL;
+    const AfPathCommand *command = NULL;
+    if (node == NULL) {
+        return false;
+    }
+    if (track->property < AF_PROPERTY_PATH_POINT) {
+        return track->element_index == 0U;
+    }
+    path = af_path_find_node_const(&project->path_data, track->node_id);
+    if (node->type != AF_NODE_PATH || path == NULL || track->element_index >= path->command_count) {
+        return false;
+    }
+    command = &project->path_data.commands[path->command_start + track->element_index];
+    if (command->type == AF_PATH_CLOSE) {
+        return false;
+    }
+    return track->property == AF_PROPERTY_PATH_POINT || command->type == AF_PATH_CUBIC;
+}
+
 const char *af_project_name(const AfProject *project, uint64_t id) {
     const uint32_t index = af_project_find_index(project, id);
     return index == UINT32_MAX ? NULL : project->names[index];
@@ -310,14 +331,15 @@ AfResult af_project_validate(const AfProject *project) {
         if (track->id == 0U || track->id >= UINT64_MAX - 1U ||
             !af_project_validation_insert(project, track->id) ||
             af_project_find_clip_const(project, track->clip_id) == NULL ||
-            af_scene_find_const(&project->scene, track->node_id) == NULL ||
-            track->property > AF_PROPERTY_CORNER_RADIUS) {
+            track->property > AF_PROPERTY_PATH_CONTROL_OUT ||
+            !af_project_track_target_valid(project, track)) {
             return AF_RESULT_INVALID_ARGUMENT;
         }
         for (other = index + 1U; other < project->track_count; ++other) {
             const AfProjectTrack *candidate = &project->tracks[other];
             if (track->clip_id == candidate->clip_id && track->node_id == candidate->node_id &&
-                track->property == candidate->property) {
+                track->property == candidate->property &&
+                track->element_index == candidate->element_index) {
                 return AF_RESULT_INVALID_ARGUMENT;
             }
         }
@@ -602,6 +624,7 @@ AfResult af_project_snapshot(const AfProject *project, uint64_t id,
         return AF_RESULT_NOT_FOUND;
     }
     *out_snapshot = (AfProjectNodeSnapshot){.node = project->scene.nodes[index], .index = index};
+    out_snapshot->vfx_lod = project->particle_data.lod;
     out_snapshot->style = *af_style_find_node_const(&project->style_data, id);
     {
         const AfLayoutNode *layout = af_layout_find_const(&project->layout_data, id);
@@ -1321,6 +1344,25 @@ AfResult af_project_animation_apply(const AfProject *project, uint64_t clip_id, 
         case AF_PROPERTY_CORNER_RADIUS:
             node->corner_radius = value[0];
             break;
+        case AF_PROPERTY_PATH_POINT:
+        case AF_PROPERTY_PATH_CONTROL_IN:
+        case AF_PROPERTY_PATH_CONTROL_OUT: {
+            AfPathData *paths = (AfPathData *)scene->paths;
+            AfPath *path = af_path_find_node(paths, track->node_id);
+            AfPathCommand *command = &paths->commands[path->command_start + track->element_index];
+            AfVec2 *target =
+                track->property == AF_PROPERTY_PATH_POINT
+                    ? &command->point
+                    : (track->property == AF_PROPERTY_PATH_CONTROL_IN ? &command->control2
+                                                                      : &command->control1);
+            if (target->x != value[0] || target->y != value[1]) {
+                *target = (AfVec2){value[0], value[1]};
+                if (af_path_mark_geometry_changed(path) != AF_RESULT_SUCCESS) {
+                    return AF_RESULT_LIMIT_EXCEEDED;
+                }
+            }
+            break;
+        }
         default:
             return AF_RESULT_INVALID_ARGUMENT;
         }
@@ -1352,9 +1394,10 @@ static const char *af_project_type_name(AfNodeType type) {
 }
 
 static const char *af_project_property_name(AfPropertyType property) {
-    static const char *const names[] = {"position", "rotation",   "scale",
-                                        "opacity",  "fill_color", "corner_radius"};
-    return property <= AF_PROPERTY_CORNER_RADIUS ? names[property] : "invalid";
+    static const char *const names[] = {"position",   "rotation",        "scale",
+                                        "opacity",    "fill_color",      "corner_radius",
+                                        "path_point", "path_control_in", "path_control_out"};
+    return property <= AF_PROPERTY_PATH_CONTROL_OUT ? names[property] : "invalid";
 }
 
 static const char *af_project_interpolation_name(AfInterpolation interpolation) {
@@ -1587,9 +1630,10 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->track_count; ++index) {
         const AfProjectTrack *track = &project->tracks[index];
         result = af_project_writer_append(
-            &writer, "track\nid %llu\nclip %llu\nnode %llu\nproperty %s\nend_track\n",
+            &writer, "track\nid %llu\nclip %llu\nnode %llu\nproperty %s\nelement %u\nend_track\n",
             (unsigned long long)track->id, (unsigned long long)track->clip_id,
-            (unsigned long long)track->node_id, af_project_property_name(track->property));
+            (unsigned long long)track->node_id, af_project_property_name(track->property),
+            track->element_index);
     }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->keyframe_count; ++index) {
         const AfProjectKeyframe *key = &project->keyframes[index];
@@ -2223,9 +2267,23 @@ static bool af_project_parse_track_field(const char *line, AfProjectTrackSnapsho
             snapshot->track.property = AF_PROPERTY_FILL_COLOR;
         } else if (strcmp(value, "corner_radius") == 0) {
             snapshot->track.property = AF_PROPERTY_CORNER_RADIUS;
+        } else if (strcmp(value, "path_point") == 0) {
+            snapshot->track.property = AF_PROPERTY_PATH_POINT;
+        } else if (strcmp(value, "path_control_in") == 0) {
+            snapshot->track.property = AF_PROPERTY_PATH_CONTROL_IN;
+        } else if (strcmp(value, "path_control_out") == 0) {
+            snapshot->track.property = AF_PROPERTY_PATH_CONTROL_OUT;
         } else {
             return false;
         }
+        return true;
+    }
+    if ((value = af_project_value(line, "element")) != NULL) {
+        uint64_t element = 0U;
+        if (!af_project_parse_u64(value, &element) || element > UINT32_MAX) {
+            return false;
+        }
+        snapshot->track.element_index = (uint32_t)element;
         return true;
     }
     return true;
@@ -2810,7 +2868,8 @@ AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
                                        .node_id = source_track->node_id,
                                        .property = source_track->property,
                                        .keyframe_start = key_start,
-                                       .keyframe_count = key_write - key_start};
+                                       .keyframe_count = key_write - key_start,
+                                       .element_index = source_track->element_index};
             }
             ir_clips[clip_index] = (AfAnimationClip){.id = source_clip->id,
                                                      .duration = source_clip->duration,

@@ -38,6 +38,14 @@ const AfPath *af_path_find_node_const(const AfPathData *data, uint64_t node_id) 
     return NULL;
 }
 
+AfPath *af_path_find(AfPathData *data, uint64_t path_id) {
+    return (AfPath *)af_path_find_const(data, path_id);
+}
+
+AfPath *af_path_find_node(AfPathData *data, uint64_t node_id) {
+    return (AfPath *)af_path_find_node_const(data, node_id);
+}
+
 AfResult af_path_data_validate(const AfPathData *data) {
     if (data == NULL || (data->path_count != 0U && data->paths == NULL) ||
         (data->command_count != 0U && data->commands == NULL) ||
