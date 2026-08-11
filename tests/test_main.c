@@ -574,6 +574,8 @@ static bool af_test_text_shaping(void) {
     uint32_t atlas_width = 0U;
     uint32_t atlas_height = 0U;
     uint64_t atlas_generation = 0U;
+    AfPathCommand outline[AF_MAX_PATH_COMMANDS_PER_PATH];
+    uint32_t outline_count = 0U;
     af_allocator_init_default(&allocator);
     CHECK(af_file_read_limited(ARCFLOW_TEST_FONT, 4U * 1024U * 1024U, &allocator, &font_data) ==
           AF_RESULT_SUCCESS);
@@ -583,6 +585,12 @@ static bool af_test_text_shaping(void) {
     CHECK(af_text_shape(engine, &request, &layout) == AF_RESULT_SUCCESS);
     CHECK(layout.glyph_count != 0U && layout.line_count == 2U && layout.truncated);
     CHECK(layout.bounds.x <= request.maximum_width + 0.001F);
+    CHECK(af_text_glyph_outline(engine, layout.glyphs[0].font_id, layout.glyphs[0].glyph_id,
+                                request.font_size, (AfVec2){20.0F, 40.0F}, outline,
+                                AF_MAX_PATH_COMMANDS_PER_PATH,
+                                &outline_count) == AF_RESULT_SUCCESS);
+    CHECK(outline_count != 0U && outline[0].type == AF_PATH_MOVE &&
+          outline[outline_count - 1U].type == AF_PATH_CLOSE);
     cache.layout.glyph_count = 0U;
     cache.layout.line_count = 0U;
     CHECK(af_text_run_cache_update(engine, &request, 1U, &cache) == AF_RESULT_SUCCESS);

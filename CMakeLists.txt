@@ -209,6 +209,9 @@ add_executable(arcflow_editor
     src/editor/editor_app.c
 )
 target_include_directories(arcflow_editor PRIVATE src)
+target_compile_definitions(arcflow_editor PRIVATE
+    ARCFLOW_EDITOR_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/test/api/fonts/NotoSans-Bold.ttf"
+)
 target_link_libraries(arcflow_editor PRIVATE arcflow_renderer arcflow_editor_core)
 
 enable_testing()

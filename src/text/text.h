@@ -4,6 +4,7 @@
 #include "arcflow/arcflow_result.h"
 #include "core/allocator.h"
 #include "core/math.h"
+#include "path/path.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -97,6 +98,9 @@ void af_text_engine_destroy(AfTextEngine *engine);
 AfResult af_text_font_load_memory(AfTextEngine *engine, uint64_t font_id, const void *data,
                                   size_t size, uint32_t face_index);
 AfResult af_text_shape(AfTextEngine *engine, const AfTextRequest *request, AfTextLayout *layout);
+AfResult af_text_glyph_outline(AfTextEngine *engine, uint64_t font_id, uint32_t glyph_id,
+                               float font_size, AfVec2 baseline, AfPathCommand *commands,
+                               uint32_t command_capacity, uint32_t *out_command_count);
 AfResult af_text_run_cache_update(AfTextEngine *engine, const AfTextRequest *request,
                                   uint64_t generation, AfTextRunCache *cache);
 const uint8_t *af_text_atlas_pixels(const AfTextEngine *engine, uint32_t *out_width,

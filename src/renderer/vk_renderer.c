@@ -26,6 +26,10 @@ typedef struct AfVkFrame {
     VkCommandBuffer command_buffer;
     VkSemaphore image_available;
     VkFence fence;
+    VkImage color_image;
+    VkDeviceMemory color_memory;
+    VkImageView color_view;
+    bool color_initialized;
 } AfVkFrame;
 
 typedef struct AfGpuShape {
@@ -88,6 +92,7 @@ struct AfVkRenderer {
     VkSwapchainKHR swapchain;
     VkFormat swapchain_format;
     VkExtent2D extent;
+    VkSampleCountFlagBits sample_count;
     VkImage swapchain_images[AF_MAX_SWAPCHAIN_IMAGES];
     VkImageView swapchain_views[AF_MAX_SWAPCHAIN_IMAGES];
     VkSemaphore present_semaphores[AF_MAX_SWAPCHAIN_IMAGES];
@@ -321,6 +326,17 @@ static AfResult af_vk_create_device(AfVkRenderer *renderer) {
         return AF_RESULT_UNSUPPORTED_FEATURE;
     }
     {
+        VkPhysicalDeviceProperties properties;
+        VkSampleCountFlags counts = 0U;
+        vkGetPhysicalDeviceProperties(renderer->physical_device, &properties);
+        counts = properties.limits.framebufferColorSampleCounts;
+        renderer->sample_count =
+            (counts & VK_SAMPLE_COUNT_4_BIT) != 0U
+                ? VK_SAMPLE_COUNT_4_BIT
+                : ((counts & VK_SAMPLE_COUNT_2_BIT) != 0U ? VK_SAMPLE_COUNT_2_BIT
+                                                          : VK_SAMPLE_COUNT_1_BIT);
+    }
+    {
         const char *extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
         VkDeviceQueueCreateInfo queue_infos[2] = {
             {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -387,6 +403,101 @@ static VkPresentModeKHR af_vk_choose_present_mode(const VkPresentModeKHR *modes,
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
+static uint32_t af_vk_find_memory_type(AfVkRenderer *renderer, uint32_t type_bits,
+                                       VkMemoryPropertyFlags required) {
+    VkPhysicalDeviceMemoryProperties properties;
+    uint32_t index = 0U;
+    vkGetPhysicalDeviceMemoryProperties(renderer->physical_device, &properties);
+    for (index = 0U; index < properties.memoryTypeCount; ++index) {
+        if ((type_bits & (1U << index)) != 0U &&
+            (properties.memoryTypes[index].propertyFlags & required) == required) {
+            return index;
+        }
+    }
+    return UINT32_MAX;
+}
+
+static void af_vk_destroy_multisample_targets(AfVkRenderer *renderer) {
+    for (uint32_t index = 0U; index < AF_FRAME_COUNT; ++index) {
+        AfVkFrame *frame = &renderer->frames[index];
+        if (frame->color_view != VK_NULL_HANDLE) {
+            vkDestroyImageView(renderer->device, frame->color_view, NULL);
+            frame->color_view = VK_NULL_HANDLE;
+        }
+        if (frame->color_image != VK_NULL_HANDLE) {
+            vkDestroyImage(renderer->device, frame->color_image, NULL);
+            frame->color_image = VK_NULL_HANDLE;
+        }
+        if (frame->color_memory != VK_NULL_HANDLE) {
+            vkFreeMemory(renderer->device, frame->color_memory, NULL);
+            frame->color_memory = VK_NULL_HANDLE;
+        }
+        frame->color_initialized = false;
+    }
+}
+
+static AfResult af_vk_create_multisample_targets(AfVkRenderer *renderer) {
+    if (renderer->sample_count == VK_SAMPLE_COUNT_1_BIT) {
+        return AF_RESULT_SUCCESS;
+    }
+    for (uint32_t index = 0U; index < AF_FRAME_COUNT; ++index) {
+        AfVkFrame *frame = &renderer->frames[index];
+        const VkImageCreateInfo image_info = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                                              .imageType = VK_IMAGE_TYPE_2D,
+                                              .format = renderer->swapchain_format,
+                                              .extent = {.width = renderer->extent.width,
+                                                         .height = renderer->extent.height,
+                                                         .depth = 1U},
+                                              .mipLevels = 1U,
+                                              .arrayLayers = 1U,
+                                              .samples = renderer->sample_count,
+                                              .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                              .usage = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT |
+                                                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                                              .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                                              .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+        VkMemoryRequirements requirements;
+        VkMemoryAllocateInfo allocation = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkImageViewCreateInfo view_info = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = renderer->swapchain_format,
+            .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                 .baseMipLevel = 0U,
+                                 .levelCount = 1U,
+                                 .baseArrayLayer = 0U,
+                                 .layerCount = 1U}};
+        uint32_t memory_type = UINT32_MAX;
+        if (vkCreateImage(renderer->device, &image_info, NULL, &frame->color_image) != VK_SUCCESS) {
+            return AF_RESULT_VULKAN_ERROR;
+        }
+        vkGetImageMemoryRequirements(renderer->device, frame->color_image, &requirements);
+        memory_type = af_vk_find_memory_type(renderer, requirements.memoryTypeBits,
+                                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (memory_type == UINT32_MAX) {
+            return AF_RESULT_UNSUPPORTED_FEATURE;
+        }
+        allocation.allocationSize = requirements.size;
+        allocation.memoryTypeIndex = memory_type;
+        if (vkAllocateMemory(renderer->device, &allocation, NULL, &frame->color_memory) !=
+                VK_SUCCESS ||
+            vkBindImageMemory(renderer->device, frame->color_image, frame->color_memory, 0U) !=
+                VK_SUCCESS) {
+            return AF_RESULT_VULKAN_ERROR;
+        }
+        view_info.image = frame->color_image;
+        if (vkCreateImageView(renderer->device, &view_info, NULL, &frame->color_view) !=
+            VK_SUCCESS) {
+            return AF_RESULT_VULKAN_ERROR;
+        }
+        af_vk_name(renderer, VK_OBJECT_TYPE_IMAGE, (uint64_t)(uintptr_t)frame->color_image,
+                   "Arcflow multisample color target");
+        af_vk_name(renderer, VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)(uintptr_t)frame->color_view,
+                   "Arcflow multisample color view");
+    }
+    return AF_RESULT_SUCCESS;
+}
+
 static void af_vk_destroy_pipeline(AfVkRenderer *renderer) {
     if (renderer->path_pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(renderer->device, renderer->path_pipeline, NULL);
@@ -408,6 +519,7 @@ static void af_vk_destroy_pipeline(AfVkRenderer *renderer) {
 
 static void af_vk_destroy_swapchain(AfVkRenderer *renderer) {
     uint32_t index = 0U;
+    af_vk_destroy_multisample_targets(renderer);
     for (index = 0U; index < renderer->swapchain_image_count; ++index) {
         if (renderer->present_semaphores[index] != VK_NULL_HANDLE) {
             vkDestroySemaphore(renderer->device, renderer->present_semaphores[index], NULL);
@@ -538,7 +650,7 @@ static AfResult af_vk_create_swapchain(AfVkRenderer *renderer) {
     }
     af_vk_name(renderer, VK_OBJECT_TYPE_SWAPCHAIN_KHR, (uint64_t)(uintptr_t)renderer->swapchain,
                "Arcflow swapchain");
-    return AF_RESULT_SUCCESS;
+    return af_vk_create_multisample_targets(renderer);
 }
 
 static AfResult af_vk_load_shader(AfVkRenderer *renderer, const char *path,
@@ -616,7 +728,7 @@ static AfResult af_vk_create_pipeline(AfVkRenderer *renderer) {
         .lineWidth = 1.0F};
     VkPipelineMultisampleStateCreateInfo multisampling = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        .rasterizationSamples = renderer->sample_count,
         .minSampleShading = 1.0F};
     VkPipelineColorBlendAttachmentState blend_attachment = {
         .blendEnable = VK_TRUE,
@@ -738,7 +850,7 @@ static AfResult af_vk_create_path_pipeline(AfVkRenderer *renderer) {
         .lineWidth = 1.0F};
     const VkPipelineMultisampleStateCreateInfo multisampling = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        .rasterizationSamples = renderer->sample_count,
         .minSampleShading = 1.0F};
     const VkPipelineColorBlendAttachmentState blend_attachment = {
         .blendEnable = VK_TRUE,
@@ -821,20 +933,6 @@ static AfResult af_vk_create_path_pipeline(AfVkRenderer *renderer) {
                    "Arcflow path pipeline");
     }
     return result;
-}
-
-static uint32_t af_vk_find_memory_type(AfVkRenderer *renderer, uint32_t type_bits,
-                                       VkMemoryPropertyFlags required) {
-    VkPhysicalDeviceMemoryProperties properties;
-    uint32_t index = 0U;
-    vkGetPhysicalDeviceMemoryProperties(renderer->physical_device, &properties);
-    for (index = 0U; index < properties.memoryTypeCount; ++index) {
-        if ((type_bits & (1U << index)) != 0U &&
-            (properties.memoryTypes[index].propertyFlags & required) == required) {
-            return index;
-        }
-    }
-    return UINT32_MAX;
 }
 
 static AfResult af_vk_create_upload_ring(AfVkRenderer *renderer) {
@@ -1361,6 +1459,24 @@ AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
     VkDependencyInfo dependency = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
                                    .imageMemoryBarrierCount = 1U,
                                    .pImageMemoryBarriers = &to_render};
+    VkImageMemoryBarrier2 to_multisample = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+        .srcAccessMask = VK_ACCESS_2_NONE,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                             .baseMipLevel = 0U,
+                             .levelCount = 1U,
+                             .baseArrayLayer = 0U,
+                             .layerCount = 1U}};
+    VkDependencyInfo multisample_dependency = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                               .imageMemoryBarrierCount = 1U,
+                                               .pImageMemoryBarriers = &to_multisample};
     VkRenderingAttachmentInfo color_attachment = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
         .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -1436,7 +1552,19 @@ AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
         return AF_RESULT_VULKAN_ERROR;
     }
     to_render.image = renderer->swapchain_images[image_index];
-    color_attachment.imageView = renderer->swapchain_views[image_index];
+    if (renderer->sample_count == VK_SAMPLE_COUNT_1_BIT) {
+        color_attachment.imageView = renderer->swapchain_views[image_index];
+        color_attachment.resolveMode = VK_RESOLVE_MODE_NONE;
+        color_attachment.resolveImageView = VK_NULL_HANDLE;
+        color_attachment.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    } else {
+        color_attachment.imageView = frame->color_view;
+        color_attachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+        color_attachment.resolveImageView = renderer->swapchain_views[image_index];
+        color_attachment.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        to_multisample.image = frame->color_image;
+    }
     rendering.renderArea.extent = renderer->extent;
     viewport = (VkViewport){.x = 0.0F,
                             .y = 0.0F,
@@ -1450,6 +1578,9 @@ AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
     upload_offset = renderer->frame_index * renderer->upload_slice_size;
     path_upload_offset = upload_offset + AF_MAX_NODES * sizeof(AfGpuShape);
     vkCmdPipelineBarrier2(frame->command_buffer, &dependency);
+    if (renderer->sample_count != VK_SAMPLE_COUNT_1_BIT && !frame->color_initialized) {
+        vkCmdPipelineBarrier2(frame->command_buffer, &multisample_dependency);
+    }
     vkCmdBeginRendering(frame->command_buffer, &rendering);
     vkCmdSetViewport(frame->command_buffer, 0U, 1U, &viewport);
     vkCmdSetScissor(frame->command_buffer, 0U, 1U, &scissor);
@@ -1499,6 +1630,7 @@ AfResult af_vk_renderer_draw(AfVkRenderer *renderer, const AfScene *scene) {
     if (vkQueueSubmit2(renderer->graphics_queue, 1U, &submit, frame->fence) != VK_SUCCESS) {
         return AF_RESULT_VULKAN_ERROR;
     }
+    frame->color_initialized = true;
     result = vkQueuePresentKHR(renderer->present_queue, &present);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         renderer->resize_requested = true;

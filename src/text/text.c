@@ -4,6 +4,7 @@
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_OUTLINE_H
 #include <hb-ft.h>
 #include <hb.h>
 
@@ -293,6 +294,118 @@ static AfTextFont *af_text_fallback_font(AfTextEngine *engine, const AfTextReque
         }
     }
     return NULL;
+}
+
+typedef struct AfTextOutlineWriter {
+    AfPathCommand *commands;
+    uint32_t count;
+    uint32_t capacity;
+    AfVec2 baseline;
+    AfVec2 current;
+    bool contour_open;
+    bool overflow;
+} AfTextOutlineWriter;
+
+static AfVec2 af_text_outline_point(const AfTextOutlineWriter *writer, const FT_Vector *point) {
+    return (AfVec2){writer->baseline.x + (float)point->x / 64.0F,
+                    writer->baseline.y - (float)point->y / 64.0F};
+}
+
+static bool af_text_outline_push(AfTextOutlineWriter *writer, AfPathCommand command) {
+    if (writer->count >= writer->capacity) {
+        writer->overflow = true;
+        return false;
+    }
+    writer->commands[writer->count++] = command;
+    return true;
+}
+
+static int af_text_outline_move_to(const FT_Vector *to, void *context) {
+    AfTextOutlineWriter *writer = context;
+    if (writer->contour_open &&
+        !af_text_outline_push(writer, (AfPathCommand){.type = AF_PATH_CLOSE})) {
+        return 1;
+    }
+    writer->current = af_text_outline_point(writer, to);
+    writer->contour_open = true;
+    return af_text_outline_push(writer,
+                                (AfPathCommand){.type = AF_PATH_MOVE, .point = writer->current})
+               ? 0
+               : 1;
+}
+
+static int af_text_outline_line_to(const FT_Vector *to, void *context) {
+    AfTextOutlineWriter *writer = context;
+    writer->current = af_text_outline_point(writer, to);
+    return af_text_outline_push(writer,
+                                (AfPathCommand){.type = AF_PATH_LINE, .point = writer->current})
+               ? 0
+               : 1;
+}
+
+static int af_text_outline_conic_to(const FT_Vector *control, const FT_Vector *to, void *context) {
+    AfTextOutlineWriter *writer = context;
+    const AfVec2 start = writer->current;
+    const AfVec2 control_point = af_text_outline_point(writer, control);
+    const AfVec2 end = af_text_outline_point(writer, to);
+    const AfPathCommand command = {
+        .type = AF_PATH_CUBIC,
+        .point = end,
+        .control1 = {start.x + (control_point.x - start.x) * (2.0F / 3.0F),
+                     start.y + (control_point.y - start.y) * (2.0F / 3.0F)},
+        .control2 = {end.x + (control_point.x - end.x) * (2.0F / 3.0F),
+                     end.y + (control_point.y - end.y) * (2.0F / 3.0F)}};
+    writer->current = end;
+    return af_text_outline_push(writer, command) ? 0 : 1;
+}
+
+static int af_text_outline_cubic_to(const FT_Vector *control1, const FT_Vector *control2,
+                                    const FT_Vector *to, void *context) {
+    AfTextOutlineWriter *writer = context;
+    const AfPathCommand command = {.type = AF_PATH_CUBIC,
+                                   .point = af_text_outline_point(writer, to),
+                                   .control1 = af_text_outline_point(writer, control1),
+                                   .control2 = af_text_outline_point(writer, control2)};
+    writer->current = command.point;
+    return af_text_outline_push(writer, command) ? 0 : 1;
+}
+
+AfResult af_text_glyph_outline(AfTextEngine *engine, uint64_t font_id, uint32_t glyph_id,
+                               float font_size, AfVec2 baseline, AfPathCommand *commands,
+                               uint32_t command_capacity, uint32_t *out_command_count) {
+    AfTextFont *font = af_text_find_font(engine, font_id);
+    AfTextOutlineWriter writer = {
+        .commands = commands, .capacity = command_capacity, .baseline = baseline};
+    const FT_Outline_Funcs functions = {.move_to = af_text_outline_move_to,
+                                        .line_to = af_text_outline_line_to,
+                                        .conic_to = af_text_outline_conic_to,
+                                        .cubic_to = af_text_outline_cubic_to,
+                                        .shift = 0,
+                                        .delta = 0};
+    if (font == NULL || !isfinite(font_size) || font_size <= 0.0F || font_size > 1024.0F ||
+        !isfinite(baseline.x) || !isfinite(baseline.y) || commands == NULL ||
+        command_capacity == 0U || command_capacity > AF_MAX_PATH_COMMANDS_PER_PATH ||
+        out_command_count == NULL) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    *out_command_count = 0U;
+    if (FT_Set_Pixel_Sizes(font->face, 0U, (uint32_t)ceilf(font_size)) != 0 ||
+        FT_Load_Glyph(font->face, glyph_id, FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING) != 0) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    if (font->face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) {
+        return AF_RESULT_SUCCESS;
+    }
+    if (FT_Outline_Decompose(&font->face->glyph->outline, &functions, &writer) != 0 ||
+        writer.overflow) {
+        return writer.overflow ? AF_RESULT_LIMIT_EXCEEDED : AF_RESULT_INVALID_ARGUMENT;
+    }
+    if (writer.contour_open &&
+        !af_text_outline_push(&writer, (AfPathCommand){.type = AF_PATH_CLOSE})) {
+        return AF_RESULT_LIMIT_EXCEEDED;
+    }
+    *out_command_count = writer.count;
+    return AF_RESULT_SUCCESS;
 }
 
 static void af_text_align_lines(const AfTextRequest *request, AfTextLayout *layout) {
