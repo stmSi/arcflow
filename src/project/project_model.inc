@@ -32,6 +32,7 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
         return AF_RESULT_INVALID_ARGUMENT;
     }
     *project = (AfProject){0};
+    project->allocator = allocator;
     nodes = af_allocate_array(allocator, capacity, sizeof(*nodes), alignof(AfSceneNode));
     names = af_allocate_array(allocator, capacity, sizeof(*names), alignof(char));
     clips =
@@ -88,6 +89,7 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
     project->keyframes = keyframes;
     project->keyframe_capacity = AF_PROJECT_MAX_KEYFRAMES;
     project->next_animation_id = 1U;
+    project->next_asset_id = 1U;
     project->path_data = (AfPathData){.paths = paths,
                                       .path_capacity = AF_MAX_PATHS,
                                       .commands = path_commands,
@@ -104,8 +106,12 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
     project->particle_data = (AfParticleData){
         .emitters = emitters, .capacity = AF_MAX_PARTICLE_EMITTERS, .lod = af_vfx_lod_default()};
     project->scene.particles = &project->particle_data;
+    if (af_image_data_create(&project->image_data, allocator) != AF_RESULT_SUCCESS) {
+        af_project_destroy(project);
+        return AF_RESULT_OUT_OF_MEMORY;
+    }
+    project->scene.images = &project->image_data;
     project->validation_ids = validation_ids;
-    project->allocator = allocator;
     return AF_RESULT_SUCCESS;
 }
 
@@ -114,6 +120,7 @@ void af_project_destroy(AfProject *project) {
         return;
     }
     if (project->allocator != NULL) {
+        af_image_data_destroy(&project->image_data);
         af_deallocate(project->allocator, project->validation_ids);
         af_deallocate(project->allocator, project->path_data.commands);
         af_deallocate(project->allocator, project->style_data.styles);
@@ -188,6 +195,7 @@ AfResult af_project_validate(const AfProject *project) {
     uint32_t index = 0U;
     uint64_t maximum_id = 0U;
     uint64_t maximum_animation_id = 0U;
+    uint64_t maximum_asset_id = 0U;
     if (project == NULL || project->names == NULL || project->scene.nodes == NULL ||
         project->allocator == NULL || !isfinite(project->canvas_size.x) ||
         !isfinite(project->canvas_size.y) || project->canvas_size.x <= 0.0F ||
@@ -201,11 +209,13 @@ AfResult af_project_validate(const AfProject *project) {
         project->track_capacity > AF_PROJECT_MAX_TRACKS ||
         project->keyframe_count > project->keyframe_capacity ||
         project->keyframe_capacity > AF_PROJECT_MAX_KEYFRAMES || project->next_animation_id == 0U ||
-        project->next_animation_id == UINT64_MAX ||
+        project->next_animation_id == UINT64_MAX || project->next_asset_id == 0U ||
+        project->next_asset_id == UINT64_MAX ||
         af_scene_validate(&project->scene) != AF_RESULT_SUCCESS ||
         af_path_data_validate(&project->path_data) != AF_RESULT_SUCCESS ||
         af_style_data_validate(&project->style_data) != AF_RESULT_SUCCESS ||
-        af_particle_data_validate(&project->particle_data, &project->scene) != AF_RESULT_SUCCESS) {
+        af_particle_data_validate(&project->particle_data, &project->scene) != AF_RESULT_SUCCESS ||
+        af_image_data_validate(&project->image_data, true) != AF_RESULT_SUCCESS) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
     if (af_layout_validate(&project->layout_data, &project->scene) != AF_RESULT_SUCCESS) {
@@ -248,6 +258,33 @@ AfResult af_project_validate(const AfProject *project) {
         const AfSceneNode *node = &project->scene.nodes[index];
         if (node->type == AF_NODE_PATH &&
             af_path_find_node_const(&project->path_data, node->id) == NULL) {
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
+    }
+    for (index = 0U; index < project->image_data.binding_count; ++index) {
+        const AfImageBinding *binding = &project->image_data.bindings[index];
+        const AfSceneNode *node = af_scene_find_const(&project->scene, binding->node_id);
+        if (node == NULL || node->type != AF_NODE_IMAGE) {
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
+    }
+    for (index = 0U; index < project->image_data.asset_count; ++index) {
+        maximum_asset_id = project->image_data.assets[index].id > maximum_asset_id
+                               ? project->image_data.assets[index].id
+                               : maximum_asset_id;
+    }
+    for (index = 0U; index < project->image_data.sequence_count; ++index) {
+        maximum_asset_id = project->image_data.sequences[index].id > maximum_asset_id
+                               ? project->image_data.sequences[index].id
+                               : maximum_asset_id;
+    }
+    if (project->next_asset_id <= maximum_asset_id) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    for (index = 0U; index < project->scene.count; ++index) {
+        if (project->scene.nodes[index].type == AF_NODE_IMAGE &&
+            af_image_find_binding_const(&project->image_data, project->scene.nodes[index].id) ==
+                NULL) {
             return AF_RESULT_INVALID_ARGUMENT;
         }
     }
@@ -355,6 +392,25 @@ AfResult af_project_add_node(AfProject *project, const AfSceneNode *node, const 
     return AF_RESULT_SUCCESS;
 }
 
+static bool af_project_snapshot_image_valid(const AfProject *project,
+                                            const AfProjectNodeSnapshot *snapshot) {
+    const AfImageBinding *binding = &snapshot->image_binding;
+    if (!snapshot->has_image_binding) {
+        return true;
+    }
+    return snapshot->node.type == AF_NODE_IMAGE && binding->node_id == snapshot->node.id &&
+           project->image_data.binding_count < project->image_data.binding_capacity &&
+           af_image_find_binding_const(&project->image_data, binding->node_id) == NULL &&
+           binding->display_mode <= AF_IMAGE_DISPLAY_NINE_SLICE &&
+           (binding->asset_id == 0U) != (binding->sequence_id == 0U) &&
+           (binding->asset_id == 0U ||
+            af_image_find_const(&project->image_data, binding->asset_id) != NULL) &&
+           (binding->sequence_id == 0U ||
+            af_image_find_sequence_const(&project->image_data, binding->sequence_id) != NULL) &&
+           isfinite(binding->frames_per_second) && binding->frames_per_second >= 0.0F &&
+           binding->frames_per_second <= 1000.0F;
+}
+
 AfResult af_project_insert_snapshot(AfProject *project, const AfProjectNodeSnapshot *snapshot) {
     uint32_t index = 0U;
     AfStyle style;
@@ -368,7 +424,8 @@ AfResult af_project_insert_snapshot(AfProject *project, const AfProjectNodeSnaps
          (project->particle_data.count >= project->particle_data.capacity ||
           snapshot->emitter.node_id != snapshot->node.id ||
           af_project_find_emitter(project, snapshot->emitter.id) != NULL ||
-          af_project_find_node_emitter(project, snapshot->node.id) != NULL))) {
+          af_project_find_node_emitter(project, snapshot->node.id) != NULL)) ||
+        !af_project_snapshot_image_valid(project, snapshot)) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
     style = snapshot->style;
@@ -393,6 +450,13 @@ AfResult af_project_insert_snapshot(AfProject *project, const AfProjectNodeSnaps
         project->particle_data.emitters[project->particle_data.count++] = snapshot->emitter;
         if (project->next_animation_id <= snapshot->emitter.id) {
             project->next_animation_id = snapshot->emitter.id + 1U;
+        }
+    }
+    if (snapshot->has_image_binding) {
+        AfImageBinding binding = snapshot->image_binding;
+        binding.node_id = snapshot->node.id;
+        if (af_image_set_binding(&project->image_data, &binding) != AF_RESULT_SUCCESS) {
+            return AF_RESULT_INVALID_ARGUMENT;
         }
     }
     if (project->next_id <= snapshot->node.id) {
@@ -441,6 +505,7 @@ AfResult af_project_remove_node_exact(AfProject *project, uint64_t id) {
             ++emitter_index;
         }
     }
+    (void)af_image_remove_binding(&project->image_data, id);
     return AF_RESULT_SUCCESS;
 }
 
@@ -492,6 +557,14 @@ AfResult af_project_collect_subtree(const AfProject *project, uint64_t id,
                 if (emitter != NULL) {
                     snapshots[count].emitter = *emitter;
                     snapshots[count].has_emitter = true;
+                }
+            }
+            {
+                const AfImageBinding *binding = af_image_find_binding_const(
+                    &project->image_data, project->scene.nodes[index].id);
+                if (binding != NULL) {
+                    snapshots[count].image_binding = *binding;
+                    snapshots[count].has_image_binding = true;
                 }
             }
             memcpy(snapshots[count].name, project->names[index], AF_PROJECT_NAME_CAPACITY);
@@ -551,6 +624,15 @@ AfResult af_project_delete_subtree(AfProject *project, uint64_t id) {
             ++index;
         }
     }
+    for (index = 0U; index < project->image_data.binding_count;) {
+        if (af_scene_find_const(&project->scene, project->image_data.bindings[index].node_id) ==
+            NULL) {
+            const uint64_t node_id = project->image_data.bindings[index].node_id;
+            (void)af_image_remove_binding(&project->image_data, node_id);
+        } else {
+            ++index;
+        }
+    }
     return AF_RESULT_SUCCESS;
 }
 
@@ -575,6 +657,13 @@ AfResult af_project_snapshot(const AfProject *project, uint64_t id,
         if (emitter != NULL) {
             out_snapshot->emitter = *emitter;
             out_snapshot->has_emitter = true;
+        }
+    }
+    {
+        const AfImageBinding *binding = af_image_find_binding_const(&project->image_data, id);
+        if (binding != NULL) {
+            out_snapshot->image_binding = *binding;
+            out_snapshot->has_image_binding = true;
         }
     }
     memcpy(out_snapshot->name, project->names[index], AF_PROJECT_NAME_CAPACITY);

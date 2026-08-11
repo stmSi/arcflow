@@ -186,7 +186,7 @@ static bool af_test_project(void) {
         style->stroke.dash_count = 2U;
     }
     CHECK(af_project_serialize(&project, &allocator, &text) == AF_RESULT_SUCCESS);
-    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 8"));
+    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 9"));
     CHECK(af_test_project_contains(text.data, text.size, "property path_control_in"));
     CHECK(af_test_project_contains(text.data, text.size, "element 1"));
     CHECK(af_test_project_contains(text.data, text.size, "particle "));
@@ -363,7 +363,7 @@ static bool af_test_project(void) {
     CHECK(text.size < sizeof(unsupported));
     memcpy(unsupported, text.data, text.size);
     unsupported[text.size] = '\0';
-    unsupported[strlen("arcflow_project ")] = '9';
+    unsupported[strlen("arcflow_project ")] = '0';
     CHECK(af_project_deserialize(unsupported, text.size, &allocator, &reopened) ==
           AF_RESULT_UNSUPPORTED_VERSION);
     af_package_blob_destroy(&allocator, &package);

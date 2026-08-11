@@ -42,7 +42,7 @@ set(SDL_JOYSTICK OFF CACHE BOOL "" FORCE)
 set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
 set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
 set(SDL_POWER OFF CACHE BOOL "" FORCE)
-set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
+set(SDL_DIALOG ON CACHE BOOL "" FORCE)
 set(SDL_TRAY OFF CACHE BOOL "" FORCE)
 set(SDL_WAYLAND OFF CACHE BOOL "" FORCE)
 set(ARCFLOW_SAVED_C_EXTENSIONS "${CMAKE_C_EXTENSIONS}")
@@ -101,6 +101,7 @@ set(ARCFLOW_PROJECT_SOURCES
     src/deformation/deformation.c
     src/rigging/rigging.c
     src/particle/particle.c
+    src/assets/image.c
     src/assets/package.c
 )
 
@@ -119,9 +120,12 @@ target_link_libraries(arcflow_runtime PUBLIC arcflow_core)
 
 add_library(arcflow_project STATIC
     src/project/project.c
+    src/project/image_decode.c
+    src/project/image_svg.c
+    src/project/project_images.c
 )
 target_include_directories(arcflow_project PUBLIC src PRIVATE include)
-target_link_libraries(arcflow_project PUBLIC arcflow_core)
+target_link_libraries(arcflow_project PUBLIC arcflow_core PRIVATE SDL3::SDL3-static)
 
 add_library(arcflow_editor_core STATIC
     src/editor/editor_commands.c
@@ -162,6 +166,8 @@ arcflow_shader(analytic.vert analytic.vert.spv)
 arcflow_shader(analytic.frag analytic.frag.spv)
 arcflow_shader(path.vert path.vert.spv)
 arcflow_shader(path.frag path.frag.spv)
+arcflow_shader(image.vert image.vert.spv)
+arcflow_shader(image.frag image.frag.spv)
 arcflow_shader(particle.comp particle.comp.spv)
 arcflow_shader(particle.vert particle.vert.spv)
 arcflow_shader(particle.frag particle.frag.spv)
@@ -170,6 +176,8 @@ add_custom_target(arcflow_shaders ALL DEPENDS
     "${ARCFLOW_SHADER_DIR}/analytic.frag.spv"
     "${ARCFLOW_SHADER_DIR}/path.vert.spv"
     "${ARCFLOW_SHADER_DIR}/path.frag.spv"
+    "${ARCFLOW_SHADER_DIR}/image.vert.spv"
+    "${ARCFLOW_SHADER_DIR}/image.frag.spv"
     "${ARCFLOW_SHADER_DIR}/particle.comp.spv"
     "${ARCFLOW_SHADER_DIR}/particle.vert.spv"
     "${ARCFLOW_SHADER_DIR}/particle.frag.spv"

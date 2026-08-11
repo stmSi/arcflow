@@ -14,6 +14,7 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
     const AfSectionView *components = NULL;
     const AfSectionView *state_machines = NULL;
     const AfSectionView *particles = NULL;
+    const AfSectionView *images = NULL;
     uint32_t index = 0U;
     AfResult result = AF_RESULT_SUCCESS;
     if (allocator == NULL || out_package == NULL) {
@@ -39,6 +40,7 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
     components = af_find_section(sections, section_count, AF_SECTION_COMPONENTS);
     state_machines = af_find_section(sections, section_count, AF_SECTION_STATE_MACHINES);
     particles = af_find_section(sections, section_count, AF_SECTION_PARTICLES);
+    images = af_find_section(sections, section_count, AF_SECTION_IMAGES);
     out_package->scene.nodes =
         af_allocate_array(allocator, nodes->count, sizeof(AfSceneNode), alignof(AfSceneNode));
     out_package->base_nodes =
@@ -84,6 +86,11 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
         af_loaded_package_destroy(allocator, out_package);
         return result;
     }
+    result = af_decode_images(bytes + images->offset, allocator, &out_package->image_data);
+    if (result != AF_RESULT_SUCCESS) {
+        af_loaded_package_destroy(allocator, out_package);
+        return result;
+    }
     out_package->scene.count = nodes->count;
     out_package->scene.capacity = nodes->count;
     out_package->animation.clip_count = clips->count;
@@ -122,6 +129,7 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
     out_package->scene.styles = &out_package->style_data;
     out_package->scene.layouts = &out_package->layout_data;
     out_package->scene.particles = &out_package->particle_data;
+    out_package->scene.images = &out_package->image_data;
     for (index = 0U; index < nodes->count; ++index) {
         const uint8_t *record = bytes + nodes->offset + (uint64_t)index * AF_NODE_RECORD_SIZE;
         AfSceneNode *node = &out_package->scene.nodes[index];
@@ -234,5 +242,6 @@ void af_loaded_package_destroy(AfAllocator *allocator, AfLoadedPackage *package)
     af_deallocate(allocator, package->state_machine_data.inputs);
     af_deallocate(allocator, package->state_machine_data.conditions);
     af_deallocate(allocator, package->particle_data.emitters);
+    af_image_data_destroy(&package->image_data);
     *package = (AfLoadedPackage){0};
 }

@@ -10,7 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AF_PROJECT_FORMAT_VERSION 8U
+#define AF_PROJECT_FORMAT_VERSION 9U
 #define AF_PROJECT_MAX_FILE_SIZE (32U * 1024U * 1024U)
 #define AF_PROJECT_NAME_CAPACITY 64U
 #define AF_PROJECT_MAX_CLIPS 64U
@@ -56,10 +56,12 @@ typedef struct AfProject {
     uint32_t keyframe_count;
     uint32_t keyframe_capacity;
     uint64_t next_animation_id;
+    uint64_t next_asset_id;
     AfPathData path_data;
     AfStyleData style_data;
     AfLayoutData layout_data;
     AfParticleData particle_data;
+    AfImageData image_data;
     uint64_t *validation_ids;
     AfAllocator *allocator;
 } AfProject;
@@ -72,6 +74,8 @@ typedef struct AfProjectNodeSnapshot {
     AfVfxLodSettings vfx_lod;
     bool has_layout;
     bool has_emitter;
+    AfImageBinding image_binding;
+    bool has_image_binding;
     char name[AF_PROJECT_NAME_CAPACITY];
     uint32_t index;
 } AfProjectNodeSnapshot;

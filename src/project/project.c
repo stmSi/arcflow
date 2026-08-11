@@ -3,8 +3,11 @@
 #include "animation/animation.h"
 #include "core/file_io.h"
 #include "core/safe_math.h"
+#include "project/image_import.h"
 
+#include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdalign.h>
 #include <stdarg.h>
@@ -64,9 +67,11 @@ typedef struct AfProjectTextWriter {
 // clang-format off
 #include "project/project_model.inc"
 #include "project/project_authoring.inc"
+#include "project/project_image_tokens.inc"
 #include "project/project_serialize.inc"
 #include "project/project_parse_values.inc"
 #include "project/project_parse_entities.inc"
+#include "project/project_parse_images.inc"
 #include "project/project_deserialize.inc"
 #include "project/project_compile.inc"
 // clang-format on

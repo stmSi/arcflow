@@ -28,6 +28,7 @@ AfResult af_vk_renderer_create(AfPlatformWindow *window, AfVkRenderer **out_rend
     } else if ((result = af_vk_create_swapchain(renderer)) != AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_create_pipeline(renderer)) != AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_create_path_pipeline(renderer)) != AF_RESULT_SUCCESS) {
+    } else if ((result = af_vk_create_image_pipeline(renderer)) != AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_particles_create(renderer->physical_device, renderer->device,
                                                 renderer->swapchain_format, renderer->sample_count,
                                                 renderer->graphics_family, &renderer->particles)) !=
@@ -75,6 +76,7 @@ void af_vk_renderer_destroy(AfVkRenderer *renderer) {
         af_vk_particles_destroy(renderer->particles);
         renderer->particles = NULL;
         af_vk_destroy_pipeline(renderer);
+        af_vk_destroy_images(renderer);
         af_vk_destroy_swapchain(renderer);
         vkDestroyDevice(renderer->device, NULL);
     }

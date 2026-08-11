@@ -252,15 +252,16 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
     const AfSectionView *state_machines =
         af_find_section(sections, section_count, AF_SECTION_STATE_MACHINES);
     const AfSectionView *particles = af_find_section(sections, section_count, AF_SECTION_PARTICLES);
+    const AfSectionView *images = af_find_section(sections, section_count, AF_SECTION_IMAGES);
     uint32_t index = 0U;
     if (section_count != AF_SECTION_COUNT || nodes == NULL || clips == NULL || tracks == NULL ||
         keys == NULL || strings == NULL || paths == NULL || path_commands == NULL ||
         styles == NULL || layouts == NULL || components == NULL || state_machines == NULL ||
-        particles == NULL || nodes->count > AF_MAX_NODES || clips->count > AF_MAX_CLIPS ||
-        tracks->count > AF_MAX_TRACKS || keys->count > AF_MAX_KEYFRAMES ||
-        paths->count > AF_MAX_PATHS || path_commands->count > AF_MAX_PATH_COMMANDS ||
-        styles->count > AF_MAX_STYLES || layouts->count > AF_MAX_LAYOUT_NODES ||
-        particles->count > AF_MAX_PARTICLE_EMITTERS ||
+        particles == NULL || images == NULL || nodes->count > AF_MAX_NODES ||
+        clips->count > AF_MAX_CLIPS || tracks->count > AF_MAX_TRACKS ||
+        keys->count > AF_MAX_KEYFRAMES || paths->count > AF_MAX_PATHS ||
+        path_commands->count > AF_MAX_PATH_COMMANDS || styles->count > AF_MAX_STYLES ||
+        layouts->count > AF_MAX_LAYOUT_NODES || particles->count > AF_MAX_PARTICLE_EMITTERS ||
         nodes->size != (uint64_t)nodes->count * AF_NODE_RECORD_SIZE ||
         clips->size != (uint64_t)clips->count * AF_CLIP_RECORD_SIZE ||
         tracks->size != (uint64_t)tracks->count * AF_TRACK_RECORD_SIZE ||
@@ -433,7 +434,7 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
         uint32_t float_offset = 0U;
         uint64_t ancestor = parent_id;
         uint32_t depth = 0U;
-        if (id == 0U || id == AF_INVALID_NODE_ID || type > AF_NODE_PATH ||
+        if (id == 0U || id == AF_INVALID_NODE_ID || type > AF_NODE_IMAGE ||
             (parent_id != AF_INVALID_NODE_ID && !af_node_id_exists(bytes, nodes, parent_id)) ||
             af_read_u32(record + 20U) > 1U || af_read_f32(record + 44U) < 0.0F ||
             af_read_f32(record + 48U) < 0.0F || af_read_f32(record + 52U) < 0.0F ||
@@ -612,7 +613,7 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
             return AF_RESULT_INVALID_PACKAGE;
         }
     }
-    return AF_RESULT_SUCCESS;
+    return af_validate_images(bytes, images, nodes);
 }
 
 AfResult af_package_validate(const void *data, size_t size) {

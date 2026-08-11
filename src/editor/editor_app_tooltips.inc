@@ -22,6 +22,9 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
         }
         return tooltip;
     }
+    if (editor->top_menu != AF_EDITOR_MENU_NONE) {
+        return tooltip;
+    }
     if (fabsf(mouse.x - editor->left_width) <= 5.0F) {
         return (AfEditorTooltip){.id = 1U,
                                  .title = "Resize Scene Hierarchy",
@@ -47,7 +50,8 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                                      "Expands the dope sheet or curve editor without hiding docks.",
                                  .shortcut = "Drag the horizontal divider"};
     }
-    if (mouse.y < AF_EDITOR_TOOLBAR_HEIGHT && mouse.x >= editor->left_width) {
+    if (mouse.y >= AF_EDITOR_MENU_HEIGHT && mouse.y < AF_EDITOR_TOOLBAR_HEIGHT &&
+        mouse.x >= editor->left_width) {
         const float local_x = mouse.x - editor->left_width - 14.0F;
         static const AfEditorTooltip tools[] = {
             {.id = 10U,
@@ -93,11 +97,74 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
             return tools[3];
         }
         if (local_x >= 172.0F && local_x < 260.0F) {
-            return mouse.y < 22.0F ? tools[4] : tools[5];
+            return mouse.y < AF_EDITOR_MENU_HEIGHT + 22.0F ? tools[4] : tools[5];
         }
         return tooltip;
     }
     if (mouse.x >= center_right) {
+        const AfSceneNode *selected =
+            af_scene_find_const(&editor->project.scene, editor->selected_id);
+        if (selected != NULL && selected->type == AF_NODE_IMAGE) {
+            if (mouse.y >= 150.0F && mouse.y < 340.0F) {
+                const uint32_t row = (uint32_t)((mouse.y - 150.0F) / 38.0F);
+                static const char *const titles[] = {"Texture Trimming", "Mip Generation",
+                                                     "Color Space", "Compression Setting",
+                                                     "Image Display Mode"};
+                static const char *const summaries[] = {
+                    "Remove transparent edge pixels from atlas storage.",
+                    "Generate downsampled levels for stable minification.",
+                    "Choose sRGB color or linear data sampling.",
+                    "Choose raw or lossless package storage metadata.",
+                    "Switch between stretch and nine-slice rendering."};
+                if (row < 5U) {
+                    return (AfEditorTooltip){
+                        .id = UINT64_C(0x26000) + row,
+                        .title = titles[row],
+                        .summary = summaries[row],
+                        .details = "The atlas is rebuilt deterministically after this change.",
+                        .shortcut = "Click to toggle the setting"};
+                }
+            }
+            if (mouse.y >= 375.0F && mouse.y < 519.0F) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x26100) + (uint64_t)((mouse.y - 375.0F) / 36.0F),
+                    .title = "Nine-Slice Border",
+                    .summary = "Adjust the preserved edge width for this sprite.",
+                    .details = "Corners remain fixed while center regions stretch to object size.",
+                    .shortcut = "Use - and + to edit pixels"};
+            }
+            if (mouse.y >= 548.0F && mouse.y < 578.0F) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x26200),
+                    .title = "Image Flipbook",
+                    .summary = "Create or remove a sequence on this image object.",
+                    .details = "Creation uses all imported assets in browser order as frames.",
+                    .shortcut = "Import at least two images first"};
+            }
+            if (mouse.y >= 586.0F && mouse.y < 612.0F) {
+                return (AfEditorTooltip){.id = UINT64_C(0x26201),
+                                         .title = "Flipbook Rate",
+                                         .summary = "Change playback frames per second.",
+                                         .details =
+                                             "Each bound object can override sequence speed.",
+                                         .shortcut = "Use - and + from 1 to 120 FPS"};
+            }
+            if (mouse.y >= 622.0F && mouse.y < 650.0F) {
+                return (AfEditorTooltip){.id = UINT64_C(0x26202),
+                                         .title = "Flipbook Loop",
+                                         .summary = "Toggle looping for this image object.",
+                                         .details =
+                                             "When disabled, playback holds the final frame.",
+                                         .shortcut = "Click to toggle"};
+            }
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x26210),
+                .title = "Image Inspector",
+                .summary = "Configure the selected image resource and its scene binding.",
+                .details =
+                    "Source, atlas, display, border, mip, color, and sequence controls are here.",
+                .shortcut = "Right click the object for image-specific actions"};
+        }
         if (af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_COLOR_SV_Y, AF_EDITOR_COLOR_SV_WIDTH,
                                     AF_EDITOR_COLOR_SV_HEIGHT)) {
             return (AfEditorTooltip){
@@ -324,6 +391,24 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                            ? "Cubic keys expose bounded in and out tangent controls."
                            : "Ctrl toggles key selection; drag moves keys with optional snapping.",
             .shortcut = "Right click for keyframe actions"};
+    }
+    if (mouse.x < editor->left_width && editor->asset_browser_visible &&
+        mouse.y >= af_editor_asset_browser_top(editor, height)) {
+        const float row_start = af_editor_asset_browser_top(editor, height) + 48.0F;
+        const uint32_t row =
+            mouse.y < row_start ? UINT32_MAX : (uint32_t)((mouse.y - row_start) / 27.0F);
+        const uint32_t asset_index = editor->asset_scroll + row;
+        if (row < 5U && asset_index < editor->project.image_data.asset_count) {
+            const AfImageAsset *asset = &editor->project.image_data.assets[asset_index];
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x4100000000000000) | asset->id,
+                .title = asset->name,
+                .summary = asset->missing ? "Source file is missing; reimport is required."
+                                          : "Select this imported image asset.",
+                .details = "The row shows format, dimensions, and scene dependency count.",
+                .shortcut = "Wheel scrolls / Right click opens asset actions"};
+        }
+        return tooltip;
     }
     if (mouse.x < editor->left_width && mouse.y >= AF_EDITOR_TOOLBAR_HEIGHT + 8.0F) {
         const uint32_t row =

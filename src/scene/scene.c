@@ -133,7 +133,7 @@ AfResult af_scene_validate(const AfScene *scene) {
     }
     for (index = 0U; index < scene->count; ++index) {
         const AfSceneNode *node = &scene->nodes[index];
-        if (node->id == 0U || node->id == AF_INVALID_NODE_ID || node->type > AF_NODE_PATH ||
+        if (node->id == 0U || node->id == AF_INVALID_NODE_ID || node->type > AF_NODE_IMAGE ||
             !isfinite(node->local_transform.position.x) ||
             !isfinite(node->local_transform.position.y) ||
             !isfinite(node->local_transform.rotation) || !isfinite(node->local_transform.scale.x) ||

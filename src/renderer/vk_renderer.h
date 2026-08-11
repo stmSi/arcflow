@@ -18,7 +18,9 @@ typedef struct AfVkRenderOptions {
     uint32_t particle_clip_y;
     uint32_t particle_clip_width;
     uint32_t particle_clip_height;
+    float image_time;
     bool particle_clip_enabled;
+    bool image_time_override;
 } AfVkRenderOptions;
 
 AfResult af_vk_renderer_create(AfPlatformWindow *window, AfVkRenderer **out_renderer);

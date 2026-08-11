@@ -530,7 +530,12 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
     float canvas_height = 0.0F;
     editor->mouse_position = (AfVec2){x, y};
     if (event->button == SDL_BUTTON_RIGHT) {
+        editor->top_menu = AF_EDITOR_MENU_NONE;
         af_editor_open_context_menu(editor, width, height, x, y);
+        return;
+    }
+    if (event->button == SDL_BUTTON_LEFT &&
+        af_editor_top_menu_mouse_down(editor, width, height, x, y)) {
         return;
     }
     if (editor->context_menu != AF_EDITOR_CONTEXT_NONE) {
@@ -561,6 +566,30 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         editor->drag_mode = AF_EDITOR_DRAG_RIGHT_DOCK;
         return;
     }
+    if (editor->asset_browser_visible && x < editor->left_width &&
+        y >= af_editor_asset_browser_top(editor, height)) {
+        const float row_start = af_editor_asset_browser_top(editor, height) + 48.0F;
+        if (y >= row_start) {
+            const uint32_t row = (uint32_t)((y - row_start) / 27.0F);
+            const uint32_t asset_index = editor->asset_scroll + row;
+            if (asset_index < editor->project.image_data.asset_count && row < 5U) {
+                const uint64_t asset_id = editor->project.image_data.assets[asset_index].id;
+                editor->selected_asset_id = asset_id;
+                for (uint32_t binding = 0U; binding < editor->project.image_data.binding_count;
+                     ++binding) {
+                    if (af_editor_binding_uses_asset(&editor->project.image_data,
+                                                     &editor->project.image_data.bindings[binding],
+                                                     asset_id)) {
+                        af_editor_select_only(editor,
+                                              editor->project.image_data.bindings[binding].node_id);
+                        break;
+                    }
+                }
+                af_editor_status(editor, "Image asset selected");
+            }
+        }
+        return;
+    }
     if (x < editor->left_width && y >= AF_EDITOR_TOOLBAR_HEIGHT + 8.0F) {
         const uint32_t row =
             (uint32_t)((y - AF_EDITOR_TOOLBAR_HEIGHT - 8.0F) / AF_EDITOR_ROW_HEIGHT);
@@ -585,7 +614,7 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         }
         return;
     }
-    if (y < AF_EDITOR_TOOLBAR_HEIGHT && x >= editor->left_width) {
+    if (y >= AF_EDITOR_MENU_HEIGHT && y < AF_EDITOR_TOOLBAR_HEIGHT && x >= editor->left_width) {
         const float toolbar_x = x - editor->left_width - 14.0F;
         if (toolbar_x >= 0.0F && toolbar_x < 34.0F) {
             (void)af_editor_create_primitive(editor, AF_NODE_RECTANGLE, width, height);
@@ -596,7 +625,7 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         } else if (toolbar_x >= 126.0F && toolbar_x < 160.0F) {
             (void)af_editor_create_path(editor, width, height);
         } else if (toolbar_x >= 172.0F && toolbar_x < 260.0F) {
-            if (y < 22.0F) {
+            if (y < AF_EDITOR_MENU_HEIGHT + 22.0F) {
                 editor->grid_visible = !editor->grid_visible;
             } else {
                 editor->snapping = !editor->snapping;
@@ -858,7 +887,17 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
 static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
                                   const SDL_MouseWheelEvent *event) {
     if (event->mouse_x < editor->left_width) {
-        if (event->y > 0.0F && editor->hierarchy_scroll > 0U) {
+        if (editor->asset_browser_visible &&
+            event->mouse_y >= af_editor_asset_browser_top(editor, height)) {
+            const uint32_t maximum = editor->project.image_data.asset_count > 5U
+                                         ? editor->project.image_data.asset_count - 5U
+                                         : 0U;
+            if (event->y > 0.0F && editor->asset_scroll > 0U) {
+                --editor->asset_scroll;
+            } else if (event->y < 0.0F && editor->asset_scroll < maximum) {
+                ++editor->asset_scroll;
+            }
+        } else if (event->y > 0.0F && editor->hierarchy_scroll > 0U) {
             --editor->hierarchy_scroll;
         } else if (event->y < 0.0F && editor->hierarchy_scroll < editor->hierarchy_count) {
             ++editor->hierarchy_scroll;
@@ -908,6 +947,14 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     if (!event->down) {
         return;
     }
+    if (editor->top_menu != AF_EDITOR_MENU_NONE && event->key == SDLK_ESCAPE) {
+        editor->top_menu = AF_EDITOR_MENU_NONE;
+        return;
+    }
+    if (editor->help_overlay && event->key == SDLK_ESCAPE) {
+        editor->help_overlay = false;
+        return;
+    }
     if (editor->context_menu != AF_EDITOR_CONTEXT_NONE && event->key == SDLK_ESCAPE) {
         editor->context_menu = AF_EDITOR_CONTEXT_NONE;
         return;
@@ -935,8 +982,26 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
             af_editor_reconcile_selection(editor);
             af_editor_status(editor, "Undo");
         }
+    } else if (control && shift && event->key == SDLK_S) {
+        af_editor_show_project_dialog(editor, AF_EDITOR_DIALOG_SAVE_PROJECT_AS);
     } else if (control && event->key == SDLK_S) {
-        (void)af_editor_save(editor);
+        if (editor->project_path[0] == '\0') {
+            af_editor_show_project_dialog(editor, AF_EDITOR_DIALOG_SAVE_PROJECT_AS);
+        } else {
+            (void)af_editor_save(editor);
+        }
+    } else if (control && event->key == SDLK_O) {
+        af_editor_show_project_dialog(editor, AF_EDITOR_DIALOG_OPEN_PROJECT);
+    } else if (control && event->key == SDLK_N) {
+        (void)af_editor_new_project(editor);
+    } else if (control && event->key == SDLK_I) {
+        if (editor->project_path[0] == '\0') {
+            af_editor_status(editor, "Save the project before importing images");
+        } else {
+            af_editor_show_project_dialog(editor, AF_EDITOR_DIALOG_IMPORT_IMAGE);
+        }
+    } else if (control && event->key == SDLK_A) {
+        af_editor_select_all(editor);
     } else if (control && event->key == SDLK_C && editor->timeline_focus) {
         af_editor_copy_keyframes(editor);
     } else if (control && event->key == SDLK_V && editor->timeline_focus) {
@@ -1079,7 +1144,13 @@ static void af_editor_mouse_scale(const AfEditorState *editor, float *x, float *
 
 static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int width, int height) {
     if (event->type == SDL_EVENT_QUIT) {
-        editor->running = false;
+        if (editor->dialog_active) {
+            af_editor_status(editor, "Close the file dialog before exiting");
+        } else if (af_editor_confirm_discard(editor, "Exit Arcflow Editor?")) {
+            editor->running = false;
+        }
+    } else if (event->type == editor->dialog_event_type) {
+        af_editor_handle_dialog_event(editor, &event->user);
     } else if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
                event->type == SDL_EVENT_WINDOW_RESIZED) {
         af_vk_renderer_request_resize(editor->renderer);
@@ -1125,6 +1196,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->particle_view_smoke = true;
         } else if (strcmp(arguments[index], "--vector-animation-smoke") == 0) {
             editor->vector_animation_smoke = true;
+        } else if (strcmp(arguments[index], "--image-smoke") == 0) {
+            editor->image_smoke = true;
+        } else if (strcmp(arguments[index], "--menu-smoke") == 0) {
+            editor->menu_smoke = true;
         } else if (strcmp(arguments[index], "--sequence") == 0 && index + 1 < argument_count) {
             (void)snprintf(editor->sequence_prefix, sizeof(editor->sequence_prefix), "%s",
                            arguments[++index]);
@@ -1137,17 +1212,19 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         }
     }
     if (editor->output_path[0] != '\0' && editor->maximum_frames == 0U) {
-        editor->maximum_frames =
-            editor->particle_view_smoke
-                ? 24U
-                : (editor->vector_animation_smoke ? 18U : (editor->tooltip_smoke ? 2U : 1U));
+        editor->maximum_frames = editor->particle_view_smoke      ? 24U
+                                 : editor->vector_animation_smoke ? 18U
+                                 : editor->image_smoke            ? 16U
+                                 : editor->menu_smoke             ? 12U
+                                 : editor->tooltip_smoke          ? 2U
+                                                                  : 1U;
     } else if (editor->sequence_prefix[0] != '\0' && editor->maximum_frames == 0U) {
-        editor->maximum_frames =
-            editor->particle_view_smoke
-                ? 24U
-                : (editor->vector_animation_smoke
-                       ? 18U
-                       : (editor->vfx_smoke ? AF_EDITOR_PARTICLE_PAGE_COUNT : 60U));
+        editor->maximum_frames = editor->particle_view_smoke      ? 24U
+                                 : editor->vector_animation_smoke ? 18U
+                                 : editor->image_smoke            ? 16U
+                                 : editor->menu_smoke             ? 12U
+                                 : editor->vfx_smoke              ? AF_EDITOR_PARTICLE_PAGE_COUNT
+                                                                  : 60U;
     }
     af_editor_derive_package_path(editor);
 }

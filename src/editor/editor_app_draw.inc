@@ -358,6 +358,14 @@ static const AfEditorContextMenuInfo *af_editor_context_info(AfEditorContextMenu
          .items = {"DUPLICATE", "RENAME", "ADD RECT CHILD", "UNPARENT", "TOGGLE PARTICLES",
                    "DELETE"},
          .item_count = 6U},
+        {.title = "IMAGE",
+         .items = {"DUPLICATE", "RENAME", "SELECT ASSET", "REIMPORT SOURCE", "CREATE FLIPBOOK",
+                   "TOGGLE NINE-SLICE", "DELETE"},
+         .item_count = 7U},
+        {.title = "IMAGE ASSET",
+         .items = {"SELECT USERS", "CREATE FLIPBOOK", "REIMPORT SOURCE", "PACK ATLASES",
+                   "DELETE UNUSED ASSET"},
+         .item_count = 5U},
         {.title = "PARTICLE EMITTER",
          .items = {"RESET EMITTER", "TRIGGER BURST", "TOGGLE ENABLED", "NEXT OUTPUT", "NEXT SHAPE",
                    "OPEN LOD PAGE", "REMOVE EMITTER"},
@@ -381,6 +389,8 @@ static AfEditorContextMenu af_editor_context_for_node(const AfSceneNode *node) {
         return AF_EDITOR_CONTEXT_PATH;
     case AF_NODE_GROUP:
         return AF_EDITOR_CONTEXT_GROUP;
+    case AF_NODE_IMAGE:
+        return AF_EDITOR_CONTEXT_IMAGE;
     default:
         return AF_EDITOR_CONTEXT_CANVAS;
     }

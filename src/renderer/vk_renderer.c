@@ -24,6 +24,7 @@
 #define AF_MAX_QUEUE_FAMILIES 64U
 #define AF_MAX_GPU_PATH_VERTICES (AF_MAX_PATH_TESSELLATED_VERTICES * 2U)
 #define AF_MAX_RENDER_ITEMS (AF_MAX_NODES * 2U)
+#define AF_MAX_GPU_IMAGE_VERTICES (AF_MAX_NODES * 54U)
 #define AF_CAPTURE_PATH_CAPACITY 1024U
 
 typedef struct AfVkFrame {
@@ -54,6 +55,12 @@ typedef struct AfGpuPathVertex {
     float color[4];
 } AfGpuPathVertex;
 
+typedef struct AfGpuImageVertex {
+    float position[2];
+    float uv[2];
+    float color[4];
+} AfGpuImageVertex;
+
 typedef struct AfVkPathCache {
     const AfPathData *source;
     uint64_t path_id;
@@ -79,14 +86,25 @@ typedef struct AfVkStrokeCache {
     uint64_t seen_serial;
 } AfVkStrokeCache;
 
-typedef enum AfVkRenderItemType { AF_VK_RENDER_ANALYTIC = 0, AF_VK_RENDER_PATH } AfVkRenderItemType;
+typedef enum AfVkRenderItemType {
+    AF_VK_RENDER_ANALYTIC = 0,
+    AF_VK_RENDER_PATH,
+    AF_VK_RENDER_IMAGE
+} AfVkRenderItemType;
 
 typedef struct AfVkRenderItem {
     AfVkRenderItemType type;
     int32_t layer_order;
     uint32_t first;
     uint32_t count;
+    uint32_t atlas_index;
 } AfVkRenderItem;
+
+typedef struct AfVkImageAtlasResource {
+    VkImage image;
+    VkDeviceMemory memory;
+    VkImageView view;
+} AfVkImageAtlasResource;
 
 struct AfVkRenderer {
     AfPlatformWindow *platform;
@@ -118,6 +136,16 @@ struct AfVkRenderer {
     VkPipeline pipeline;
     VkPipelineLayout path_pipeline_layout;
     VkPipeline path_pipeline;
+    VkDescriptorSetLayout image_descriptor_layout;
+    VkDescriptorPool image_descriptor_pool;
+    VkDescriptorSet image_descriptor_sets[AF_MAX_IMAGE_ATLASES];
+    VkSampler image_sampler;
+    VkPipelineLayout image_pipeline_layout;
+    VkPipeline image_pipeline;
+    AfVkImageAtlasResource image_atlases[AF_MAX_IMAGE_ATLASES];
+    const AfImageData *image_source;
+    uint64_t image_generation;
+    float image_time;
     AfVkParticleSystem *particles;
     AfVkPathCache path_caches[AF_MAX_PATHS];
     AfVkStrokeCache stroke_caches[AF_MAX_PATHS];
@@ -135,9 +163,13 @@ struct AfVkRenderer {
     char capture_path[AF_CAPTURE_PATH_CAPACITY];
 };
 
+static void af_vk_destroy_image_pipeline(AfVkRenderer *renderer);
+static AfResult af_vk_create_image_pipeline(AfVkRenderer *renderer);
+
 // clang-format off
 #include "renderer/vk_renderer_device.inc"
 #include "renderer/vk_renderer_swapchain.inc"
+#include "renderer/vk_renderer_images.inc"
 #include "renderer/vk_renderer_lifecycle.inc"
 #include "renderer/vk_renderer_upload.inc"
 #include "renderer/vk_renderer_draw.inc"

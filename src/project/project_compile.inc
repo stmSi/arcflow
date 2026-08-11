@@ -19,6 +19,10 @@ AfResult af_project_load_file(const char *path, AfAllocator *allocator, AfProjec
         result = af_project_deserialize(file.data, file.size, allocator, out_project);
     }
     af_file_data_destroy(allocator, &file);
+    if (result == AF_RESULT_SUCCESS) {
+        uint32_t missing_count = 0U;
+        (void)af_project_reimport_images(out_project, path, &missing_count);
+    }
     return result;
 }
 
@@ -47,6 +51,7 @@ AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
     AfScene ir_scene = {0};
     AfAnimationData ir_animation = {0};
     AfPackageSource source = {0};
+    AfImageData ir_images = {0};
     AfResult result = AF_RESULT_SUCCESS;
     if (allocator == NULL || out_package == NULL ||
         af_project_validate(project) != AF_RESULT_SUCCESS) {
@@ -83,6 +88,13 @@ AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
                          .styles = &project->style_data,
                          .layouts = &project->layout_data,
                          .particles = &project->particle_data};
+    result = af_image_data_clone(&project->image_data, allocator, &ir_images);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_image_build_atlases(&ir_images);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        ir_scene.images = &ir_images;
+    }
     if (project->keyframe_count != 0U) {
         memcpy(ordered_keys, project->keyframes,
                (size_t)project->keyframe_count * sizeof(*ordered_keys));
@@ -130,7 +142,9 @@ AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
                                          .keyframes = ir_keyframes,
                                          .keyframe_count = key_write};
     }
-    result = af_scene_validate(&ir_scene);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_scene_validate(&ir_scene);
+    }
     if (result == AF_RESULT_SUCCESS) {
         result = af_animation_validate(&ir_animation, &ir_scene);
     }
@@ -143,5 +157,6 @@ AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
     af_deallocate(allocator, ir_tracks);
     af_deallocate(allocator, ir_clips);
     af_deallocate(allocator, ir_nodes);
+    af_image_data_destroy(&ir_images);
     return result;
 }

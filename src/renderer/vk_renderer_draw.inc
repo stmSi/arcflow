@@ -18,6 +18,7 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
     uint32_t image_index = 0U;
     uint32_t shape_count = 0U;
     uint32_t path_vertex_count = 0U;
+    uint32_t image_vertex_count = 0U;
     uint32_t item_count = 0U;
     VkResult result = VK_SUCCESS;
     AfResult capture_result = AF_RESULT_SUCCESS;
@@ -80,6 +81,7 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
     float canvas[2];
     VkDeviceSize upload_offset = 0U;
     VkDeviceSize path_upload_offset = 0U;
+    VkDeviceSize image_upload_offset = 0U;
     VkSemaphoreSubmitInfo wait_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
                                        .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                        .deviceIndex = 0U,
@@ -138,9 +140,20 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
     if (vkWaitForFences(renderer->device, 1U, &frame->fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
         return AF_RESULT_VULKAN_ERROR;
     }
+    renderer->image_time = render_options.image_time_override ? render_options.image_time
+                                                              : renderer->image_time + delta_time;
+    if (!isfinite(renderer->image_time) || renderer->image_time < 0.0F) {
+        renderer->image_time = 0.0F;
+    }
     {
-        const AfResult upload_result =
-            af_vk_upload_scene(renderer, scene, &shape_count, &path_vertex_count, &item_count);
+        const AfResult image_result = af_vk_update_image_atlases(renderer, scene->images);
+        if (image_result != AF_RESULT_SUCCESS) {
+            return image_result;
+        }
+    }
+    {
+        const AfResult upload_result = af_vk_upload_scene(
+            renderer, scene, &shape_count, &path_vertex_count, &image_vertex_count, &item_count);
         if (upload_result != AF_RESULT_SUCCESS) {
             return upload_result;
         }
@@ -214,6 +227,8 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
     canvas[1] = (float)renderer->extent.height;
     upload_offset = renderer->frame_index * renderer->upload_slice_size;
     path_upload_offset = upload_offset + AF_MAX_NODES * sizeof(AfGpuShape);
+    image_upload_offset =
+        path_upload_offset + (VkDeviceSize)AF_MAX_GPU_PATH_VERTICES * sizeof(AfGpuPathVertex);
     af_vk_particles_record(renderer->particles, frame->command_buffer, renderer->frame_index,
                            delta_time);
     vkCmdPipelineBarrier2(frame->command_buffer, &dependency);
@@ -225,6 +240,7 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
     vkCmdSetScissor(frame->command_buffer, 0U, 1U, &scissor);
     {
         AfVkRenderItemType bound_type = (AfVkRenderItemType)UINT32_MAX;
+        uint32_t bound_atlas = UINT32_MAX;
         for (uint32_t item_index = 0U; item_index < item_count; ++item_index) {
             const AfVkRenderItem *item = &renderer->render_items[item_index];
             if (!particles_drawn && item->layer_order > render_options.particle_layer_order) {
@@ -233,15 +249,21 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
                     render_options.particle_transform, &particle_scissor, &scissor);
                 particles_drawn = true;
                 bound_type = (AfVkRenderItemType)UINT32_MAX;
+                bound_atlas = UINT32_MAX;
             }
             if (item->type != bound_type) {
-                const VkDeviceSize *offset =
-                    item->type == AF_VK_RENDER_PATH ? &path_upload_offset : &upload_offset;
+                const VkDeviceSize *offset = item->type == AF_VK_RENDER_PATH ? &path_upload_offset
+                                             : item->type == AF_VK_RENDER_IMAGE
+                                                 ? &image_upload_offset
+                                                 : &upload_offset;
                 const VkPipeline pipeline =
-                    item->type == AF_VK_RENDER_PATH ? renderer->path_pipeline : renderer->pipeline;
-                const VkPipelineLayout layout = item->type == AF_VK_RENDER_PATH
-                                                    ? renderer->path_pipeline_layout
-                                                    : renderer->pipeline_layout;
+                    item->type == AF_VK_RENDER_PATH    ? renderer->path_pipeline
+                    : item->type == AF_VK_RENDER_IMAGE ? renderer->image_pipeline
+                                                       : renderer->pipeline;
+                const VkPipelineLayout layout =
+                    item->type == AF_VK_RENDER_PATH    ? renderer->path_pipeline_layout
+                    : item->type == AF_VK_RENDER_IMAGE ? renderer->image_pipeline_layout
+                                                       : renderer->pipeline_layout;
                 vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
                 vkCmdBindVertexBuffers(frame->command_buffer, 0U, 1U, &renderer->upload_buffer,
                                        offset);
@@ -249,7 +271,18 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
                                    sizeof(canvas), canvas);
                 bound_type = item->type;
             }
-            if (item->type == AF_VK_RENDER_PATH) {
+            if (item->type == AF_VK_RENDER_IMAGE && item->atlas_index != bound_atlas) {
+                if (item->atlas_index >= AF_MAX_IMAGE_ATLASES ||
+                    renderer->image_atlases[item->atlas_index].view == VK_NULL_HANDLE) {
+                    return AF_RESULT_INVALID_ARGUMENT;
+                }
+                vkCmdBindDescriptorSets(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        renderer->image_pipeline_layout, 0U, 1U,
+                                        &renderer->image_descriptor_sets[item->atlas_index], 0U,
+                                        NULL);
+                bound_atlas = item->atlas_index;
+            }
+            if (item->type == AF_VK_RENDER_PATH || item->type == AF_VK_RENDER_IMAGE) {
                 vkCmdDraw(frame->command_buffer, item->count, 1U, item->first, 0U);
             } else {
                 vkCmdDraw(frame->command_buffer, 6U, 1U, 0U, item->first);
@@ -264,6 +297,7 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
     }
     (void)shape_count;
     (void)path_vertex_count;
+    (void)image_vertex_count;
     vkCmdEndRendering(frame->command_buffer);
     to_render.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
     to_render.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;

@@ -476,10 +476,113 @@ static void af_editor_adjust_particle(AfEditorState *editor, AfParticleEmitter *
     }
 }
 
+static bool af_editor_handle_image_inspector(AfEditorState *editor, int width, float x, float y) {
+    const float panel_x = (float)width - editor->right_width + 18.0F;
+    const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
+    AfImageBinding *binding =
+        af_image_find_binding(&editor->project.image_data, editor->selected_id);
+    AfImageAsset *asset =
+        binding == NULL ? NULL : af_image_find(&editor->project.image_data, binding->asset_id);
+    const AfImageSequence *sequence =
+        binding == NULL
+            ? NULL
+            : af_image_find_sequence_const(&editor->project.image_data, binding->sequence_id);
+    if (asset == NULL && sequence != NULL && sequence->frame_count != 0U) {
+        asset = af_image_find(&editor->project.image_data,
+                              editor->project.image_data.sequence_frames[sequence->frame_start]);
+    }
+    if (node == NULL || node->type != AF_NODE_IMAGE || binding == NULL || asset == NULL) {
+        return false;
+    }
+    if (x < panel_x || x > (float)width - 18.0F) {
+        return true;
+    }
+    if (y >= 150.0F && y < 150.0F + 5.0F * 38.0F) {
+        const uint32_t row = (uint32_t)((y - 150.0F) / 38.0F);
+        if (row == 0U) {
+            asset->trim_enabled = !asset->trim_enabled;
+            if (asset->trim_enabled) {
+                (void)af_image_trim(asset);
+            } else {
+                asset->trim_x = 0U;
+                asset->trim_y = 0U;
+                asset->trim_width = asset->width;
+                asset->trim_height = asset->height;
+            }
+        } else if (row == 1U) {
+            asset->mipmaps_enabled = !asset->mipmaps_enabled;
+        } else if (row == 2U) {
+            asset->color_space = asset->color_space == AF_IMAGE_COLOR_SRGB ? AF_IMAGE_COLOR_LINEAR
+                                                                           : AF_IMAGE_COLOR_SRGB;
+        } else if (row == 3U) {
+            asset->compression = asset->compression == AF_IMAGE_COMPRESSION_NONE
+                                     ? AF_IMAGE_COMPRESSION_LOSSLESS
+                                     : AF_IMAGE_COMPRESSION_NONE;
+        } else {
+            binding->display_mode = binding->display_mode == AF_IMAGE_DISPLAY_STRETCH
+                                        ? AF_IMAGE_DISPLAY_NINE_SLICE
+                                        : AF_IMAGE_DISPLAY_STRETCH;
+        }
+        ++editor->project.image_data.generation;
+        (void)af_image_build_atlases(&editor->project.image_data);
+        editor->dirty = true;
+        af_editor_status(editor, "Image settings updated");
+        return true;
+    }
+    if (y >= 375.0F && y < 375.0F + 4.0F * 36.0F) {
+        const uint32_t row = (uint32_t)((y - 375.0F) / 36.0F);
+        uint16_t *value = row == 0U   ? &binding->borders.left
+                          : row == 1U ? &binding->borders.top
+                          : row == 2U ? &binding->borders.right
+                                      : &binding->borders.bottom;
+        const uint32_t maximum = row == 0U || row == 2U ? asset->width : asset->height;
+        if (x < panel_x + 35.0F) {
+            *value = *value == 0U ? 0U : (uint16_t)(*value - 1U);
+        } else if (x < panel_x + 75.0F && *value < UINT16_MAX && *value < maximum) {
+            *value = (uint16_t)(*value + 1U);
+        }
+        asset->sprite_borders = binding->borders;
+        binding->display_mode = AF_IMAGE_DISPLAY_NINE_SLICE;
+        ++editor->project.image_data.generation;
+        (void)af_image_build_atlases(&editor->project.image_data);
+        editor->dirty = true;
+        af_editor_status(editor, "Nine-slice border updated");
+        return true;
+    }
+    if (y >= 548.0F && y < 578.0F) {
+        if (sequence == NULL) {
+            (void)af_editor_create_flipbook(editor);
+        } else {
+            (void)af_editor_remove_flipbook(editor);
+        }
+        return true;
+    }
+    if (sequence != NULL && y >= 586.0F && y < 612.0F) {
+        binding->frames_per_second = af_editor_clamp(
+            binding->frames_per_second + (x < panel_x + 35.0F ? -1.0F : 1.0F), 1.0F, 120.0F);
+        ++editor->project.image_data.generation;
+        editor->dirty = true;
+        af_editor_status(editor, "Flipbook speed updated");
+        return true;
+    }
+    if (sequence != NULL && y >= 622.0F && y < 650.0F) {
+        binding->loop = !binding->loop;
+        ++editor->project.image_data.generation;
+        editor->dirty = true;
+        af_editor_status(editor,
+                         binding->loop ? "Flipbook looping enabled" : "Flipbook looping disabled");
+        return true;
+    }
+    return true;
+}
+
 static void af_editor_handle_inspector(AfEditorState *editor, int width, float x, float y) {
     const float panel_x = (float)width - editor->right_width + 18.0F;
     AfParticleEmitter *emitter =
         af_project_find_node_emitter(&editor->project, editor->selected_id);
+    if (af_editor_handle_image_inspector(editor, width, x, y)) {
+        return;
+    }
     if (af_scene_find_const(&editor->project.scene, editor->selected_id) != NULL &&
         ((x >= panel_x && x <= panel_x + AF_EDITOR_COLOR_SV_WIDTH && y >= AF_EDITOR_COLOR_SV_Y &&
           y <= AF_EDITOR_COLOR_SV_Y + AF_EDITOR_COLOR_SV_HEIGHT) ||
@@ -786,6 +889,68 @@ static void af_editor_execute_particle_context_item(AfEditorState *editor, uint3
 static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_t item, int width,
                                                   int height) {
     const AfEditorContextMenu menu = editor->context_menu;
+    if (menu == AF_EDITOR_CONTEXT_IMAGE) {
+        if (item == 0U) {
+            (void)af_editor_duplicate_selection(editor);
+        } else if (item == 1U) {
+            af_editor_begin_rename(editor);
+        } else if (item == 2U) {
+            const AfImageBinding *binding =
+                af_image_find_binding_const(&editor->project.image_data, editor->selected_id);
+            const AfImageSequence *sequence =
+                binding == NULL ? NULL
+                                : af_image_find_sequence_const(&editor->project.image_data,
+                                                               binding->sequence_id);
+            editor->selected_asset_id =
+                binding == NULL ? 0U
+                                : (binding->asset_id != 0U
+                                       ? binding->asset_id
+                                       : (sequence == NULL || sequence->frame_count == 0U
+                                              ? 0U
+                                              : editor->project.image_data
+                                                    .sequence_frames[sequence->frame_start]));
+            editor->asset_browser_visible = true;
+            af_editor_status(editor, "Image asset shown in browser");
+        } else if (item == 3U) {
+            (void)af_editor_reimport_images(editor);
+        } else if (item == 4U) {
+            (void)af_editor_create_flipbook(editor);
+        } else if (item == 5U) {
+            af_editor_toggle_image_nine_slice(editor);
+        } else if (item == 6U) {
+            (void)af_editor_delete_selection(editor);
+        }
+        return;
+    }
+    if (menu == AF_EDITOR_CONTEXT_ASSET) {
+        if (item == 0U) {
+            af_editor_select_asset_users(editor, editor->selected_asset_id);
+        } else if (item == 1U) {
+            (void)af_editor_create_flipbook(editor);
+        } else if (item == 2U) {
+            (void)af_editor_reimport_images(editor);
+        } else if (item == 3U) {
+            if (af_image_build_atlases(&editor->project.image_data) == AF_RESULT_SUCCESS) {
+                af_editor_status(editor, "Atlases packed deterministically");
+            }
+        } else if (item == 4U) {
+            const AfResult result =
+                af_image_remove(&editor->project.image_data, editor->selected_asset_id);
+            if (result == AF_RESULT_SUCCESS) {
+                editor->selected_asset_id = 0U;
+                if (editor->asset_scroll >= editor->project.image_data.asset_count &&
+                    editor->asset_scroll > 0U) {
+                    --editor->asset_scroll;
+                }
+                (void)af_image_build_atlases(&editor->project.image_data);
+                editor->dirty = true;
+                af_editor_status(editor, "Unused image asset deleted");
+            } else {
+                af_editor_status(editor, "Asset is still used by a scene object or sequence");
+            }
+        }
+        return;
+    }
     if (item == 0U) {
         (void)af_editor_duplicate_selection(editor);
         return;
@@ -956,6 +1121,28 @@ static void af_editor_open_context_menu(AfEditorState *editor, int width, int he
     editor->context_position = (AfVec2){x, y};
     editor->mouse_position = editor->context_position;
     if (x < editor->left_width) {
+        if (editor->asset_browser_visible && y >= af_editor_asset_browser_top(editor, height)) {
+            const float row_start = af_editor_asset_browser_top(editor, height) + 48.0F;
+            const uint32_t row = y < row_start ? UINT32_MAX : (uint32_t)((y - row_start) / 27.0F);
+            const uint32_t asset_index = editor->asset_scroll + row;
+            if (row < 5U && asset_index < editor->project.image_data.asset_count) {
+                editor->context_menu = AF_EDITOR_CONTEXT_ASSET;
+                editor->selected_asset_id = editor->project.image_data.assets[asset_index].id;
+                for (uint32_t binding = 0U; binding < editor->project.image_data.binding_count;
+                     ++binding) {
+                    if (af_editor_binding_uses_asset(&editor->project.image_data,
+                                                     &editor->project.image_data.bindings[binding],
+                                                     editor->selected_asset_id)) {
+                        af_editor_select_only(editor,
+                                              editor->project.image_data.bindings[binding].node_id);
+                        break;
+                    }
+                }
+            } else {
+                editor->context_menu = AF_EDITOR_CONTEXT_NONE;
+            }
+            return;
+        }
         const float hierarchy_top = AF_EDITOR_TOOLBAR_HEIGHT + 8.0F;
         editor->context_menu = AF_EDITOR_CONTEXT_HIERARCHY;
         if (y >= hierarchy_top) {

@@ -16,9 +16,9 @@ static AfResult af_project_writer_append(AfProjectTextWriter *writer, const char
 }
 
 static const char *af_project_type_name(AfNodeType type) {
-    static const char *const names[] = {"group", "rectangle", "rounded_rectangle", "ellipse",
-                                        "path"};
-    return type <= AF_NODE_PATH ? names[type] : "invalid";
+    static const char *const names[] = {"group",   "rectangle", "rounded_rectangle",
+                                        "ellipse", "path",      "image"};
+    return type <= AF_NODE_IMAGE ? names[type] : "invalid";
 }
 
 static const char *af_project_property_name(AfPropertyType property) {
@@ -59,6 +59,14 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_mul_overflow(project->particle_data.count, 2048U, &animation_capacity) ||
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
+        af_size_mul_overflow(project->image_data.asset_count, 1024U, &animation_capacity) ||
+        af_size_add_overflow(capacity, animation_capacity, &capacity) ||
+        af_size_mul_overflow(project->image_data.binding_count, 256U, &animation_capacity) ||
+        af_size_add_overflow(capacity, animation_capacity, &capacity) ||
+        af_size_mul_overflow(project->image_data.sequence_count, 256U, &animation_capacity) ||
+        af_size_add_overflow(capacity, animation_capacity, &capacity) ||
+        af_size_mul_overflow(project->image_data.sequence_frame_count, 32U, &animation_capacity) ||
+        af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_add_overflow(capacity, 256U, &capacity)) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
@@ -71,16 +79,17 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
     result = af_project_writer_append(
         &writer,
         "arcflow_project %u\ncanvas %.9g %.9g\nnext_id %llu\nnext_animation_id %llu\n"
+        "next_asset_id %llu\n"
         "layout_canvas %.9g %.9g %.9g %.9g %u %.9g %.9g %.9g %.9g\n"
         "vfx_lod %u %.9g %.9g %.9g %.9g %u\n",
         AF_PROJECT_FORMAT_VERSION, project->canvas_size.x, project->canvas_size.y,
         (unsigned long long)project->next_id, (unsigned long long)project->next_animation_id,
-        project->layout_data.reference_size.x, project->layout_data.reference_size.y,
-        project->layout_data.target_size.x, project->layout_data.target_size.y,
-        (uint32_t)project->layout_data.scale_mode, project->layout_data.safe_area.left,
-        project->layout_data.safe_area.top, project->layout_data.safe_area.right,
-        project->layout_data.safe_area.bottom, project->particle_data.lod.maximum_particles,
-        project->particle_data.lod.spawn_rate_scale,
+        (unsigned long long)project->next_asset_id, project->layout_data.reference_size.x,
+        project->layout_data.reference_size.y, project->layout_data.target_size.x,
+        project->layout_data.target_size.y, (uint32_t)project->layout_data.scale_mode,
+        project->layout_data.safe_area.left, project->layout_data.safe_area.top,
+        project->layout_data.safe_area.right, project->layout_data.safe_area.bottom,
+        project->particle_data.lod.maximum_particles, project->particle_data.lod.spawn_rate_scale,
         project->particle_data.lod.simulation_frequency_scale,
         project->particle_data.lod.distance_start, project->particle_data.lod.distance_end,
         project->particle_data.lod.renderer_enabled ? 1U : 0U);
@@ -215,6 +224,61 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
                 emitter->sub_emit_death_count, emitter->max_recursion_depth,
                 emitter->event_burst_count);
         }
+    }
+    for (index = 0U; result == AF_RESULT_SUCCESS && index < project->image_data.asset_count;
+         ++index) {
+        const AfImageAsset *asset = &project->image_data.assets[index];
+        char encoded_path[AF_IMAGE_PATH_CAPACITY * 3U];
+        char encoded_name[AF_IMAGE_NAME_CAPACITY * 3U];
+        if (!af_project_image_encode_token(asset->source_path, encoded_path,
+                                           sizeof(encoded_path)) ||
+            !af_project_image_encode_token(asset->name, encoded_name, sizeof(encoded_name))) {
+            result = AF_RESULT_INVALID_ARGUMENT;
+        } else {
+            result = af_project_writer_append(
+                &writer,
+                "image_asset %llu %llu %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %s "
+                "%s\n",
+                (unsigned long long)asset->id, (unsigned long long)asset->content_hash,
+                (uint32_t)asset->source_format, (uint32_t)asset->color_space,
+                (uint32_t)asset->compression, asset->width, asset->height, asset->trim_x,
+                asset->trim_y, asset->trim_width, asset->trim_height, asset->sprite_borders.left,
+                asset->sprite_borders.top, asset->sprite_borders.right,
+                asset->sprite_borders.bottom, asset->trim_enabled ? 1U : 0U,
+                asset->mipmaps_enabled ? 1U : 0U, encoded_path, encoded_name);
+        }
+    }
+    for (index = 0U; result == AF_RESULT_SUCCESS && index < project->image_data.sequence_count;
+         ++index) {
+        const AfImageSequence *sequence = &project->image_data.sequences[index];
+        char encoded_name[AF_IMAGE_NAME_CAPACITY * 3U];
+        if (!af_project_image_encode_token(sequence->name, encoded_name, sizeof(encoded_name))) {
+            result = AF_RESULT_INVALID_ARGUMENT;
+        } else {
+            result = af_project_writer_append(&writer, "image_sequence %llu %.9g %u %s %u",
+                                              (unsigned long long)sequence->id,
+                                              sequence->frames_per_second, sequence->loop ? 1U : 0U,
+                                              encoded_name, sequence->frame_count);
+        }
+        for (uint32_t frame = 0U; result == AF_RESULT_SUCCESS && frame < sequence->frame_count;
+             ++frame) {
+            result = af_project_writer_append(&writer, " %llu",
+                                              (unsigned long long)project->image_data
+                                                  .sequence_frames[sequence->frame_start + frame]);
+        }
+        if (result == AF_RESULT_SUCCESS) {
+            result = af_project_writer_append(&writer, "\n");
+        }
+    }
+    for (index = 0U; result == AF_RESULT_SUCCESS && index < project->image_data.binding_count;
+         ++index) {
+        const AfImageBinding *binding = &project->image_data.bindings[index];
+        result = af_project_writer_append(
+            &writer, "image_binding %llu %llu %llu %u %u %u %u %u %.9g %u\n",
+            (unsigned long long)binding->node_id, (unsigned long long)binding->asset_id,
+            (unsigned long long)binding->sequence_id, (uint32_t)binding->display_mode,
+            binding->borders.left, binding->borders.top, binding->borders.right,
+            binding->borders.bottom, binding->frames_per_second, binding->loop ? 1U : 0U);
     }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->path_data.path_count;
          ++index) {

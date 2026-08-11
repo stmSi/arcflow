@@ -2,6 +2,7 @@
 #define AF_SCENE_H
 
 #include "arcflow/arcflow_result.h"
+#include "assets/image.h"
 #include "core/math.h"
 #include "particle/particle.h"
 #include "path/path.h"
@@ -19,7 +20,8 @@ typedef enum AfNodeType {
     AF_NODE_RECTANGLE = 1,
     AF_NODE_ROUNDED_RECTANGLE = 2,
     AF_NODE_ELLIPSE = 3,
-    AF_NODE_PATH = 4
+    AF_NODE_PATH = 4,
+    AF_NODE_IMAGE = 5
 } AfNodeType;
 
 typedef struct AfSceneNode {
@@ -49,6 +51,7 @@ typedef struct AfScene {
     const AfStyleData *styles;
     const struct AfLayoutData *layouts;
     const AfParticleData *particles;
+    const AfImageData *images;
 } AfScene;
 
 void af_scene_init(AfScene *scene, AfSceneNode *nodes, uint32_t capacity);

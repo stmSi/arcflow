@@ -186,16 +186,146 @@ static void af_vk_prune_path_caches(AfVkRenderer *renderer, const AfPathData *pa
     }
 }
 
+static const AfImageAsset *af_vk_image_asset_at_time(const AfImageData *images,
+                                                     const AfImageBinding *binding, float time) {
+    uint64_t asset_id = binding->asset_id;
+    if (binding->sequence_id != 0U) {
+        const AfImageSequence *sequence =
+            af_image_find_sequence_const(images, binding->sequence_id);
+        if (sequence == NULL || sequence->frame_count == 0U) {
+            return NULL;
+        }
+        {
+            const float fps = binding->frames_per_second > 0.0F ? binding->frames_per_second
+                                                                : sequence->frames_per_second;
+            uint64_t frame = (uint64_t)floorf(fmaxf(time, 0.0F) * fps);
+            if (binding->loop) {
+                frame %= sequence->frame_count;
+            } else if (frame >= sequence->frame_count) {
+                frame = sequence->frame_count - 1U;
+            }
+            asset_id = images->sequence_frames[sequence->frame_start + (uint32_t)frame];
+        }
+    }
+    return af_image_find_const(images, asset_id);
+}
+
+static void af_vk_emit_image_quad(AfGpuImageVertex *vertices, uint32_t *count,
+                                  const AfSceneNode *node, float x0, float y0, float x1, float y1,
+                                  float u0, float v0, float u1, float v1) {
+    static const uint32_t corners[6] = {0U, 1U, 2U, 0U, 2U, 3U};
+    const AfVec2 local[4] = {{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}};
+    const AfVec2 uv[4] = {{u0, v0}, {u1, v0}, {u1, v1}, {u0, v1}};
+    for (uint32_t index = 0U; index < 6U; ++index) {
+        const uint32_t corner = corners[index];
+        const AfVec2 world = af_affine_transform_point(node->world_transform, local[corner]);
+        vertices[*count] = (AfGpuImageVertex){.position = {world.x, world.y},
+                                              .uv = {uv[corner].x, uv[corner].y},
+                                              .color = {node->fill.r, node->fill.g, node->fill.b,
+                                                        node->fill.a * node->world_opacity}};
+        ++(*count);
+    }
+}
+
+static AfResult af_vk_emit_image_node(const AfSceneNode *node, const AfImageData *images,
+                                      float time, AfGpuImageVertex *vertices, uint32_t *count,
+                                      uint32_t *out_atlas_index) {
+    const AfImageBinding *binding = af_image_find_binding_const(images, node->id);
+    const AfImageAsset *asset =
+        binding == NULL ? NULL : af_vk_image_asset_at_time(images, binding, time);
+    const AfImageAtlas *atlas = NULL;
+    float source_x[4];
+    float source_y[4];
+    float target_x[4];
+    float target_y[4];
+    if (asset != NULL && asset->missing) {
+        return AF_RESULT_SUCCESS;
+    }
+    if (asset == NULL || asset->atlas_index >= images->atlas_count ||
+        *count > AF_MAX_GPU_IMAGE_VERTICES - 54U) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    atlas = &images->atlases[asset->atlas_index];
+    if (atlas->pixels == NULL || atlas->width == 0U || atlas->height == 0U) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    *out_atlas_index = asset->atlas_index;
+    if (binding->display_mode != AF_IMAGE_DISPLAY_NINE_SLICE) {
+        const float x0 = (float)asset->trim_x / (float)asset->width * node->resolved_bounds.x;
+        const float y0 = (float)asset->trim_y / (float)asset->height * node->resolved_bounds.y;
+        const float x1 = (float)(asset->trim_x + asset->trim_width) / (float)asset->width *
+                         node->resolved_bounds.x;
+        const float y1 = (float)(asset->trim_y + asset->trim_height) / (float)asset->height *
+                         node->resolved_bounds.y;
+        af_vk_emit_image_quad(vertices, count, node, x0, y0, x1, y1,
+                              (float)asset->atlas_x / (float)atlas->width,
+                              (float)asset->atlas_y / (float)atlas->height,
+                              (float)(asset->atlas_x + asset->trim_width) / (float)atlas->width,
+                              (float)(asset->atlas_y + asset->trim_height) / (float)atlas->height);
+        return AF_RESULT_SUCCESS;
+    }
+    {
+        float left = (float)binding->borders.left;
+        float top = (float)binding->borders.top;
+        float right = (float)binding->borders.right;
+        float bottom = (float)binding->borders.bottom;
+        float horizontal_scale = 1.0F;
+        float vertical_scale = 1.0F;
+        left = fminf(left, (float)asset->trim_width);
+        right = fminf(right, (float)asset->trim_width - left);
+        top = fminf(top, (float)asset->trim_height);
+        bottom = fminf(bottom, (float)asset->trim_height - top);
+        if (left + right > node->resolved_bounds.x && left + right > 0.0F) {
+            horizontal_scale = node->resolved_bounds.x / (left + right);
+        }
+        if (top + bottom > node->resolved_bounds.y && top + bottom > 0.0F) {
+            vertical_scale = node->resolved_bounds.y / (top + bottom);
+        }
+        source_x[0] = (float)asset->atlas_x;
+        source_x[1] = source_x[0] + left;
+        source_x[2] = (float)(asset->atlas_x + asset->trim_width) - right;
+        source_x[3] = (float)(asset->atlas_x + asset->trim_width);
+        source_y[0] = (float)asset->atlas_y;
+        source_y[1] = source_y[0] + top;
+        source_y[2] = (float)(asset->atlas_y + asset->trim_height) - bottom;
+        source_y[3] = (float)(asset->atlas_y + asset->trim_height);
+        target_x[0] = 0.0F;
+        target_x[1] = left * horizontal_scale;
+        target_x[2] = node->resolved_bounds.x - right * horizontal_scale;
+        target_x[3] = node->resolved_bounds.x;
+        target_y[0] = 0.0F;
+        target_y[1] = top * vertical_scale;
+        target_y[2] = node->resolved_bounds.y - bottom * vertical_scale;
+        target_y[3] = node->resolved_bounds.y;
+    }
+    for (uint32_t y = 0U; y < 3U; ++y) {
+        for (uint32_t x = 0U; x < 3U; ++x) {
+            if (target_x[x + 1U] <= target_x[x] || target_y[y + 1U] <= target_y[y]) {
+                continue;
+            }
+            af_vk_emit_image_quad(
+                vertices, count, node, target_x[x], target_y[y], target_x[x + 1U], target_y[y + 1U],
+                source_x[x] / (float)atlas->width, source_y[y] / (float)atlas->height,
+                source_x[x + 1U] / (float)atlas->width, source_y[y + 1U] / (float)atlas->height);
+        }
+    }
+    return AF_RESULT_SUCCESS;
+}
+
 static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                                    uint32_t *out_shape_count, uint32_t *out_path_vertex_count,
-                                   uint32_t *out_item_count) {
+                                   uint32_t *out_image_vertex_count, uint32_t *out_item_count) {
     uint8_t *slice = renderer->upload_mapping + renderer->frame_index * renderer->upload_slice_size;
     AfGpuShape *shapes = (AfGpuShape *)(void *)slice;
     AfGpuPathVertex *path_vertices =
         (AfGpuPathVertex *)(void *)(slice + AF_MAX_NODES * sizeof(AfGpuShape));
+    AfGpuImageVertex *image_vertices =
+        (AfGpuImageVertex *)(void *)(slice + AF_MAX_NODES * sizeof(AfGpuShape) +
+                                     (size_t)AF_MAX_GPU_PATH_VERTICES * sizeof(AfGpuPathVertex));
     uint32_t shape_count = 0U;
     uint32_t path_vertex_count = 0U;
     uint32_t item_count = 0U;
+    uint32_t image_vertex_count = 0U;
     uint32_t index = 0U;
     if (++renderer->path_cache_serial == 0U) {
         renderer->path_cache_serial = 1U;
@@ -283,6 +413,25 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                                                               .count = stroke_cache->vertex_count});
                 }
             }
+        } else if (node->type == AF_NODE_IMAGE) {
+            uint32_t atlas_index = 0U;
+            const uint32_t first = image_vertex_count;
+            AfResult result =
+                scene->images == NULL
+                    ? AF_RESULT_INVALID_ARGUMENT
+                    : af_vk_emit_image_node(node, scene->images, renderer->image_time,
+                                            image_vertices, &image_vertex_count, &atlas_index);
+            if (result != AF_RESULT_SUCCESS) {
+                return result;
+            }
+            if (image_vertex_count != first) {
+                af_vk_insert_render_item(renderer, &item_count,
+                                         (AfVkRenderItem){.type = AF_VK_RENDER_IMAGE,
+                                                          .layer_order = node->layer_order,
+                                                          .first = first,
+                                                          .count = image_vertex_count - first,
+                                                          .atlas_index = atlas_index});
+            }
         } else {
             if (node->type > AF_NODE_ELLIPSE || shape_count >= AF_MAX_NODES) {
                 return AF_RESULT_INVALID_ARGUMENT;
@@ -330,6 +479,7 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
     }
     *out_shape_count = shape_count;
     *out_path_vertex_count = path_vertex_count;
+    *out_image_vertex_count = image_vertex_count;
     *out_item_count = item_count;
     return AF_RESULT_SUCCESS;
 }

@@ -441,6 +441,7 @@ static AfResult af_vk_create_multisample_targets(AfVkRenderer *renderer) {
 }
 
 static void af_vk_destroy_pipeline(AfVkRenderer *renderer) {
+    af_vk_destroy_image_pipeline(renderer);
     if (renderer->path_pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(renderer->device, renderer->path_pipeline, NULL);
         renderer->path_pipeline = VK_NULL_HANDLE;

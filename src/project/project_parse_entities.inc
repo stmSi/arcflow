@@ -31,6 +31,8 @@ static bool af_project_parse_node_field(const char *line, AfProjectNodeSnapshot 
             snapshot->node.type = AF_NODE_ELLIPSE;
         } else if (strcmp(value, "path") == 0) {
             snapshot->node.type = AF_NODE_PATH;
+        } else if (strcmp(value, "image") == 0) {
+            snapshot->node.type = AF_NODE_IMAGE;
         } else {
             return false;
         }

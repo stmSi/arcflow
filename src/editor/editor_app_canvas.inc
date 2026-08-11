@@ -217,6 +217,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     af_editor_add_rect(editor, (float)width - editor->right_width - 2.0F, 0.0F, 4.0F, (float)height,
                        (AfColor){0.23F, 0.25F, 0.3F, 1.0F}, 100100);
     af_editor_render_hierarchy(editor, height);
+    af_editor_render_asset_browser(editor, height);
     af_editor_render_toolbar(editor);
     af_editor_render_inspector(editor, width);
     af_editor_render_timeline(editor, width, height);
@@ -226,6 +227,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
                        (AfColor){0.62F, 0.67F, 0.76F, 1.0F}, 100140);
     af_editor_render_context_menu(editor, width, height);
     af_editor_render_tooltip(editor, width, height);
+    af_editor_render_top_menu(editor, width, height);
 }
 
 static void af_editor_update_title(AfEditorState *editor) {

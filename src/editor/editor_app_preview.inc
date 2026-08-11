@@ -36,6 +36,7 @@ static void af_editor_update_preview(AfEditorState *editor) {
     editor->preview_scene.styles = &editor->project.style_data;
     editor->preview_scene.layouts = &editor->project.layout_data;
     editor->preview_scene.particles = &editor->project.particle_data;
+    editor->preview_scene.images = &editor->project.image_data;
     if (editor->project.scene.count != 0U) {
         memcpy(editor->preview_nodes, editor->project.scene.nodes,
                (size_t)editor->project.scene.count * sizeof(*editor->preview_nodes));

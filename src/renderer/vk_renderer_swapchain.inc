@@ -414,7 +414,8 @@ static AfResult af_vk_create_path_pipeline(AfVkRenderer *renderer) {
 static AfResult af_vk_create_upload_ring(AfVkRenderer *renderer) {
     const VkDeviceSize slice_size =
         AF_MAX_NODES * sizeof(AfGpuShape) +
-        (VkDeviceSize)AF_MAX_GPU_PATH_VERTICES * sizeof(AfGpuPathVertex);
+        (VkDeviceSize)AF_MAX_GPU_PATH_VERTICES * sizeof(AfGpuPathVertex) +
+        (VkDeviceSize)AF_MAX_GPU_IMAGE_VERTICES * sizeof(AfGpuImageVertex);
     VkBufferCreateInfo buffer_info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                       .size = AF_FRAME_COUNT * slice_size,
                                       .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
@@ -505,6 +506,9 @@ static AfResult af_vk_recreate_swapchain(AfVkRenderer *renderer) {
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_vk_create_path_pipeline(renderer);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_vk_create_image_pipeline(renderer);
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_vk_particles_set_render_target(renderer->particles, renderer->swapchain_format,

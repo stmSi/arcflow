@@ -19,6 +19,7 @@
 #include "layout/layout.h"
 #include "particle/particle.h"
 #include "path/path.h"
+#include "project/image_import.h"
 #include "project/project.h"
 #include "rigging/rigging.h"
 #include "runtime/runtime_internal.h"
@@ -63,6 +64,7 @@ typedef struct AfTestFixture {
 #include "test_rigging.inc"
 #include "test_package.inc"
 #include "test_project.inc"
+#include "test_images.inc"
 #include "test_editor.inc"
 #include "test_gpu.inc"
 // clang-format on
@@ -89,6 +91,7 @@ int main(void) {
         {"runtime package", af_test_package},
         {"runtime handles and allocations", af_test_runtime},
         {"editable projects", af_test_project},
+        {"image asset pipeline", af_test_images},
         {"timeline authoring", af_test_timeline_authoring},
         {"editor commands", af_test_editor_commands},
         {"Vulkan pipeline smoke", af_test_gpu_smoke}};

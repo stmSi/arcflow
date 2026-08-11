@@ -10,6 +10,8 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     const AfComponentData empty_components = {0};
     const AfStateMachineData empty_state_machines = {0};
     AfParticleData empty_particles = {0};
+    const AfImageData empty_images = {0};
+    AfImagePackagePlan image_plan = {0};
     const AfLayoutData default_layouts = {.reference_size = {1280.0F, 720.0F},
                                           .target_size = {1280.0F, 720.0F},
                                           .scale_mode = AF_CANVAS_SCALE_FIT};
@@ -19,6 +21,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     const AfComponentData *component_data = NULL;
     const AfStateMachineData *state_machine_data = NULL;
     const AfParticleData *particle_data = NULL;
+    const AfImageData *image_data = NULL;
     AfResult result = AF_RESULT_SUCCESS;
     if (source == NULL || source->scene == NULL || source->animation == NULL || allocator == NULL ||
         out_blob == NULL) {
@@ -33,6 +36,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     state_machine_data =
         source->state_machines == NULL ? &empty_state_machines : source->state_machines;
     particle_data = source->scene->particles == NULL ? &empty_particles : source->scene->particles;
+    image_data = source->scene->images == NULL ? &empty_images : source->scene->images;
     result = af_scene_validate(source->scene);
     if (result != AF_RESULT_SUCCESS ||
         af_animation_validate(source->animation, source->scene) != AF_RESULT_SUCCESS ||
@@ -43,8 +47,15 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
             AF_RESULT_SUCCESS ||
         af_state_machine_validate(state_machine_data, source->animation, component_data) !=
             AF_RESULT_SUCCESS ||
-        af_particle_data_validate(particle_data, source->scene) != AF_RESULT_SUCCESS) {
+        af_particle_data_validate(particle_data, source->scene) != AF_RESULT_SUCCESS ||
+        (source->scene->images != NULL &&
+         af_image_data_validate(image_data, false) != AF_RESULT_SUCCESS) ||
+        (image_data->asset_count != 0U && image_data->atlas_count == 0U)) {
         return AF_RESULT_INVALID_ARGUMENT;
+    }
+    result = af_image_package_plan_create(image_data, allocator, &image_plan);
+    if (result != AF_RESULT_SUCCESS) {
+        return result;
     }
     sizes[0] = (uint64_t)source->scene->count * AF_NODE_RECORD_SIZE;
     sizes[1] = (uint64_t)source->animation->clip_count * AF_CLIP_RECORD_SIZE;
@@ -58,15 +69,18 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     sizes[9] = af_component_section_size(component_data);
     sizes[10] = af_state_machine_section_size(state_machine_data);
     sizes[11] = AF_PARTICLE_HEADER_SIZE + (uint64_t)particle_data->count * AF_PARTICLE_RECORD_SIZE;
+    sizes[12] = af_image_section_size(image_data, &image_plan);
     for (index = 0U; index < AF_SECTION_COUNT; ++index) {
         offsets[index] = af_align_u64(total_size, 8U);
         if (af_u64_add_overflow(offsets[index], sizes[index], &total_size) ||
             total_size > AF_PACKAGE_MAX_SIZE) {
+            af_image_package_plan_destroy(&image_plan);
             return AF_RESULT_LIMIT_EXCEEDED;
         }
     }
     bytes = af_allocate(allocator, (size_t)total_size, 8U);
     if (bytes == NULL) {
+        af_image_package_plan_destroy(&image_plan);
         return AF_RESULT_OUT_OF_MEMORY;
     }
     memset(bytes, 0, (size_t)total_size);
@@ -106,6 +120,8 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
                      state_machine_data->machine_count);
     af_write_section(bytes + AF_PACKAGE_HEADER_SIZE + 11U * AF_PACKAGE_SECTION_SIZE,
                      AF_SECTION_PARTICLES, offsets[11], sizes[11], 8U, particle_data->count);
+    af_write_section(bytes + AF_PACKAGE_HEADER_SIZE + 12U * AF_PACKAGE_SECTION_SIZE,
+                     AF_SECTION_IMAGES, offsets[12], sizes[12], 8U, image_data->asset_count);
     for (index = 0U; index < source->scene->count; ++index) {
         const AfSceneNode *node = &source->scene->nodes[index];
         uint8_t *record = bytes + offsets[0] + (uint64_t)index * AF_NODE_RECORD_SIZE;
@@ -215,6 +231,8 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
                               (uint64_t)index * AF_PARTICLE_RECORD_SIZE,
                           &particle_data->emitters[index]);
     }
+    af_write_images(bytes + offsets[12], image_data, &image_plan);
+    af_image_package_plan_destroy(&image_plan);
     af_write_u32(bytes + 48U, af_checksum(bytes + AF_PACKAGE_HEADER_SIZE,
                                           (size_t)total_size - AF_PACKAGE_HEADER_SIZE));
     if (af_package_validate(bytes, (size_t)total_size) != AF_RESULT_SUCCESS) {

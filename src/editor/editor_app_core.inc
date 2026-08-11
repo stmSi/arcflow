@@ -248,8 +248,10 @@ static void af_editor_derive_package_path(AfEditorState *editor) {
 }
 
 static AfResult af_editor_save(AfEditorState *editor) {
-    AfResult result =
-        af_project_save_file(&editor->project, editor->project_path, &editor->allocator);
+    AfResult result = AF_RESULT_INVALID_ARGUMENT;
+    if (editor->project_path[0] != '\0') {
+        result = af_project_save_file(&editor->project, editor->project_path, &editor->allocator);
+    }
     if (result == AF_RESULT_SUCCESS) {
         editor->dirty = false;
         af_editor_status(editor, "Project saved");
@@ -261,7 +263,9 @@ static AfResult af_editor_save(AfEditorState *editor) {
 
 static AfResult af_editor_compile(AfEditorState *editor) {
     AfPackageBlob package = {0};
-    AfResult result = af_project_compile(&editor->project, &editor->allocator, &package);
+    AfResult result = editor->package_path[0] == '\0'
+                          ? AF_RESULT_INVALID_ARGUMENT
+                          : af_project_compile(&editor->project, &editor->allocator, &package);
     if (result == AF_RESULT_SUCCESS) {
         result = af_file_write(editor->package_path, package.data, package.size);
     }

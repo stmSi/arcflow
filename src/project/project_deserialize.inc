@@ -24,8 +24,10 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
     bool vfx_lod_seen = false;
     bool next_id_seen = false;
     bool next_animation_id_seen = false;
+    bool next_asset_id_seen = false;
     uint64_t parsed_next_id = 0U;
     uint64_t parsed_next_animation_id = 0U;
+    uint64_t parsed_next_asset_id = 0U;
     uint64_t format_version = 0U;
     AfResult result = AF_RESULT_INVALID_PACKAGE;
     if (data == NULL || size == 0U || size > AF_PROJECT_MAX_FILE_SIZE || allocator == NULL ||
@@ -77,6 +79,27 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
                 goto cleanup;
             }
             project.particle_data.emitters[project.particle_data.count++] = emitter;
+            continue;
+        }
+        if (strncmp(line, "image_asset ", 12U) == 0) {
+            if (in_node || in_clip || in_track || in_keyframe || in_path ||
+                !af_project_parse_image_asset_line(line, &project)) {
+                goto cleanup;
+            }
+            continue;
+        }
+        if (strncmp(line, "image_sequence ", 15U) == 0) {
+            if (in_node || in_clip || in_track || in_keyframe || in_path ||
+                !af_project_parse_image_sequence_line(line, &project)) {
+                goto cleanup;
+            }
+            continue;
+        }
+        if (strncmp(line, "image_binding ", 14U) == 0) {
+            if (in_node || in_clip || in_track || in_keyframe || in_path ||
+                !af_project_parse_image_binding_line(line, &project)) {
+                goto cleanup;
+            }
             continue;
         }
         if (strncmp(line, "vfx_emitter ", 12U) == 0) {
@@ -317,6 +340,11 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
                 goto cleanup;
             }
             next_animation_id_seen = true;
+        } else if ((value = af_project_value(line, "next_asset_id")) != NULL) {
+            if (next_asset_id_seen || !af_project_parse_u64(value, &parsed_next_asset_id)) {
+                goto cleanup;
+            }
+            next_asset_id_seen = true;
         }
     }
     if (in_node || in_clip || in_track || in_keyframe || in_path || !header_seen || !canvas_seen) {
@@ -327,6 +355,9 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
     }
     if (next_animation_id_seen && parsed_next_animation_id > project.next_animation_id) {
         project.next_animation_id = parsed_next_animation_id;
+    }
+    if (next_asset_id_seen && parsed_next_asset_id > project.next_asset_id) {
+        project.next_asset_id = parsed_next_asset_id;
     }
     if (!layout_canvas_seen) {
         project.layout_data.reference_size = project.canvas_size;
@@ -345,6 +376,7 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
     out_project->scene.styles = &out_project->style_data;
     out_project->scene.layouts = &out_project->layout_data;
     out_project->scene.particles = &out_project->particle_data;
+    out_project->scene.images = &out_project->image_data;
     project = (AfProject){0};
     result = AF_RESULT_SUCCESS;
 

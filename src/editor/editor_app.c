@@ -6,6 +6,7 @@
 #include "core/log.h"
 #include "editor/editor_commands.h"
 #include "platform/platform_sdl.h"
+#include "project/image_import.h"
 #include "project/project.h"
 #include "renderer/vk_renderer.h"
 #include "scene/scene.h"
@@ -23,7 +24,8 @@
 #define AF_EDITOR_PROJECT_CAPACITY (AF_MAX_NODES - AF_EDITOR_UI_RESERVE)
 #define AF_EDITOR_PATH_CAPACITY 512U
 #define AF_EDITOR_STATUS_CAPACITY 160U
-#define AF_EDITOR_TOOLBAR_HEIGHT 44.0F
+#define AF_EDITOR_MENU_HEIGHT 28.0F
+#define AF_EDITOR_TOOLBAR_HEIGHT 72.0F
 #define AF_EDITOR_STATUS_HEIGHT 28.0F
 #define AF_EDITOR_TIMELINE_DEFAULT_HEIGHT 270.0F
 #define AF_EDITOR_TIMELINE_MIN_HEIGHT 170.0F
@@ -102,8 +104,27 @@ typedef enum AfEditorContextMenu {
     AF_EDITOR_CONTEXT_ELLIPSE,
     AF_EDITOR_CONTEXT_PATH,
     AF_EDITOR_CONTEXT_GROUP,
+    AF_EDITOR_CONTEXT_IMAGE,
+    AF_EDITOR_CONTEXT_ASSET,
     AF_EDITOR_CONTEXT_PARTICLE
 } AfEditorContextMenu;
+
+typedef enum AfEditorTopMenu {
+    AF_EDITOR_MENU_NONE = 0,
+    AF_EDITOR_MENU_FILE,
+    AF_EDITOR_MENU_EDIT,
+    AF_EDITOR_MENU_VIEW,
+    AF_EDITOR_MENU_ANIMATION,
+    AF_EDITOR_MENU_ASSETS,
+    AF_EDITOR_MENU_HELP
+} AfEditorTopMenu;
+
+typedef enum AfEditorDialogAction {
+    AF_EDITOR_DIALOG_NONE = 0,
+    AF_EDITOR_DIALOG_OPEN_PROJECT,
+    AF_EDITOR_DIALOG_SAVE_PROJECT_AS,
+    AF_EDITOR_DIALOG_IMPORT_IMAGE
+} AfEditorDialogAction;
 
 typedef struct AfEditorContextMenuInfo {
     const char *title;
@@ -139,6 +160,7 @@ typedef struct AfEditorState {
     uint8_t hierarchy_depth[AF_EDITOR_PROJECT_CAPACITY];
     uint32_t hierarchy_count;
     uint32_t hierarchy_scroll;
+    uint32_t asset_scroll;
     uint64_t hierarchy_anchor_id;
     float left_width;
     float right_width;
@@ -152,6 +174,7 @@ typedef struct AfEditorState {
     AfVec2 mouse_position;
     AfVec2 context_position;
     AfEditorContextMenu context_menu;
+    AfEditorTopMenu top_menu;
     uint64_t hovered_tooltip_id;
     uint64_t tooltip_started_ticks;
     float timeline_height;
@@ -201,6 +224,8 @@ typedef struct AfEditorState {
     char output_path[AF_EDITOR_PATH_CAPACITY];
     char sequence_prefix[AF_EDITOR_PATH_CAPACITY];
     char status[AF_EDITOR_STATUS_CAPACITY];
+    uint32_t dialog_event_type;
+    AfEditorDialogAction dialog_action;
     uint32_t maximum_frames;
     uint32_t rendered_frames;
     bool resize_smoke;
@@ -210,15 +235,26 @@ typedef struct AfEditorState {
     bool vfx_smoke;
     bool particle_view_smoke;
     bool vector_animation_smoke;
+    bool image_smoke;
+    bool menu_smoke;
     bool vector_animation_smoke_prepared;
+    bool dialog_active;
+    bool help_overlay;
+    bool asset_browser_visible;
+    uint64_t selected_asset_id;
     bool running;
     bool dirty;
 } AfEditorState;
 
 static void af_editor_prepare_render_paths(AfEditorState *editor);
+static void af_editor_render_top_menu(AfEditorState *editor, int width, int height);
+static bool af_editor_top_menu_mouse_down(AfEditorState *editor, int width, int height, float x,
+                                          float y);
+static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserEvent *event);
 
 // clang-format off
 #include "editor/editor_app_core.inc"
+#include "editor/editor_app_images.inc"
 #include "editor/editor_app_draw.inc"
 #include "editor/editor_app_timeline.inc"
 #include "editor/editor_app_preview.inc"
@@ -228,6 +264,7 @@ static void af_editor_prepare_render_paths(AfEditorState *editor);
 #include "editor/editor_app_animation.inc"
 #include "editor/editor_app_paths.inc"
 #include "editor/editor_app_properties.inc"
+#include "editor/editor_app_menus.inc"
 #include "editor/editor_app_input.inc"
 // clang-format on
 
@@ -246,6 +283,7 @@ int af_editor_run(int argument_count, char **arguments) {
                             .timeline_zoom = 120.0F,
                             .running = true};
     AfResult result = AF_RESULT_SUCCESS;
+    uint32_t missing_image_count = 0U;
     bool loaded = false;
     int exit_code = 1;
     af_allocator_init_default(&editor.allocator);
@@ -268,6 +306,21 @@ int af_editor_run(int argument_count, char **arguments) {
                af_result_string(result));
         goto cleanup;
     }
+    if (editor.image_smoke) {
+        result = af_editor_prepare_image_smoke(&editor);
+        if (result != AF_RESULT_SUCCESS) {
+            goto cleanup;
+        }
+    }
+    result = af_image_build_atlases(&editor.project.image_data);
+    if (result != AF_RESULT_SUCCESS) {
+        af_log(AF_LOG_ERROR, "Cannot prepare project image atlases: %s", af_result_string(result));
+        goto cleanup;
+    }
+    for (uint32_t index = 0U; index < editor.project.image_data.asset_count; ++index) {
+        missing_image_count += editor.project.image_data.assets[index].missing ? 1U : 0U;
+    }
+    editor.asset_browser_visible = missing_image_count != 0U;
     if (editor.project.clip_count == 0U) {
         AfProjectClip clip = {.id = 1U,
                               .name = "Main Clip",
@@ -294,7 +347,7 @@ int af_editor_run(int argument_count, char **arguments) {
     editor.render_path_commands =
         af_allocate_array(&editor.allocator, AF_MAX_PATH_COMMANDS,
                           sizeof(*editor.render_path_commands), _Alignof(AfPathCommand));
-    editor.preview_nodes = af_allocate_array(&editor.allocator, editor.project.scene.capacity,
+    editor.preview_nodes = af_allocate_array(&editor.allocator, AF_EDITOR_PROJECT_CAPACITY,
                                              sizeof(*editor.preview_nodes), _Alignof(AfSceneNode));
     editor.curve_order = af_allocate_array(&editor.allocator, AF_PROJECT_MAX_KEYFRAMES,
                                            sizeof(*editor.curve_order), _Alignof(uint32_t));
@@ -330,13 +383,15 @@ int af_editor_run(int argument_count, char **arguments) {
         goto cleanup;
     }
     af_scene_init(&editor.render_scene, editor.render_nodes, AF_MAX_NODES);
-    af_scene_init(&editor.preview_scene, editor.preview_nodes, editor.project.scene.capacity);
+    af_scene_init(&editor.preview_scene, editor.preview_nodes, AF_EDITOR_PROJECT_CAPACITY);
     editor.render_scene.paths = &editor.render_path_data;
+    editor.render_scene.images = &editor.project.image_data;
     editor.render_scene.particles = &editor.project.particle_data;
     editor.preview_scene.paths = &editor.project.path_data;
     editor.preview_scene.styles = &editor.project.style_data;
     editor.preview_scene.layouts = &editor.project.layout_data;
     editor.preview_scene.particles = &editor.project.particle_data;
+    editor.preview_scene.images = &editor.project.image_data;
     result = af_platform_window_create("Arcflow Editor", 1440, 840, &editor.window);
     if (result == AF_RESULT_SUCCESS) {
         result = af_vk_renderer_create(&editor.window, &editor.renderer);
@@ -344,7 +399,19 @@ int af_editor_run(int argument_count, char **arguments) {
     if (result != AF_RESULT_SUCCESS) {
         goto cleanup;
     }
-    af_editor_status(&editor, loaded ? "Project loaded" : "New project");
+    editor.dialog_event_type = SDL_RegisterEvents(1);
+    if (editor.dialog_event_type == UINT32_MAX) {
+        result = AF_RESULT_IO_ERROR;
+        goto cleanup;
+    }
+    if (missing_image_count != 0U) {
+        char status[96];
+        (void)snprintf(status, sizeof(status), "%u image source%s missing", missing_image_count,
+                       missing_image_count == 1U ? " is" : "s are");
+        af_editor_status(&editor, status);
+    } else {
+        af_editor_status(&editor, loaded ? "Project loaded" : "New project");
+    }
     editor.previous_ticks = SDL_GetTicksNS();
     while (editor.running) {
         SDL_Event event;
@@ -379,7 +446,11 @@ int af_editor_run(int argument_count, char **arguments) {
                 }
             }
         }
-        if (editor.vector_animation_smoke) {
+        if (editor.image_smoke) {
+            editor.playhead = (float)editor.rendered_frames * 0.125F;
+            editor.asset_browser_visible = true;
+            af_editor_status(&editor, "Programmatic image atlas / flipbook / nine-slice capture");
+        } else if (editor.vector_animation_smoke) {
             const AfProjectClip *clip = NULL;
             if (!editor.vector_animation_smoke_prepared) {
                 result = af_editor_prepare_vector_animation_smoke(&editor, width, height);
@@ -430,7 +501,9 @@ int af_editor_run(int argument_count, char **arguments) {
         } else if (editor.selection_smoke) {
             af_editor_prepare_selection_smoke(&editor, width, height);
         } else if (editor.context_smoke) {
-            const uint32_t context = (editor.rendered_frames / 2U) % 11U;
+            const uint32_t context =
+                (editor.rendered_frames / 2U) %
+                (uint32_t)(AF_EDITOR_CONTEXT_PARTICLE - AF_EDITOR_CONTEXT_HIERARCHY + 1);
             editor.context_menu = (AfEditorContextMenu)(AF_EDITOR_CONTEXT_HIERARCHY + context);
             if (editor.context_menu == AF_EDITOR_CONTEXT_HIERARCHY) {
                 editor.context_position = (AfVec2){54.0F, 92.0F};
@@ -454,6 +527,12 @@ int af_editor_run(int argument_count, char **arguments) {
                 (AfVec2){editor.context_position.x + 52.0F,
                          editor.context_position.y + AF_EDITOR_CONTEXT_HEADER_HEIGHT +
                              AF_EDITOR_CONTEXT_ITEM_HEIGHT + 12.0F};
+        } else if (editor.menu_smoke) {
+            const uint32_t menu = (editor.rendered_frames / 2U) % 6U;
+            editor.top_menu = (AfEditorTopMenu)(AF_EDITOR_MENU_FILE + menu);
+            editor.mouse_position =
+                (AfVec2){af_editor_top_menu_x(&editor, editor.top_menu) + 22.0F,
+                         AF_EDITOR_MENU_HEIGHT + AF_EDITOR_CONTEXT_ITEM_HEIGHT + 12.0F};
         } else if (editor.tooltip_smoke) {
             editor.context_menu = AF_EDITOR_CONTEXT_NONE;
             editor.mouse_position = (AfVec2){editor.left_width + 31.0F, 20.0F};
@@ -484,6 +563,8 @@ int af_editor_run(int argument_count, char **arguments) {
                 .particle_clip_y = (uint32_t)fmaxf(canvas_y, 0.0F),
                 .particle_clip_width = (uint32_t)fmaxf(canvas_width, 0.0F),
                 .particle_clip_height = (uint32_t)fmaxf(canvas_height, 0.0F),
+                .image_time = editor.playhead,
+                .image_time_override = true,
                 .particle_clip_enabled = true};
             result = af_vk_renderer_draw_timed_with_options(
                 editor.renderer, &editor.render_scene, fminf(delta_time, 0.1F), &render_options);
