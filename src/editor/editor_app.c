@@ -54,7 +54,8 @@
 #define AF_EDITOR_LAYOUT_ROW_Y 450.0F
 #define AF_EDITOR_PARTICLE_LABEL_Y 493.0F
 #define AF_EDITOR_PARTICLE_ROW_Y 514.0F
-#define AF_EDITOR_PARTICLE_ROW_STEP 36.0F
+#define AF_EDITOR_PARTICLE_ROW_STEP 30.0F
+#define AF_EDITOR_PARTICLE_ROW_COUNT 10U
 #define AF_EDITOR_TEXT_FONT_ID 1U
 #define AF_EDITOR_TEXT_GLYPH_CAPACITY 512U
 #define AF_EDITOR_TEXT_LINE_CAPACITY 8U
@@ -425,7 +426,9 @@ static AfResult af_editor_default_project(AfEditorState *editor) {
         if (result == AF_RESULT_SUCCESS) {
             AfParticleEmitter emitter = af_particle_emitter_default(emitter_id, ellipse.id);
             emitter.type = AF_PARTICLE_EMITTER_CIRCLE;
-            emitter.output = AF_PARTICLE_OUTPUT_UI_BILLBOARD;
+            emitter.output = AF_PARTICLE_OUTPUT_TRAIL;
+            emitter.turbulence_strength = 120.0F;
+            emitter.vortex_force = 70.0F;
             result = af_project_add_emitter(&editor->project, &emitter);
         }
     }
@@ -1652,14 +1655,30 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
                                (AfColor){0.52F, 0.56F, 0.64F, 1.0F}, 100125);
         } else {
             static const char *const type_names[] = {"POINT", "LINE", "RECT", "CIRCLE", "PATH"};
-            char labels[4][64];
+            static const char *const output_names[] = {"BILLBOARD", "UI",   "FLIPBOOK", "TRAIL",
+                                                       "RIBBON",    "MESH", "DECAL",    "HEAT",
+                                                       "REFRACT",   "SOFT", "LIGHT"};
+            char labels[AF_EDITOR_PARTICLE_ROW_COUNT][64];
+            const AfVkVfxMetrics metrics = af_vk_renderer_vfx_metrics(editor->renderer);
             (void)snprintf(labels[0], sizeof(labels[0]), "RATE %.0f / S",
                            (double)emitter->spawn_rate);
             (void)snprintf(labels[1], sizeof(labels[1]), "LIFE %.2f - %.2f",
                            (double)emitter->lifetime_min, (double)emitter->lifetime_max);
             (void)snprintf(labels[2], sizeof(labels[2]), "CAPACITY %u", emitter->capacity);
             (void)snprintf(labels[3], sizeof(labels[3]), "SHAPE %s", type_names[emitter->type]);
-            for (uint32_t row = 0U; row < 4U; ++row) {
+            (void)snprintf(labels[4], sizeof(labels[4]), "OUTPUT %s",
+                           output_names[emitter->output]);
+            (void)snprintf(labels[5], sizeof(labels[5]), "TURBULENCE %.0f",
+                           (double)emitter->turbulence_strength);
+            (void)snprintf(labels[6], sizeof(labels[6]), "RADIAL %.0f",
+                           (double)emitter->radial_force);
+            (void)snprintf(labels[7], sizeof(labels[7]), "VORTEX %.0f",
+                           (double)emitter->vortex_force);
+            (void)snprintf(labels[8], sizeof(labels[8]), "PLANE COLLISION %s",
+                           emitter->collision_plane_enabled ? "ON" : "OFF");
+            (void)snprintf(labels[9], sizeof(labels[9]), "EVENT BURST %u",
+                           emitter->event_burst_count);
+            for (uint32_t row = 0U; row < AF_EDITOR_PARTICLE_ROW_COUNT; ++row) {
                 const float row_y =
                     AF_EDITOR_PARTICLE_ROW_Y + (float)row * AF_EDITOR_PARTICLE_ROW_STEP;
                 af_editor_add_rect(editor, x, row_y, 28.0F, 24.0F,
@@ -1673,6 +1692,18 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
                 af_editor_add_text(editor, x + 72.0F, row_y + 7.0F, labels[row], 0.72F,
                                    editor->right_width - 108.0F,
                                    (AfColor){0.7F, 0.74F, 0.82F, 1.0F}, 100130);
+            }
+            {
+                char timing[96];
+                (void)snprintf(timing, sizeof(timing), "VFX CPU %.2f MS  GPU %.2f MS  LOD %.0f%%",
+                               (double)metrics.cpu_milliseconds, (double)metrics.gpu_milliseconds,
+                               (double)(metrics.lod_factor * 100.0F));
+                af_editor_add_text(editor, x,
+                                   AF_EDITOR_PARTICLE_ROW_Y +
+                                       AF_EDITOR_PARTICLE_ROW_COUNT * AF_EDITOR_PARTICLE_ROW_STEP +
+                                       2.0F,
+                                   timing, 0.58F, editor->right_width - 36.0F,
+                                   (AfColor){0.48F, 0.66F, 0.76F, 1.0F}, 100130);
             }
         }
     }
@@ -2154,21 +2185,39 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
             }
         }
         if (mouse.y >= AF_EDITOR_PARTICLE_ROW_Y &&
-            mouse.y < AF_EDITOR_PARTICLE_ROW_Y + 4.0F * AF_EDITOR_PARTICLE_ROW_STEP &&
+            mouse.y < AF_EDITOR_PARTICLE_ROW_Y +
+                          AF_EDITOR_PARTICLE_ROW_COUNT * AF_EDITOR_PARTICLE_ROW_STEP &&
             mouse.x >= panel_x && mouse.x < panel_x + 65.0F) {
             const uint32_t row =
                 (uint32_t)((mouse.y - AF_EDITOR_PARTICLE_ROW_Y) / AF_EDITOR_PARTICLE_ROW_STEP);
-            static const char *const titles[] = {"Particle Spawn Rate", "Particle Lifetime",
-                                                 "Particle Capacity", "Emitter Shape"};
+            static const char *const titles[] = {
+                "Particle Spawn Rate", "Particle Lifetime", "Particle Capacity", "Emitter Shape",
+                "Particle Output",     "Curl Turbulence",   "Radial Force",      "Vortex Force",
+                "Collision Plane",     "Event Burst"};
             static const char *const summaries[] = {
-                "Change particles emitted per second.", "Change the particle lifetime range.",
-                "Change this emitter's bounded GPU capacity.", "Cycle the particle source shape."};
+                "Change particles emitted per second.",
+                "Change the particle lifetime range.",
+                "Change this emitter's bounded GPU capacity.",
+                "Cycle the particle source shape.",
+                "Cycle the VFX renderer type.",
+                "Change deterministic curl-like turbulence.",
+                "Push particles toward or away from the force center.",
+                "Rotate particles around the force center.",
+                "Enable or disable the local collision plane.",
+                "Set the count used by a host-triggered burst."};
             static const char *const details[] = {
                 "Spawn uses a fixed-step accumulator and deterministic per-emitter random seed.",
                 "Color, size, position, velocity, and rotation evolve over this lifetime.",
                 "Total project capacity cannot exceed the fixed runtime GPU particle pool.",
-                "Sources include point, line, rectangle, circle, and vector path."};
-            if (row < 4U) {
+                "Sources include point, line, rectangle, circle, and vector path.",
+                "Outputs include trails, ribbons, mesh proxies, decals, distortion, soft and "
+                "light.",
+                "The force is bounded and sampled analytically without per-frame allocation.",
+                "Positive values repel; negative values pull toward the local center.",
+                "The force is perpendicular to the radial direction and remains bounded.",
+                "Failed or non-finite collisions recycle particles without corrupting the pool.",
+                "Runtime events are sequence-numbered, one-shot, and capacity bounded."};
+            if (row < AF_EDITOR_PARTICLE_ROW_COUNT) {
                 return (AfEditorTooltip){.id = UINT64_C(0x24000) + row,
                                          .title = titles[row],
                                          .summary = summaries[row],
@@ -3828,12 +3877,12 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
         return;
     }
     if (emitter != NULL && y >= AF_EDITOR_PARTICLE_ROW_Y &&
-        y < AF_EDITOR_PARTICLE_ROW_Y + 4.0F * AF_EDITOR_PARTICLE_ROW_STEP) {
+        y < AF_EDITOR_PARTICLE_ROW_Y + AF_EDITOR_PARTICLE_ROW_COUNT * AF_EDITOR_PARTICLE_ROW_STEP) {
         AfProjectNodeSnapshot before = {0};
         const uint32_t row =
             (uint32_t)((y - AF_EDITOR_PARTICLE_ROW_Y) / AF_EDITOR_PARTICLE_ROW_STEP);
         const bool decrease = x < panel_x + 31.0F;
-        if (x <= panel_x + 65.0F && row < 4U &&
+        if (x <= panel_x + 65.0F && row < AF_EDITOR_PARTICLE_ROW_COUNT &&
             af_project_snapshot(&editor->project, editor->selected_id, &before) ==
                 AF_RESULT_SUCCESS) {
             if (row == 0U) {
@@ -3858,7 +3907,7 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
                 emitter->burst_count = emitter->burst_count > emitter->capacity
                                            ? emitter->capacity
                                            : emitter->burst_count;
-            } else {
+            } else if (row == 3U) {
                 int type = (int)emitter->type + (decrease ? -1 : 1);
                 type = type < 0 ? (int)AF_PARTICLE_EMITTER_VECTOR_PATH
                                 : (type > (int)AF_PARTICLE_EMITTER_VECTOR_PATH ? 0 : type);
@@ -3874,6 +3923,46 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
                         ? af_path_find_node_const(&editor->project.path_data, editor->selected_id)
                               ->id
                         : 0U;
+            } else if (row == 4U) {
+                int output = (int)emitter->output + (decrease ? -1 : 1);
+                output = output < 0 ? (int)AF_PARTICLE_OUTPUT_LIGHT_PROXY
+                                    : (output > (int)AF_PARTICLE_OUTPUT_LIGHT_PROXY ? 0 : output);
+                emitter->output = (AfParticleOutputType)output;
+            } else if (row == 5U) {
+                emitter->turbulence_strength =
+                    af_editor_clamp(emitter->turbulence_strength + (decrease ? -20.0F : 20.0F),
+                                    -AF_MAX_PARTICLE_FORCE, AF_MAX_PARTICLE_FORCE);
+            } else if (row == 6U) {
+                emitter->radial_force =
+                    af_editor_clamp(emitter->radial_force + (decrease ? -25.0F : 25.0F),
+                                    -AF_MAX_PARTICLE_FORCE, AF_MAX_PARTICLE_FORCE);
+            } else if (row == 7U) {
+                emitter->vortex_force =
+                    af_editor_clamp(emitter->vortex_force + (decrease ? -25.0F : 25.0F),
+                                    -AF_MAX_PARTICLE_FORCE, AF_MAX_PARTICLE_FORCE);
+            } else if (row == 8U) {
+                const AfSceneNode *node =
+                    af_scene_find_const(&editor->project.scene, editor->selected_id);
+                emitter->collision_plane_enabled = !emitter->collision_plane_enabled;
+                emitter->collision_plane_normal = (AfVec2){0.0F, -1.0F};
+                if (node != NULL) {
+                    emitter->collision_plane_offset = -(node->bounds.y + 80.0F);
+                }
+            } else {
+                if (decrease) {
+                    emitter->event_burst_count =
+                        emitter->event_burst_count > 16U ? emitter->event_burst_count - 16U : 0U;
+                } else {
+                    emitter->event_burst_count =
+                        emitter->event_burst_count <=
+                                emitter->capacity -
+                                    (emitter->capacity < 16U ? emitter->capacity : 16U)
+                            ? emitter->event_burst_count +
+                                  (emitter->capacity < 16U ? emitter->capacity : 16U)
+                            : emitter->capacity;
+                }
+                emitter->event_sequence =
+                    emitter->event_sequence == UINT32_MAX ? 1U : emitter->event_sequence + 1U;
             }
             (void)af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_PARTICLE, true);
             editor->dirty = true;

@@ -8,6 +8,7 @@ struct Particle {
     vec4 sizes;
     vec4 color;
     uvec4 meta;
+    vec4 previous_depth;
 };
 
 struct Emitter {
@@ -25,11 +26,24 @@ struct Emitter {
     vec4 forces;
     vec4 flipbook;
     uvec4 settings;
+    vec4 advanced0;
+    vec4 force_center;
+    vec4 attractor;
+    vec4 repulsor;
+    vec4 vector_field;
+    vec4 collision_plane;
+    vec4 collision_extra;
+    vec4 depth_velocity;
+    vec4 render0;
+    vec4 render1;
+    uvec4 sub_settings;
+    uvec4 event_settings;
 };
 
 struct EmitterState {
     vec4 values;
     uvec4 meta;
+    uvec4 event_meta;
 };
 
 layout(std430, binding = 0) buffer Particles { Particle particles[]; };
@@ -116,7 +130,8 @@ vec2 emitter_position(Emitter emitter, uint serial) {
     return transform_point(emitter, point + offset);
 }
 
-void initialize_particle(uint emitter_index, uint particle_index, uint serial) {
+void initialize_particle(uint emitter_index, uint particle_index, uint serial, uint recursion_depth,
+                         uint birth_pending) {
     Emitter emitter = emitters[emitter_index];
     vec2 velocity = mix(emitter.velocity_range.xy, emitter.velocity_range.zw,
                         vec2(random_unit(emitter.meta0.w, emitter.meta1.xy, serial, 2U),
@@ -136,7 +151,84 @@ void initialize_particle(uint emitter_index, uint particle_index, uint serial) {
         vec4(transform_vector(emitter, velocity), rotation, angular_velocity);
     particles[particle_index].sizes = vec4(start_size, end_size, start_size, 0.0);
     particles[particle_index].color = emitter.color_start;
-    particles[particle_index].meta = uvec4(emitter_index, emitter.meta0.y, 0U, 0U);
+    particles[particle_index].meta =
+        uvec4(emitter_index, emitter.meta0.y, recursion_depth, birth_pending);
+    particles[particle_index].previous_depth =
+        vec4(particles[particle_index].position_age.xy,
+             (emitter.collision_extra.y + emitter.collision_extra.z) * 0.5,
+             mix(emitter.depth_velocity.x, emitter.depth_velocity.y,
+                 random_unit(emitter.meta0.w, emitter.meta1.xy, serial, 11U)));
+}
+
+void append_alive(uint particle_index) {
+    uint output_slot = atomicAdd(counters.y, 1U);
+    if (step.parity == 0U) {
+        alive_b[output_slot] = particle_index;
+    } else {
+        alive_a[output_slot] = particle_index;
+    }
+}
+
+bool spawn_particle(uint emitter_index, uint recursion_depth, vec2 parent_position,
+                    float parent_depth, bool inherit_position) {
+    Emitter emitter = emitters[emitter_index];
+    uint emitter_alive = atomicAdd(emitter_states[emitter_index].meta.z, 1U);
+    if (emitter_alive >= emitter.meta0.z) {
+        atomicAdd(emitter_states[emitter_index].meta.z, uint(-1));
+        atomicAdd(emitter_states[emitter_index].meta.w, 1U);
+        atomicAdd(counters.w, 1U);
+        return false;
+    }
+    uint particle_index = 0U;
+    if (!pop_dead(particle_index)) {
+        atomicAdd(emitter_states[emitter_index].meta.z, uint(-1));
+        atomicAdd(emitter_states[emitter_index].meta.w, 1U);
+        atomicAdd(counters.w, 1U);
+        return false;
+    }
+    uint serial = atomicAdd(emitter_states[emitter_index].meta.x, 1U);
+    initialize_particle(emitter_index, particle_index, serial, recursion_depth, 1U);
+    if (inherit_position) {
+        particles[particle_index].position_age.xy = parent_position;
+        particles[particle_index].previous_depth.xy = parent_position;
+        particles[particle_index].previous_depth.z = parent_depth;
+    }
+    append_alive(particle_index);
+    return true;
+}
+
+vec2 safe_direction(vec2 value) {
+    float magnitude = length(value);
+    return magnitude > 0.00001 ? value / magnitude : vec2(0.0);
+}
+
+vec2 advanced_force(Emitter emitter, vec2 position, float time) {
+    vec2 force = emitter.forces.xy + emitter.forces.zw;
+    if (emitter.advanced0.x != 0.0) {
+        force += vec2(cos(position.y * emitter.advanced0.y + time),
+                      sin(position.x * emitter.advanced0.y - time)) * emitter.advanced0.x;
+    }
+    vec2 direction = safe_direction(position - emitter.force_center.xy);
+    force += direction * emitter.advanced0.z + vec2(-direction.y, direction.x) * emitter.advanced0.w;
+    vec2 delta = emitter.attractor.xy - position;
+    float distance_to_force = length(delta);
+    if (emitter.attractor.w > 0.0 && distance_to_force < emitter.attractor.w) {
+        force += safe_direction(delta) * emitter.attractor.z *
+                 (1.0 - distance_to_force / emitter.attractor.w);
+    }
+    delta = position - emitter.repulsor.xy;
+    distance_to_force = length(delta);
+    if (emitter.repulsor.w > 0.0 && distance_to_force < emitter.repulsor.w) {
+        force += safe_direction(delta) * emitter.repulsor.z *
+                 (1.0 - distance_to_force / emitter.repulsor.w);
+    }
+    force += safe_direction(emitter.vector_field.xy) * emitter.vector_field.z;
+    float magnitude = length(force);
+    return magnitude > 100000.0 ? force * (100000.0 / magnitude) : force;
+}
+
+bool invalid_vector(vec2 value) {
+    return any(isnan(value)) || any(isinf(value));
 }
 
 void main() {
@@ -144,11 +236,13 @@ void main() {
     if (step.pass_index == 0U) {
         if (index < step.capacity) {
             dead_indices[index] = step.capacity - index - 1U;
-            particles[index] = Particle(vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0), uvec4(0U));
+            particles[index] = Particle(vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0),
+                                        uvec4(0U), vec4(0.0));
         }
         if (index < step.emitter_count) {
             emitter_states[index].values = vec4(0.0);
             emitter_states[index].meta = uvec4(0U);
+            emitter_states[index].event_meta = uvec4(0U);
         }
         if (index == 0U) {
             counters = uvec4(0U, 0U, step.capacity, 0U);
@@ -169,27 +263,75 @@ void main() {
         uint particle_index = step.parity == 0U ? alive_a[index] : alive_b[index];
         Particle particle = particles[particle_index];
         Emitter emitter = emitters[particle.meta.x];
+        if (particle.meta.w != 0U) {
+            particle.meta.w = 0U;
+            if (emitter.sub_settings.x != uint(-1) && particle.meta.z < emitter.sub_settings.w &&
+                particle.meta.z < 3U) {
+                for (uint child = 0U; child < emitter.sub_settings.y; ++child) {
+                    spawn_particle(emitter.sub_settings.x, particle.meta.z + 1U,
+                                   particle.position_age.xy, particle.previous_depth.z, true);
+                }
+            }
+        }
         particle.position_age.z += step.delta_time;
         if (particle.position_age.z >= particle.position_age.w) {
             uint dead_slot = atomicAdd(counters.z, 1U);
             dead_indices[dead_slot] = particle_index;
             atomicAdd(emitter_states[particle.meta.x].meta.z, uint(-1));
+            if (emitter.sub_settings.x != uint(-1) && particle.meta.z < emitter.sub_settings.w &&
+                particle.meta.z < 3U) {
+                for (uint child = 0U; child < emitter.sub_settings.z; ++child) {
+                    spawn_particle(emitter.sub_settings.x, particle.meta.z + 1U,
+                                   particle.position_age.xy, particle.previous_depth.z, true);
+                }
+            }
             return;
         }
-        particle.velocity_rotation.xy += (emitter.forces.xy + emitter.forces.zw) * step.delta_time;
+        particle.previous_depth.xy = particle.position_age.xy;
+        particle.velocity_rotation.xy +=
+            advanced_force(emitter, particle.position_age.xy,
+                           float(step.step_serial) * step.delta_time) * step.delta_time;
         particle.velocity_rotation.xy /= 1.0 + emitter.lifetime_spawn.w * step.delta_time;
         particle.position_age.xy += particle.velocity_rotation.xy * step.delta_time;
+        particle.previous_depth.z += particle.previous_depth.w * step.delta_time;
+        if (emitter.event_settings.z != 0U) {
+            vec2 normal = safe_direction(emitter.collision_plane.xy);
+            float plane_distance = dot(particle.position_age.xy, normal) - emitter.collision_plane.z;
+            if (plane_distance < 0.0) {
+                particle.position_age.xy -= normal * plane_distance;
+                float normal_speed = dot(particle.velocity_rotation.xy, normal);
+                if (normal_speed < 0.0) {
+                    particle.velocity_rotation.xy -=
+                        (1.0 + emitter.collision_plane.w) * normal_speed * normal;
+                    particle.velocity_rotation.xy *= 1.0 - emitter.collision_extra.x;
+                }
+            }
+        }
+        if (emitter.event_settings.w != 0U) {
+            if (particle.previous_depth.z < emitter.collision_extra.y) {
+                particle.previous_depth.z = emitter.collision_extra.y;
+                particle.previous_depth.w = abs(particle.previous_depth.w) * emitter.collision_plane.w;
+            } else if (particle.previous_depth.z > emitter.collision_extra.z) {
+                particle.previous_depth.z = emitter.collision_extra.z;
+                particle.previous_depth.w = -abs(particle.previous_depth.w) * emitter.collision_plane.w;
+            }
+        }
+        if (invalid_vector(particle.position_age.xy) ||
+            invalid_vector(particle.velocity_rotation.xy) ||
+            isnan(particle.previous_depth.z) || isinf(particle.previous_depth.z)) {
+            uint dead_slot = atomicAdd(counters.z, 1U);
+            dead_indices[dead_slot] = particle_index;
+            atomicAdd(emitter_states[particle.meta.x].meta.z, uint(-1));
+            atomicAdd(emitter_states[particle.meta.x].meta.w, 1U);
+            atomicAdd(counters.w, 1U);
+            return;
+        }
         particle.velocity_rotation.z += particle.velocity_rotation.w * step.delta_time;
         float amount = clamp(particle.position_age.z / particle.position_age.w, 0.0, 1.0);
         particle.sizes.z = mix(particle.sizes.x, particle.sizes.y, amount);
         particle.color = mix(emitter.color_start, emitter.color_end, amount);
         particles[particle_index] = particle;
-        uint output_slot = atomicAdd(counters.y, 1U);
-        if (step.parity == 0U) {
-            alive_b[output_slot] = particle_index;
-        } else {
-            alive_a[output_slot] = particle_index;
-        }
+        append_alive(particle_index);
         return;
     }
     if (step.pass_index == 3U) {
@@ -197,36 +339,22 @@ void main() {
             return;
         }
         Emitter emitter = emitters[index];
-        float requested = emitter_states[index].values.x + emitter.lifetime_spawn.z * step.delta_time;
+        float requested = min(emitter_states[index].values.x +
+                              emitter.lifetime_spawn.z * step.delta_time,
+                              float(emitter.meta0.z));
         uint spawn_count = uint(floor(requested));
         emitter_states[index].values.x = requested - float(spawn_count);
         if (emitter_states[index].meta.y == 0U) {
             spawn_count += emitter.settings.x;
             emitter_states[index].meta.y = 1U;
         }
+        if (emitter.event_settings.y != emitter_states[index].event_meta.x) {
+            spawn_count = min(emitter.meta0.z, spawn_count + emitter.event_settings.x);
+            emitter_states[index].event_meta.x = emitter.event_settings.y;
+        }
+        spawn_count = min(spawn_count, emitter.meta0.z);
         for (uint spawn = 0U; spawn < spawn_count; ++spawn) {
-            uint emitter_alive = atomicAdd(emitter_states[index].meta.z, 1U);
-            if (emitter_alive >= emitter.meta0.z) {
-                atomicAdd(emitter_states[index].meta.z, uint(-1));
-                atomicAdd(emitter_states[index].meta.w, 1U);
-                atomicAdd(counters.w, 1U);
-                continue;
-            }
-            uint particle_index = 0U;
-            if (!pop_dead(particle_index)) {
-                atomicAdd(emitter_states[index].meta.z, uint(-1));
-                atomicAdd(emitter_states[index].meta.w, 1U);
-                atomicAdd(counters.w, 1U);
-                continue;
-            }
-            uint serial = emitter_states[index].meta.x++;
-            initialize_particle(index, particle_index, serial);
-            uint output_slot = atomicAdd(counters.y, 1U);
-            if (step.parity == 0U) {
-                alive_b[output_slot] = particle_index;
-            } else {
-                alive_a[output_slot] = particle_index;
-            }
+            spawn_particle(index, 0U, vec2(0.0), 0.0, false);
         }
         return;
     }

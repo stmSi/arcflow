@@ -28,6 +28,8 @@ typedef struct AfRuntimeInstanceSlot {
     AfPlayback playback;
     AfCanvasInfo canvas;
     AfLayoutData layout;
+    AfParticleData particles;
+    AfParticleEmitter particle_emitters[AF_MAX_PARTICLE_EMITTERS];
     AfComponentRuntime components;
     AfComponentInstanceState component_states[AF_MAX_COMPONENT_INSTANCES];
     AfInteractionSystem interaction;
@@ -216,7 +218,14 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
     slot->scene.capacity = loaded->scene.count;
     slot->scene.paths = &loaded->path_data;
     slot->scene.styles = &loaded->style_data;
-    slot->scene.particles = &loaded->particle_data;
+    slot->particles = loaded->particle_data;
+    slot->particles.emitters = slot->particle_emitters;
+    slot->particles.capacity = AF_MAX_PARTICLE_EMITTERS;
+    if (loaded->particle_data.count != 0U) {
+        memcpy(slot->particle_emitters, loaded->particle_data.emitters,
+               (size_t)loaded->particle_data.count * sizeof(AfParticleEmitter));
+    }
+    slot->scene.particles = &slot->particles;
     slot->layout = loaded->layout_data;
     slot->scene.layouts = &slot->layout;
     if (loaded->scene.count != 0U) {
@@ -381,6 +390,45 @@ AfResult af_instance_resize(AfRuntime *runtime, AfInstanceHandle instance,
         result = AF_RESULT_INVALID_ARGUMENT;
     }
     return result;
+}
+
+AfResult af_instance_set_vfx_quality(AfRuntime *runtime, AfInstanceHandle instance,
+                                     AfVfxQuality quality, float view_distance) {
+    AfRuntimeInstanceSlot *slot = NULL;
+    AfResult result = af_runtime_instance(runtime, instance, &slot, NULL);
+    if (result != AF_RESULT_SUCCESS || quality < AF_VFX_QUALITY_DISABLED ||
+        quality > AF_VFX_QUALITY_HIGH || !isfinite(view_distance) || view_distance < 0.0F) {
+        return result != AF_RESULT_SUCCESS ? result : AF_RESULT_INVALID_ARGUMENT;
+    }
+    slot->particles.lod.host_quality =
+        quality == AF_VFX_QUALITY_DISABLED
+            ? 0.0F
+            : (quality == AF_VFX_QUALITY_LOW ? 0.35F
+                                             : (quality == AF_VFX_QUALITY_MEDIUM ? 0.65F : 1.0F));
+    slot->particles.lod.view_distance = view_distance;
+    return AF_RESULT_SUCCESS;
+}
+
+AfResult af_instance_trigger_vfx(AfRuntime *runtime, AfInstanceHandle instance, uint64_t emitter_id,
+                                 uint32_t burst_count) {
+    AfRuntimeInstanceSlot *slot = NULL;
+    AfResult result = af_runtime_instance(runtime, instance, &slot, NULL);
+    if (result != AF_RESULT_SUCCESS || emitter_id == 0U || burst_count == 0U) {
+        return result != AF_RESULT_SUCCESS ? result : AF_RESULT_INVALID_ARGUMENT;
+    }
+    for (uint32_t index = 0U; index < slot->particles.count; ++index) {
+        AfParticleEmitter *emitter = &slot->particles.emitters[index];
+        if (emitter->id == emitter_id) {
+            if (burst_count > emitter->capacity) {
+                return AF_RESULT_LIMIT_EXCEEDED;
+            }
+            emitter->event_burst_count = burst_count;
+            emitter->event_sequence =
+                emitter->event_sequence == UINT32_MAX ? 1U : emitter->event_sequence + 1U;
+            return AF_RESULT_SUCCESS;
+        }
+    }
+    return AF_RESULT_NOT_FOUND;
 }
 
 uint64_t af_runtime_frame_allocation_count(const AfRuntime *runtime) {

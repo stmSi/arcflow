@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define AF_PARTICLE_FRAME_COUNT 2U
 #define AF_PARTICLE_BUFFER_COUNT 8U
@@ -29,6 +30,7 @@ typedef struct AfGpuParticle {
     float sizes[4];
     float color[4];
     uint32_t meta[4];
+    float previous_depth[4];
 } AfGpuParticle;
 
 typedef struct AfGpuParticleEmitter {
@@ -46,11 +48,24 @@ typedef struct AfGpuParticleEmitter {
     float forces[4];
     float flipbook[4];
     uint32_t settings[4];
+    float advanced0[4];
+    float force_center[4];
+    float attractor[4];
+    float repulsor[4];
+    float vector_field[4];
+    float collision_plane[4];
+    float collision_extra[4];
+    float depth_velocity[4];
+    float render0[4];
+    float render1[4];
+    uint32_t sub_settings[4];
+    uint32_t event_settings[4];
 } AfGpuParticleEmitter;
 
 typedef struct AfGpuParticleEmitterState {
     float values[4];
     uint32_t meta[4];
+    uint32_t event_meta[4];
 } AfGpuParticleEmitterState;
 
 typedef struct AfGpuParticleStep {
@@ -97,13 +112,51 @@ struct AfVkParticleSystem {
     uint32_t parity;
     uint32_t step_serial;
     bool needs_initialize;
+    bool renderer_enabled;
+    uint32_t effective_capacity;
+    float simulation_step;
+    float lod_factor;
+    uint32_t simulated_steps;
+    VkQueryPool timestamp_queries;
+    float timestamp_period;
+    uint32_t timestamp_valid_bits;
+    bool query_written[AF_PARTICLE_FRAME_COUNT];
+    bool query_active[AF_PARTICLE_FRAME_COUNT];
+    AfVkVfxMetrics metrics;
 };
 
-_Static_assert(sizeof(AfGpuParticle) == 80U, "GPU particle layout mismatch");
-_Static_assert(sizeof(AfGpuParticleEmitter) == 224U, "GPU emitter layout mismatch");
-_Static_assert(sizeof(AfGpuParticleEmitterState) == 32U, "GPU emitter state layout mismatch");
+_Static_assert(sizeof(AfGpuParticle) == 96U, "GPU particle layout mismatch");
+_Static_assert(sizeof(AfGpuParticleEmitter) == 416U, "GPU emitter layout mismatch");
+_Static_assert(sizeof(AfGpuParticleEmitterState) == 48U, "GPU emitter state layout mismatch");
 _Static_assert(sizeof(AfGpuParticleStep) == 32U, "GPU step push constant mismatch");
 _Static_assert(sizeof(AfGpuParticleView) == 16U, "GPU view push constant mismatch");
+
+static double af_vk_particle_now_milliseconds(void) {
+    struct timespec value;
+    if (timespec_get(&value, TIME_UTC) != TIME_UTC) {
+        return 0.0;
+    }
+    return (double)value.tv_sec * 1000.0 + (double)value.tv_nsec * 0.000001;
+}
+
+static void af_vk_particles_collect_gpu_metrics(AfVkParticleSystem *system, uint32_t frame_index) {
+    uint64_t timestamps[2] = {0U, 0U};
+    if (system->timestamp_queries == VK_NULL_HANDLE || !system->query_written[frame_index]) {
+        return;
+    }
+    if (vkGetQueryPoolResults(system->device, system->timestamp_queries, frame_index * 2U, 2U,
+                              sizeof(timestamps), timestamps, sizeof(uint64_t),
+                              VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+        uint64_t delta = timestamps[1] - timestamps[0];
+        if (system->timestamp_valid_bits < 64U) {
+            const uint64_t mask = (UINT64_C(1) << system->timestamp_valid_bits) - 1U;
+            delta &= mask;
+        }
+        system->metrics.gpu_milliseconds =
+            (float)((double)delta * (double)system->timestamp_period * 0.000001);
+    }
+    system->query_written[frame_index] = false;
+}
 
 static uint32_t af_vk_particle_memory_type(AfVkParticleSystem *system, uint32_t type_bits,
                                            VkMemoryPropertyFlags properties) {
@@ -441,7 +494,7 @@ static AfResult af_vk_particles_create_descriptors(AfVkParticleSystem *system) {
 
 AfResult af_vk_particles_create(VkPhysicalDevice physical_device, VkDevice device,
                                 VkFormat color_format, VkSampleCountFlagBits sample_count,
-                                AfVkParticleSystem **out_system) {
+                                uint32_t graphics_queue_family, AfVkParticleSystem **out_system) {
     AfVkParticleSystem *system = NULL;
     AfResult result = AF_RESULT_SUCCESS;
     if (physical_device == VK_NULL_HANDLE || device == VK_NULL_HANDLE || out_system == NULL) {
@@ -456,6 +509,33 @@ AfResult af_vk_particles_create(VkPhysicalDevice physical_device, VkDevice devic
     system->device = device;
     system->color_format = color_format;
     system->sample_count = sample_count;
+    {
+        VkPhysicalDeviceProperties properties;
+        uint32_t family_count = 0U;
+        vkGetPhysicalDeviceProperties(physical_device, &properties);
+        vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &family_count, NULL);
+        if (graphics_queue_family < family_count) {
+            VkQueueFamilyProperties *families = calloc(family_count, sizeof(*families));
+            if (families == NULL) {
+                free(system);
+                return AF_RESULT_OUT_OF_MEMORY;
+            }
+            vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &family_count, families);
+            system->timestamp_valid_bits = families[graphics_queue_family].timestampValidBits;
+            free(families);
+        }
+        system->timestamp_period = properties.limits.timestampPeriod;
+        if (system->timestamp_valid_bits != 0U) {
+            const VkQueryPoolCreateInfo query_info = {.sType =
+                                                          VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                                                      .queryType = VK_QUERY_TYPE_TIMESTAMP,
+                                                      .queryCount = AF_PARTICLE_FRAME_COUNT * 2U};
+            if (vkCreateQueryPool(device, &query_info, NULL, &system->timestamp_queries) !=
+                VK_SUCCESS) {
+                system->timestamp_valid_bits = 0U;
+            }
+        }
+    }
     system->path_scratch = calloc(1U, sizeof(*system->path_scratch));
     system->cached_path_points =
         calloc(AF_MAX_PARTICLE_PATH_POINTS, sizeof(*system->cached_path_points));
@@ -496,6 +576,9 @@ void af_vk_particles_destroy(AfVkParticleSystem *system) {
         }
         if (system->descriptor_layout != VK_NULL_HANDLE) {
             vkDestroyDescriptorSetLayout(system->device, system->descriptor_layout, NULL);
+        }
+        if (system->timestamp_queries != VK_NULL_HANDLE) {
+            vkDestroyQueryPool(system->device, system->timestamp_queries, NULL);
         }
         af_vk_particle_buffer_destroy(system, &system->particles);
         af_vk_particle_buffer_destroy(system, &system->alive[0]);
@@ -543,7 +626,10 @@ static uint64_t af_vk_particle_definition_hash(const AfScene *scene) {
     hash = af_vk_particle_hash_bytes(hash, &data->count, sizeof(data->count));
     for (uint32_t index = 0U; index < data->count; ++index) {
         const AfParticleEmitter *emitter = &data->emitters[index];
-        hash = af_vk_particle_hash_bytes(hash, emitter, sizeof(*emitter));
+        AfParticleEmitter stable = *emitter;
+        stable.event_burst_count = 0U;
+        stable.event_sequence = 0U;
+        hash = af_vk_particle_hash_bytes(hash, &stable, sizeof(stable));
         if (emitter->type == AF_PARTICLE_EMITTER_VECTOR_PATH && scene->paths != NULL) {
             const AfPath *path = af_path_find_const(scene->paths, emitter->path_id);
             if (path != NULL) {
@@ -622,6 +708,47 @@ static void af_vk_particles_fill_static_emitter(AfGpuParticleEmitter *gpu,
     gpu->settings[1] = emitter->enabled ? 1U : 0U;
     gpu->settings[2] = emitter->flipbook_columns;
     gpu->settings[3] = emitter->flipbook_rows;
+    gpu->advanced0[0] = emitter->turbulence_strength;
+    gpu->advanced0[1] = emitter->turbulence_frequency;
+    gpu->advanced0[2] = emitter->radial_force;
+    gpu->advanced0[3] = emitter->vortex_force;
+    gpu->force_center[0] = emitter->force_center.x;
+    gpu->force_center[1] = emitter->force_center.y;
+    gpu->attractor[0] = emitter->attractor_position.x;
+    gpu->attractor[1] = emitter->attractor_position.y;
+    gpu->attractor[2] = emitter->attractor_strength;
+    gpu->attractor[3] = emitter->attractor_radius;
+    gpu->repulsor[0] = emitter->repulsor_position.x;
+    gpu->repulsor[1] = emitter->repulsor_position.y;
+    gpu->repulsor[2] = emitter->repulsor_strength;
+    gpu->repulsor[3] = emitter->repulsor_radius;
+    gpu->vector_field[0] = emitter->vector_field_direction.x;
+    gpu->vector_field[1] = emitter->vector_field_direction.y;
+    gpu->vector_field[2] = emitter->vector_field_strength;
+    gpu->collision_plane[0] = emitter->collision_plane_normal.x;
+    gpu->collision_plane[1] = emitter->collision_plane_normal.y;
+    gpu->collision_plane[2] = emitter->collision_plane_offset;
+    gpu->collision_plane[3] = emitter->collision_restitution;
+    gpu->collision_extra[0] = emitter->collision_friction;
+    gpu->collision_extra[1] = emitter->depth_min;
+    gpu->collision_extra[2] = emitter->depth_max;
+    gpu->depth_velocity[0] = emitter->depth_velocity_min;
+    gpu->depth_velocity[1] = emitter->depth_velocity_max;
+    gpu->render0[0] = emitter->trail_length;
+    gpu->render0[1] = emitter->trail_width;
+    gpu->render0[2] = emitter->mesh_scale;
+    gpu->render0[3] = emitter->decal_rotation_offset;
+    gpu->render1[0] = emitter->distortion_strength;
+    gpu->render1[1] = emitter->soft_fade_distance;
+    gpu->render1[2] = emitter->light_radius;
+    gpu->sub_settings[0] = UINT32_MAX;
+    gpu->sub_settings[1] = emitter->sub_emit_birth_count;
+    gpu->sub_settings[2] = emitter->sub_emit_death_count;
+    gpu->sub_settings[3] = emitter->max_recursion_depth;
+    gpu->event_settings[0] = emitter->event_burst_count;
+    gpu->event_settings[1] = emitter->event_sequence;
+    gpu->event_settings[2] = emitter->collision_plane_enabled ? 1U : 0U;
+    gpu->event_settings[3] = emitter->depth_collision_enabled ? 1U : 0U;
 }
 
 AfResult af_vk_particles_update(AfVkParticleSystem *system, const AfScene *scene,
@@ -629,14 +756,43 @@ AfResult af_vk_particles_update(AfVkParticleSystem *system, const AfScene *scene
     const AfParticleData empty = {0};
     AfScene validation_scene;
     uint64_t hash = 0U;
+    uint32_t effective_capacity = 0U;
+    float lod_factor = 1.0F;
+    const double cpu_start = af_vk_particle_now_milliseconds();
     if (system == NULL || scene == NULL || frame_index >= AF_PARTICLE_FRAME_COUNT) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
+    af_vk_particles_collect_gpu_metrics(system, frame_index);
     validation_scene = *scene;
     validation_scene.particles = scene->particles == NULL ? &empty : scene->particles;
     if (af_particle_data_validate(validation_scene.particles, &validation_scene) !=
         AF_RESULT_SUCCESS) {
         return AF_RESULT_INVALID_ARGUMENT;
+    }
+    lod_factor = af_vfx_lod_factor(&validation_scene.particles->lod);
+    effective_capacity = validation_scene.particles->lod.maximum_particles == 0U
+                             ? AF_MAX_PARTICLES
+                             : validation_scene.particles->lod.maximum_particles;
+    effective_capacity = (uint32_t)floorf((float)effective_capacity * lod_factor);
+    if (effective_capacity > AF_MAX_PARTICLES) {
+        effective_capacity = AF_MAX_PARTICLES;
+    }
+    if (effective_capacity != system->effective_capacity) {
+        system->effective_capacity = effective_capacity;
+        system->needs_initialize = true;
+        system->accumulator = 0.0F;
+        system->parity = 0U;
+    }
+    system->lod_factor = lod_factor;
+    system->renderer_enabled =
+        validation_scene.particles->count != 0U && effective_capacity != 0U && lod_factor > 0.0F;
+    {
+        const float authored_frequency =
+            validation_scene.particles->lod.maximum_particles == 0U
+                ? 1.0F
+                : validation_scene.particles->lod.simulation_frequency_scale;
+        const float effective_frequency = fmaxf(authored_frequency * lod_factor, 0.1F);
+        system->simulation_step = AF_PARTICLE_FIXED_STEP / effective_frequency;
     }
     hash = af_vk_particle_definition_hash(&validation_scene);
     if (hash != system->definition_hash) {
@@ -647,6 +803,17 @@ AfResult af_vk_particles_update(AfVkParticleSystem *system, const AfScene *scene
         for (uint32_t index = 0U; index < system->emitter_count; ++index) {
             af_vk_particles_fill_static_emitter(&system->cached_emitters[index],
                                                 &validation_scene.particles->emitters[index]);
+        }
+        for (uint32_t index = 0U; index < system->emitter_count; ++index) {
+            const uint64_t sub_id = validation_scene.particles->emitters[index].sub_emitter_id;
+            if (sub_id != 0U) {
+                for (uint32_t target = 0U; target < system->emitter_count; ++target) {
+                    if (validation_scene.particles->emitters[target].id == sub_id) {
+                        system->cached_emitters[index].sub_settings[0] = target;
+                        break;
+                    }
+                }
+            }
         }
         {
             const AfResult result = af_vk_particles_cache_paths(system, &validation_scene);
@@ -663,6 +830,26 @@ AfResult af_vk_particles_update(AfVkParticleSystem *system, const AfScene *scene
         const AfParticleEmitter *emitter = &validation_scene.particles->emitters[index];
         const AfSceneNode *node = af_scene_find_const(&validation_scene, emitter->node_id);
         AfGpuParticleEmitter *gpu = &system->cached_emitters[index];
+        const float capacity_scale = fmaxf(system->lod_factor, 0.0F);
+        const AfVec2 local_normal = emitter->collision_plane_normal;
+        const AfVec2 local_tangent = {-local_normal.y, local_normal.x};
+        const AfVec2 world_tangent = {node->world_transform.m00 * local_tangent.x +
+                                          node->world_transform.m01 * local_tangent.y,
+                                      node->world_transform.m10 * local_tangent.x +
+                                          node->world_transform.m11 * local_tangent.y};
+        const float tangent_length =
+            sqrtf(world_tangent.x * world_tangent.x + world_tangent.y * world_tangent.y);
+        AfVec2 world_normal =
+            tangent_length > 0.000001F
+                ? (AfVec2){-world_tangent.y / tangent_length, world_tangent.x / tangent_length}
+                : (AfVec2){0.0F, -1.0F};
+        const AfVec2 plane_point_local = {local_normal.x * emitter->collision_plane_offset,
+                                          local_normal.y * emitter->collision_plane_offset};
+        const AfVec2 plane_point_world = {
+            node->world_transform.m00 * plane_point_local.x +
+                node->world_transform.m01 * plane_point_local.y + node->world_transform.tx,
+            node->world_transform.m10 * plane_point_local.x +
+                node->world_transform.m11 * plane_point_local.y + node->world_transform.ty};
         gpu->transform0[0] = node->world_transform.m00;
         gpu->transform0[1] = node->world_transform.m01;
         gpu->transform0[2] = node->world_transform.m10;
@@ -671,11 +858,52 @@ AfResult af_vk_particles_update(AfVkParticleSystem *system, const AfScene *scene
         gpu->transform1[1] = node->world_transform.ty;
         gpu->transform1[2] = node->resolved_bounds.x;
         gpu->transform1[3] = node->resolved_bounds.y;
+        gpu->meta0[2] = (uint32_t)floorf((float)emitter->capacity * capacity_scale);
+        if (gpu->meta0[2] > system->effective_capacity) {
+            gpu->meta0[2] = system->effective_capacity;
+        }
+        gpu->lifetime_spawn[2] = emitter->spawn_rate *
+                                 (validation_scene.particles->lod.maximum_particles == 0U
+                                      ? 1.0F
+                                      : validation_scene.particles->lod.spawn_rate_scale) *
+                                 system->lod_factor;
+        gpu->force_center[0] = node->world_transform.m00 * emitter->force_center.x +
+                               node->world_transform.m01 * emitter->force_center.y +
+                               node->world_transform.tx;
+        gpu->force_center[1] = node->world_transform.m10 * emitter->force_center.x +
+                               node->world_transform.m11 * emitter->force_center.y +
+                               node->world_transform.ty;
+        gpu->attractor[0] = node->world_transform.m00 * emitter->attractor_position.x +
+                            node->world_transform.m01 * emitter->attractor_position.y +
+                            node->world_transform.tx;
+        gpu->attractor[1] = node->world_transform.m10 * emitter->attractor_position.x +
+                            node->world_transform.m11 * emitter->attractor_position.y +
+                            node->world_transform.ty;
+        gpu->repulsor[0] = node->world_transform.m00 * emitter->repulsor_position.x +
+                           node->world_transform.m01 * emitter->repulsor_position.y +
+                           node->world_transform.tx;
+        gpu->repulsor[1] = node->world_transform.m10 * emitter->repulsor_position.x +
+                           node->world_transform.m11 * emitter->repulsor_position.y +
+                           node->world_transform.ty;
+        gpu->vector_field[0] = node->world_transform.m00 * emitter->vector_field_direction.x +
+                               node->world_transform.m01 * emitter->vector_field_direction.y;
+        gpu->vector_field[1] = node->world_transform.m10 * emitter->vector_field_direction.x +
+                               node->world_transform.m11 * emitter->vector_field_direction.y;
+        gpu->collision_plane[0] = world_normal.x;
+        gpu->collision_plane[1] = world_normal.y;
+        gpu->collision_plane[2] =
+            world_normal.x * plane_point_world.x + world_normal.y * plane_point_world.y;
+        gpu->event_settings[0] = emitter->event_burst_count;
+        gpu->event_settings[1] = emitter->event_sequence;
     }
     memcpy(system->emitters[frame_index].mapping, system->cached_emitters,
            (size_t)system->emitter_count * sizeof(*system->cached_emitters));
     memcpy(system->path_points[frame_index].mapping, system->cached_path_points,
            (size_t)system->path_point_count * sizeof(*system->cached_path_points));
+    system->metrics.cpu_milliseconds = (float)(af_vk_particle_now_milliseconds() - cpu_start);
+    system->metrics.lod_factor = system->lod_factor;
+    system->metrics.effective_capacity = system->effective_capacity;
+    system->metrics.gpu_timing_supported = system->timestamp_queries != VK_NULL_HANDLE;
     return AF_RESULT_SUCCESS;
 }
 
@@ -704,30 +932,47 @@ void af_vk_particles_record(AfVkParticleSystem *system, VkCommandBuffer command_
                             uint32_t frame_index, float delta_time) {
     AfGpuParticleStep step = {0};
     uint32_t step_count = 0U;
+    const double cpu_start = af_vk_particle_now_milliseconds();
     if (system == NULL || command_buffer == VK_NULL_HANDLE ||
         frame_index >= AF_PARTICLE_FRAME_COUNT || !isfinite(delta_time) || delta_time < 0.0F) {
         return;
     }
-    step.capacity = AF_MAX_PARTICLES;
+    system->simulated_steps = 0U;
+    if (!system->renderer_enabled || system->effective_capacity == 0U) {
+        system->metrics.gpu_milliseconds = 0.0F;
+        system->metrics.simulated_steps = 0U;
+        return;
+    }
+    if (system->timestamp_queries != VK_NULL_HANDLE) {
+        vkCmdResetQueryPool(command_buffer, system->timestamp_queries, frame_index * 2U, 2U);
+        vkCmdWriteTimestamp2(command_buffer, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                             system->timestamp_queries, frame_index * 2U);
+        system->query_active[frame_index] = true;
+    }
+    step.capacity = system->effective_capacity;
     step.emitter_count = system->emitter_count;
-    step.delta_time = AF_PARTICLE_FIXED_STEP;
+    step.delta_time = system->simulation_step;
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, system->compute_pipeline);
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, system->pipeline_layout,
                             0U, 1U, &system->descriptor_sets[frame_index], 0U, NULL);
     if (system->needs_initialize) {
         step.pass_index = 0U;
-        af_vk_particles_dispatch(system, command_buffer, &step, (AF_MAX_PARTICLES + 63U) / 64U);
+        {
+            const uint32_t initialize_count =
+                step.capacity > step.emitter_count ? step.capacity : step.emitter_count;
+            af_vk_particles_dispatch(system, command_buffer, &step, (initialize_count + 63U) / 64U);
+        }
         af_vk_particles_compute_barrier(command_buffer);
         system->needs_initialize = false;
     }
     system->accumulator += fminf(delta_time, 0.1F);
-    step_count = (uint32_t)(system->accumulator / AF_PARTICLE_FIXED_STEP);
+    step_count = (uint32_t)(system->accumulator / system->simulation_step);
     if (step_count > AF_PARTICLE_MAX_STEPS_PER_FRAME) {
         step_count = AF_PARTICLE_MAX_STEPS_PER_FRAME;
     }
-    system->accumulator -= (float)step_count * AF_PARTICLE_FIXED_STEP;
-    if (system->accumulator >= AF_PARTICLE_FIXED_STEP) {
-        system->accumulator = fmodf(system->accumulator, AF_PARTICLE_FIXED_STEP);
+    system->accumulator -= (float)step_count * system->simulation_step;
+    if (system->accumulator >= system->simulation_step) {
+        system->accumulator = fmodf(system->accumulator, system->simulation_step);
     }
     for (uint32_t index = 0U; index < step_count; ++index) {
         step.parity = system->parity;
@@ -736,7 +981,8 @@ void af_vk_particles_record(AfVkParticleSystem *system, VkCommandBuffer command_
         af_vk_particles_dispatch(system, command_buffer, &step, 1U);
         af_vk_particles_compute_barrier(command_buffer);
         step.pass_index = 2U;
-        af_vk_particles_dispatch(system, command_buffer, &step, (AF_MAX_PARTICLES + 63U) / 64U);
+        af_vk_particles_dispatch(system, command_buffer, &step,
+                                 (system->effective_capacity + 63U) / 64U);
         af_vk_particles_compute_barrier(command_buffer);
         if (system->emitter_count != 0U) {
             step.pass_index = 3U;
@@ -749,6 +995,9 @@ void af_vk_particles_record(AfVkParticleSystem *system, VkCommandBuffer command_
         af_vk_particles_compute_barrier(command_buffer);
         system->parity ^= 1U;
     }
+    system->simulated_steps = step_count;
+    system->metrics.simulated_steps = step_count;
+    system->metrics.cpu_milliseconds += (float)(af_vk_particle_now_milliseconds() - cpu_start);
     {
         const VkMemoryBarrier2 barrier = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
                                           .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -762,13 +1011,19 @@ void af_vk_particles_record(AfVkParticleSystem *system, VkCommandBuffer command_
                                              .pMemoryBarriers = &barrier};
         vkCmdPipelineBarrier2(command_buffer, &dependency);
     }
+    if (system->query_active[frame_index]) {
+        vkCmdWriteTimestamp2(command_buffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                             system->timestamp_queries, frame_index * 2U + 1U);
+        system->query_active[frame_index] = false;
+        system->query_written[frame_index] = true;
+    }
 }
 
 void af_vk_particles_draw(AfVkParticleSystem *system, VkCommandBuffer command_buffer,
                           uint32_t frame_index, VkExtent2D extent) {
     AfGpuParticleView view = {0};
     if (system == NULL || command_buffer == VK_NULL_HANDLE ||
-        frame_index >= AF_PARTICLE_FRAME_COUNT) {
+        frame_index >= AF_PARTICLE_FRAME_COUNT || !system->renderer_enabled) {
         return;
     }
     view.viewport_size[0] = (float)extent.width;
@@ -792,4 +1047,8 @@ uint64_t af_vk_particles_memory_size(void) {
            AF_PARTICLE_FRAME_COUNT *
                ((uint64_t)AF_MAX_PARTICLE_EMITTERS * sizeof(AfGpuParticleEmitter) +
                 (uint64_t)AF_MAX_PARTICLE_PATH_POINTS * sizeof(AfVec2));
+}
+
+AfVkVfxMetrics af_vk_particles_metrics(const AfVkParticleSystem *system) {
+    return system == NULL ? (AfVkVfxMetrics){0} : system->metrics;
 }

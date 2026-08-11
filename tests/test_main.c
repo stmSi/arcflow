@@ -116,11 +116,41 @@ static bool af_test_particles(void) {
     AfParticleData data = {.emitters = emitters, .count = 1U, .capacity = 2U};
     AfParticleSpawnSample first;
     AfParticleSpawnSample second;
+    AfVec2 position = {0.0F, 3.0F};
+    AfVec2 velocity = {2.0F, -5.0F};
+    float depth = -1.0F;
+    float depth_velocity = -2.0F;
     af_test_fixture_init(&fixture);
     emitters[0] = af_particle_emitter_default(700U, 2U);
     emitters[0].type = AF_PARTICLE_EMITTER_RECTANGLE;
     emitters[0].seed = 0x12345678U;
+    emitters[0].output = AF_PARTICLE_OUTPUT_TRAIL;
+    emitters[0].turbulence_strength = 120.0F;
+    emitters[0].radial_force = 40.0F;
+    emitters[0].vortex_force = 60.0F;
+    emitters[0].attractor_position = (AfVec2){20.0F, 10.0F};
+    emitters[0].attractor_strength = 90.0F;
+    emitters[0].attractor_radius = 100.0F;
+    emitters[0].repulsor_position = (AfVec2){-20.0F, -10.0F};
+    emitters[0].repulsor_strength = 70.0F;
+    emitters[0].repulsor_radius = 80.0F;
+    emitters[0].vector_field_direction = (AfVec2){1.0F, 0.0F};
+    emitters[0].vector_field_strength = 10.0F;
+    emitters[0].collision_plane_enabled = true;
+    emitters[0].collision_plane_normal = (AfVec2){0.0F, 1.0F};
+    emitters[0].collision_plane_offset = 5.0F;
+    emitters[0].depth_collision_enabled = true;
+    data.lod = af_vfx_lod_default();
     CHECK(af_particle_data_validate(&data, &fixture.scene) == AF_RESULT_SUCCESS);
+    CHECK(isfinite(af_particle_force_sample(&emitters[0], (AfVec2){3.0F, 4.0F}, 1.0F).x));
+    CHECK(af_particle_collide_sample(&emitters[0], (AfVec2){0.0F, 7.0F}, &position, &velocity,
+                                     &depth, &depth_velocity) == AF_RESULT_SUCCESS);
+    CHECK_NEAR(position.y, 5.0F, 0.0001F);
+    CHECK(depth == emitters[0].depth_min && depth_velocity >= 0.0F);
+    data.lod.host_quality = 0.5F;
+    data.lod.view_distance = 3000.0F;
+    CHECK_NEAR(af_vfx_lod_factor(&data.lod), 0.25F, 0.0001F);
+    data.lod = af_vfx_lod_default();
     CHECK(af_particle_total_capacity(&data) == emitters[0].capacity);
     CHECK(af_particle_spawn_sample(&emitters[0], 42U, &first) == AF_RESULT_SUCCESS);
     CHECK(af_particle_spawn_sample(&emitters[0], 42U, &second) == AF_RESULT_SUCCESS);
@@ -128,9 +158,17 @@ static bool af_test_particles(void) {
     CHECK(af_particle_random_u32(emitters[0].seed, emitters[0].id, 42U, 0U) !=
           af_particle_random_u32(emitters[0].seed, emitters[0].id, 43U, 0U));
     emitters[1] = af_particle_emitter_default(701U, 3U);
+    emitters[0].sub_emitter_id = emitters[1].id;
+    emitters[0].sub_emit_birth_count = 2U;
+    emitters[0].sub_emit_death_count = 1U;
+    emitters[0].max_recursion_depth = AF_MAX_PARTICLE_RECURSION_DEPTH;
+    data.count = 2U;
+    CHECK(af_particle_data_validate(&data, &fixture.scene) == AF_RESULT_SUCCESS);
+    emitters[0].max_recursion_depth = AF_MAX_PARTICLE_RECURSION_DEPTH + 1U;
+    CHECK(af_particle_data_validate(&data, &fixture.scene) == AF_RESULT_INVALID_ARGUMENT);
+    emitters[0].max_recursion_depth = AF_MAX_PARTICLE_RECURSION_DEPTH;
     emitters[0].capacity = AF_MAX_PARTICLES;
     emitters[1].capacity = 1U;
-    data.count = 2U;
     CHECK(af_particle_total_capacity(&data) == AF_MAX_PARTICLES + 1U);
     CHECK(af_particle_data_validate(&data, &fixture.scene) == AF_RESULT_INVALID_ARGUMENT);
     emitters[0].capacity = 1024U;
@@ -1770,13 +1808,28 @@ static bool af_test_runtime(void) {
     AfPackageHandle package = 0U;
     AfInstanceHandle instance = 0U;
     AfRuntimeCreateInfo create_info = {.frames_in_flight = 2U};
+    AfParticleEmitter emitter;
+    AfParticleData particles;
     af_test_fixture_init(&fixture);
     af_allocator_init_default(&allocator);
+    emitter = af_particle_emitter_default(900U, 2U);
+    emitter.event_burst_count = 8U;
+    particles = (AfParticleData){
+        .emitters = &emitter, .count = 1U, .capacity = 1U, .lod = af_vfx_lod_default()};
+    fixture.scene.particles = &particles;
     source = (AfPackageSource){.scene = &fixture.scene, .animation = &fixture.animation};
     CHECK(af_package_write(&source, &allocator, &blob) == AF_RESULT_SUCCESS);
     CHECK(af_runtime_create(&create_info, &runtime) == AF_RESULT_SUCCESS);
     CHECK(af_package_load(runtime, blob.data, blob.size, &package) == AF_RESULT_SUCCESS);
     CHECK(af_instance_create(runtime, package, &instance) == AF_RESULT_SUCCESS);
+    CHECK(af_instance_set_vfx_quality(runtime, instance, AF_VFX_QUALITY_LOW, 1500.0F) ==
+          AF_RESULT_SUCCESS);
+    CHECK(af_instance_set_vfx_quality(runtime, instance, (AfVfxQuality)99, 0.0F) ==
+          AF_RESULT_INVALID_ARGUMENT);
+    CHECK(af_instance_trigger_vfx(runtime, instance, emitter.id, 32U) == AF_RESULT_SUCCESS);
+    CHECK(af_instance_trigger_vfx(runtime, instance, emitter.id, emitter.capacity + 1U) ==
+          AF_RESULT_LIMIT_EXCEEDED);
+    CHECK(af_instance_trigger_vfx(runtime, instance, 999U, 1U) == AF_RESULT_NOT_FOUND);
     CHECK(af_instance_play(runtime, instance) == AF_RESULT_SUCCESS);
     CHECK(af_instance_update(runtime, instance, 0.25F) == AF_RESULT_SUCCESS);
     CHECK(af_runtime_frame_allocation_count(runtime) == 0U);
@@ -1907,6 +1960,15 @@ static bool af_test_project(void) {
         emitter.flipbook_columns = 4U;
         emitter.flipbook_rows = 2U;
         emitter.flipbook_frames_per_second = 12.0F;
+        emitter.turbulence_strength = 175.0F;
+        emitter.radial_force = -40.0F;
+        emitter.vortex_force = 90.0F;
+        emitter.collision_plane_enabled = true;
+        emitter.collision_plane_offset = -320.0F;
+        emitter.output = AF_PARTICLE_OUTPUT_RIBBON;
+        emitter.sub_emitter_id = emitter.id;
+        emitter.sub_emit_death_count = 1U;
+        emitter.max_recursion_depth = 2U;
         CHECK(af_project_add_emitter(&project, &emitter) == AF_RESULT_SUCCESS);
     }
     {
@@ -1944,8 +2006,10 @@ static bool af_test_project(void) {
         style->stroke.dash_count = 2U;
     }
     CHECK(af_project_serialize(&project, &allocator, &text) == AF_RESULT_SUCCESS);
-    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 6"));
+    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 7"));
     CHECK(af_test_project_contains(text.data, text.size, "particle "));
+    CHECK(af_test_project_contains(text.data, text.size, "vfx_emitter "));
+    CHECK(af_test_project_contains(text.data, text.size, "vfx_lod "));
     CHECK(af_test_project_contains(text.data, text.size, "name Editor Only Name"));
     CHECK(af_test_project_contains(text.data, text.size, "interpolation cubic_bezier"));
     CHECK(af_project_deserialize(text.data, text.size, &allocator, &loaded) == AF_RESULT_SUCCESS);
@@ -1958,7 +2022,10 @@ static bool af_test_project(void) {
     CHECK(af_project_find_node_style(&loaded, 3U)->stroke.dash_count == 2U);
     CHECK(loaded.layout_data.count == 1U);
     CHECK(loaded.particle_data.count == 1U);
-    CHECK(loaded.particle_data.emitters[0].output == AF_PARTICLE_OUTPUT_FLIPBOOK);
+    CHECK(loaded.particle_data.emitters[0].output == AF_PARTICLE_OUTPUT_RIBBON);
+    CHECK_NEAR(loaded.particle_data.emitters[0].turbulence_strength, 175.0F, 0.0001F);
+    CHECK(loaded.particle_data.emitters[0].collision_plane_enabled);
+    CHECK(loaded.particle_data.emitters[0].sub_emit_death_count == 1U);
     CHECK_NEAR(af_layout_find_const(&loaded.layout_data, 3U)->width.value, 0.25F, 0.0001F);
     CHECK_NEAR(af_scene_find(&loaded.scene, 2U)->local_transform.rotation, 0.25F, 0.0001F);
     {
@@ -1978,6 +2045,18 @@ static bool af_test_project(void) {
     CHECK(remove(path) == 0);
     CHECK(af_project_compile(&loaded, &allocator, &package) == AF_RESULT_SUCCESS);
     CHECK(af_package_validate(package.data, package.size) == AF_RESULT_SUCCESS);
+    {
+        const uint64_t particles_offset = af_test_read_u64(package.data + AF_PACKAGE_HEADER_SIZE +
+                                                           11U * AF_PACKAGE_SECTION_SIZE + 8U);
+        const uint64_t record_offset = particles_offset + 64U;
+        const uint64_t saved_sub_emitter = af_test_read_u64(package.data + record_offset + 328U);
+        af_test_write_u64(package.data + record_offset + 328U, UINT64_C(999999));
+        af_test_rechecksum(&package);
+        CHECK(af_package_validate(package.data, package.size) == AF_RESULT_INVALID_PACKAGE);
+        af_test_write_u64(package.data + record_offset + 328U, saved_sub_emitter);
+        af_test_rechecksum(&package);
+        CHECK(af_package_validate(package.data, package.size) == AF_RESULT_SUCCESS);
+    }
     CHECK(!af_test_project_contains(package.data, package.size, "Editor Only Name"));
     CHECK(af_package_decode(package.data, package.size, &allocator, &runtime) == AF_RESULT_SUCCESS);
     CHECK(runtime.scene.count == loaded.scene.count && runtime.animation.clip_count == 1U);
@@ -1987,6 +2066,8 @@ static bool af_test_project(void) {
     CHECK(runtime.layout_data.count == 1U);
     CHECK(runtime.particle_data.count == 1U);
     CHECK(runtime.scene.particles == &runtime.particle_data);
+    CHECK(runtime.particle_data.emitters[0].output == AF_PARTICLE_OUTPUT_RIBBON);
+    CHECK_NEAR(runtime.particle_data.emitters[0].vortex_force, 90.0F, 0.0001F);
     CHECK(af_style_find_node_const(&runtime.style_data, 3U)->stroke.end_width == 6.0F);
     af_loaded_package_destroy(&allocator, &runtime);
     written = snprintf(with_unknown, sizeof(with_unknown), "unknown_editor_field retained\n%.*s",

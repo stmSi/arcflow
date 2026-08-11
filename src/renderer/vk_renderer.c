@@ -1162,7 +1162,8 @@ AfResult af_vk_renderer_create(AfPlatformWindow *window, AfVkRenderer **out_rend
     } else if ((result = af_vk_create_path_pipeline(renderer)) != AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_particles_create(renderer->physical_device, renderer->device,
                                                 renderer->swapchain_format, renderer->sample_count,
-                                                &renderer->particles)) != AF_RESULT_SUCCESS) {
+                                                renderer->graphics_family, &renderer->particles)) !=
+               AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_create_upload_ring(renderer)) != AF_RESULT_SUCCESS) {
     } else {
         result = af_vk_create_frames(renderer);
@@ -1850,4 +1851,8 @@ void af_vk_renderer_request_resize(AfVkRenderer *renderer) {
 
 bool af_vk_renderer_has_validation_errors(const AfVkRenderer *renderer) {
     return renderer != NULL && renderer->validation_error;
+}
+
+AfVkVfxMetrics af_vk_renderer_vfx_metrics(const AfVkRenderer *renderer) {
+    return renderer == NULL ? (AfVkVfxMetrics){0} : af_vk_particles_metrics(renderer->particles);
 }

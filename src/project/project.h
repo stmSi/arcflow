@@ -10,7 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AF_PROJECT_FORMAT_VERSION 6U
+#define AF_PROJECT_FORMAT_VERSION 7U
 #define AF_PROJECT_MAX_FILE_SIZE (32U * 1024U * 1024U)
 #define AF_PROJECT_NAME_CAPACITY 64U
 #define AF_PROJECT_MAX_CLIPS 64U

@@ -3,6 +3,7 @@
 
 #include "arcflow/arcflow_runtime.h"
 #include "platform/platform_sdl.h"
+#include "renderer/vk_particles.h"
 #include "scene/scene.h"
 
 #include <stdbool.h>
@@ -17,5 +18,6 @@ AfResult af_vk_renderer_draw_timed(AfVkRenderer *renderer, const AfScene *scene,
 AfResult af_vk_renderer_capture_next(AfVkRenderer *renderer, const char *path);
 void af_vk_renderer_request_resize(AfVkRenderer *renderer);
 bool af_vk_renderer_has_validation_errors(const AfVkRenderer *renderer);
+AfVkVfxMetrics af_vk_renderer_vfx_metrics(const AfVkRenderer *renderer);
 
 #endif

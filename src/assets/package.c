@@ -45,7 +45,8 @@ enum {
     AF_STATE_TRANSITION_RECORD_SIZE = 64U,
     AF_STATE_INPUT_RECORD_SIZE = 32U,
     AF_STATE_CONDITION_RECORD_SIZE = 32U,
-    AF_PARTICLE_RECORD_SIZE = 256U
+    AF_PARTICLE_HEADER_SIZE = 64U,
+    AF_PARTICLE_RECORD_SIZE = 512U
 };
 
 typedef struct AfSectionView {
@@ -107,6 +108,41 @@ static AfParticleEmitter af_read_particle(const uint8_t *record) {
         .flipbook_columns = af_read_u32(record + 172U),
         .flipbook_rows = af_read_u32(record + 176U),
         .flipbook_frames_per_second = af_read_f32(record + 180U),
+        .turbulence_strength = af_read_f32(record + 188U),
+        .turbulence_frequency = af_read_f32(record + 192U),
+        .force_center = {af_read_f32(record + 196U), af_read_f32(record + 200U)},
+        .radial_force = af_read_f32(record + 204U),
+        .vortex_force = af_read_f32(record + 208U),
+        .attractor_position = {af_read_f32(record + 212U), af_read_f32(record + 216U)},
+        .attractor_strength = af_read_f32(record + 220U),
+        .attractor_radius = af_read_f32(record + 224U),
+        .repulsor_position = {af_read_f32(record + 228U), af_read_f32(record + 232U)},
+        .repulsor_strength = af_read_f32(record + 236U),
+        .repulsor_radius = af_read_f32(record + 240U),
+        .vector_field_direction = {af_read_f32(record + 244U), af_read_f32(record + 248U)},
+        .vector_field_strength = af_read_f32(record + 252U),
+        .collision_plane_normal = {af_read_f32(record + 256U), af_read_f32(record + 260U)},
+        .collision_plane_offset = af_read_f32(record + 264U),
+        .collision_restitution = af_read_f32(record + 268U),
+        .collision_friction = af_read_f32(record + 272U),
+        .depth_min = af_read_f32(record + 276U),
+        .depth_max = af_read_f32(record + 280U),
+        .depth_velocity_min = af_read_f32(record + 284U),
+        .depth_velocity_max = af_read_f32(record + 288U),
+        .trail_length = af_read_f32(record + 292U),
+        .trail_width = af_read_f32(record + 296U),
+        .mesh_scale = af_read_f32(record + 300U),
+        .decal_rotation_offset = af_read_f32(record + 304U),
+        .distortion_strength = af_read_f32(record + 308U),
+        .soft_fade_distance = af_read_f32(record + 312U),
+        .light_radius = af_read_f32(record + 316U),
+        .collision_plane_enabled = af_read_u32(record + 320U) != 0U,
+        .depth_collision_enabled = af_read_u32(record + 324U) != 0U,
+        .sub_emitter_id = af_read_u64(record + 328U),
+        .sub_emit_birth_count = af_read_u32(record + 336U),
+        .sub_emit_death_count = af_read_u32(record + 340U),
+        .max_recursion_depth = af_read_u32(record + 344U),
+        .event_burst_count = af_read_u32(record + 348U),
         .enabled = af_read_u32(record + 184U) != 0U};
 }
 
@@ -173,6 +209,46 @@ static void af_write_particle(uint8_t *record, const AfParticleEmitter *emitter)
     af_write_u32(record + 176U, emitter->flipbook_rows);
     af_write_f32(record + 180U, emitter->flipbook_frames_per_second);
     af_write_u32(record + 184U, emitter->enabled ? 1U : 0U);
+    af_write_f32(record + 188U, emitter->turbulence_strength);
+    af_write_f32(record + 192U, emitter->turbulence_frequency);
+    af_write_f32(record + 196U, emitter->force_center.x);
+    af_write_f32(record + 200U, emitter->force_center.y);
+    af_write_f32(record + 204U, emitter->radial_force);
+    af_write_f32(record + 208U, emitter->vortex_force);
+    af_write_f32(record + 212U, emitter->attractor_position.x);
+    af_write_f32(record + 216U, emitter->attractor_position.y);
+    af_write_f32(record + 220U, emitter->attractor_strength);
+    af_write_f32(record + 224U, emitter->attractor_radius);
+    af_write_f32(record + 228U, emitter->repulsor_position.x);
+    af_write_f32(record + 232U, emitter->repulsor_position.y);
+    af_write_f32(record + 236U, emitter->repulsor_strength);
+    af_write_f32(record + 240U, emitter->repulsor_radius);
+    af_write_f32(record + 244U, emitter->vector_field_direction.x);
+    af_write_f32(record + 248U, emitter->vector_field_direction.y);
+    af_write_f32(record + 252U, emitter->vector_field_strength);
+    af_write_f32(record + 256U, emitter->collision_plane_normal.x);
+    af_write_f32(record + 260U, emitter->collision_plane_normal.y);
+    af_write_f32(record + 264U, emitter->collision_plane_offset);
+    af_write_f32(record + 268U, emitter->collision_restitution);
+    af_write_f32(record + 272U, emitter->collision_friction);
+    af_write_f32(record + 276U, emitter->depth_min);
+    af_write_f32(record + 280U, emitter->depth_max);
+    af_write_f32(record + 284U, emitter->depth_velocity_min);
+    af_write_f32(record + 288U, emitter->depth_velocity_max);
+    af_write_f32(record + 292U, emitter->trail_length);
+    af_write_f32(record + 296U, emitter->trail_width);
+    af_write_f32(record + 300U, emitter->mesh_scale);
+    af_write_f32(record + 304U, emitter->decal_rotation_offset);
+    af_write_f32(record + 308U, emitter->distortion_strength);
+    af_write_f32(record + 312U, emitter->soft_fade_distance);
+    af_write_f32(record + 316U, emitter->light_radius);
+    af_write_u32(record + 320U, emitter->collision_plane_enabled ? 1U : 0U);
+    af_write_u32(record + 324U, emitter->depth_collision_enabled ? 1U : 0U);
+    af_write_u64(record + 328U, emitter->sub_emitter_id);
+    af_write_u32(record + 336U, emitter->sub_emit_birth_count);
+    af_write_u32(record + 340U, emitter->sub_emit_death_count);
+    af_write_u32(record + 344U, emitter->max_recursion_depth);
+    af_write_u32(record + 348U, emitter->event_burst_count);
 }
 
 static void af_write_component_value(uint8_t *record, uint64_t owner_id, uint64_t property_id,
@@ -560,11 +636,44 @@ static bool af_particle_record_valid(const uint8_t *record, const uint8_t *bytes
         emitter.wind.y,
         emitter.drag,
         emitter.flipbook_frames_per_second,
+        emitter.turbulence_strength,
+        emitter.turbulence_frequency,
+        emitter.force_center.x,
+        emitter.force_center.y,
+        emitter.radial_force,
+        emitter.vortex_force,
+        emitter.attractor_position.x,
+        emitter.attractor_position.y,
+        emitter.attractor_strength,
+        emitter.attractor_radius,
+        emitter.repulsor_position.x,
+        emitter.repulsor_position.y,
+        emitter.repulsor_strength,
+        emitter.repulsor_radius,
+        emitter.vector_field_direction.x,
+        emitter.vector_field_direction.y,
+        emitter.vector_field_strength,
+        emitter.collision_plane_normal.x,
+        emitter.collision_plane_normal.y,
+        emitter.collision_plane_offset,
+        emitter.collision_restitution,
+        emitter.collision_friction,
+        emitter.depth_min,
+        emitter.depth_max,
+        emitter.depth_velocity_min,
+        emitter.depth_velocity_max,
+        emitter.trail_length,
+        emitter.trail_width,
+        emitter.mesh_scale,
+        emitter.decal_rotation_offset,
+        emitter.distortion_strength,
+        emitter.soft_fade_distance,
+        emitter.light_radius,
     };
     if (emitter.id == 0U || emitter.id == UINT64_MAX || emitter.node_id == 0U ||
         !af_node_id_exists(bytes, nodes, emitter.node_id) ||
         emitter.type > AF_PARTICLE_EMITTER_VECTOR_PATH ||
-        emitter.output > AF_PARTICLE_OUTPUT_FLIPBOOK || emitter.capacity == 0U ||
+        emitter.output > AF_PARTICLE_OUTPUT_LIGHT_PROXY || emitter.capacity == 0U ||
         emitter.capacity > AF_MAX_PARTICLES_PER_EMITTER || emitter.spawn_rate < 0.0F ||
         emitter.burst_count > emitter.capacity || emitter.lifetime_min <= 0.0F ||
         emitter.lifetime_max < emitter.lifetime_min ||
@@ -579,6 +688,46 @@ static bool af_particle_record_valid(const uint8_t *record, const uint8_t *bytes
         emitter.drag < 0.0F || emitter.flipbook_columns == 0U || emitter.flipbook_columns > 64U ||
         emitter.flipbook_rows == 0U || emitter.flipbook_rows > 64U ||
         emitter.flipbook_frames_per_second < 0.0F || af_read_u32(record + 184U) > 1U ||
+        fabsf(emitter.turbulence_strength) > AF_MAX_PARTICLE_FORCE ||
+        emitter.turbulence_frequency < 0.0F || emitter.turbulence_frequency > 100.0F ||
+        fabsf(emitter.radial_force) > AF_MAX_PARTICLE_FORCE ||
+        fabsf(emitter.vortex_force) > AF_MAX_PARTICLE_FORCE ||
+        fabsf(emitter.attractor_strength) > AF_MAX_PARTICLE_FORCE ||
+        emitter.attractor_radius < 0.0F ||
+        (emitter.attractor_strength != 0.0F && emitter.attractor_radius <= 0.0F) ||
+        fabsf(emitter.repulsor_strength) > AF_MAX_PARTICLE_FORCE ||
+        emitter.repulsor_radius < 0.0F ||
+        (emitter.repulsor_strength != 0.0F && emitter.repulsor_radius <= 0.0F) ||
+        fabsf(emitter.vector_field_strength) > AF_MAX_PARTICLE_FORCE ||
+        (emitter.vector_field_strength != 0.0F &&
+         emitter.vector_field_direction.x * emitter.vector_field_direction.x +
+                 emitter.vector_field_direction.y * emitter.vector_field_direction.y <
+             0.000001F) ||
+        emitter.collision_restitution < 0.0F || emitter.collision_restitution > 1.0F ||
+        emitter.collision_friction < 0.0F || emitter.collision_friction > 1.0F ||
+        af_read_u32(record + 320U) > 1U || af_read_u32(record + 324U) > 1U ||
+        (emitter.collision_plane_enabled &&
+         emitter.collision_plane_normal.x * emitter.collision_plane_normal.x +
+                 emitter.collision_plane_normal.y * emitter.collision_plane_normal.y <
+             0.000001F) ||
+        emitter.depth_max < emitter.depth_min ||
+        emitter.depth_velocity_max < emitter.depth_velocity_min || emitter.trail_length < 0.0F ||
+        emitter.trail_length > 100000.0F || emitter.trail_width < 0.0F ||
+        emitter.trail_width > 100000.0F || emitter.mesh_scale <= 0.0F ||
+        emitter.mesh_scale > 1000.0F || emitter.soft_fade_distance < 0.0F ||
+        emitter.light_radius < 0.0F ||
+        ((emitter.output == AF_PARTICLE_OUTPUT_TRAIL ||
+          emitter.output == AF_PARTICLE_OUTPUT_RIBBON) &&
+         (emitter.trail_length <= 0.0F || emitter.trail_width <= 0.0F)) ||
+        (emitter.output == AF_PARTICLE_OUTPUT_SOFT && emitter.soft_fade_distance <= 0.0F) ||
+        (emitter.output == AF_PARTICLE_OUTPUT_LIGHT_PROXY && emitter.light_radius <= 0.0F) ||
+        emitter.sub_emit_birth_count > AF_MAX_PARTICLE_SUB_EMIT_COUNT ||
+        emitter.sub_emit_death_count > AF_MAX_PARTICLE_SUB_EMIT_COUNT ||
+        emitter.max_recursion_depth > AF_MAX_PARTICLE_RECURSION_DEPTH ||
+        emitter.event_burst_count > emitter.capacity ||
+        (emitter.sub_emitter_id == 0U &&
+         (emitter.sub_emit_birth_count != 0U || emitter.sub_emit_death_count != 0U)) ||
+        (emitter.sub_emitter_id != 0U && emitter.max_recursion_depth == 0U) ||
         (emitter.type == AF_PARTICLE_EMITTER_VECTOR_PATH &&
          !af_path_id_exists(bytes, paths, emitter.path_id)) ||
         (emitter.type != AF_PARTICLE_EMITTER_VECTOR_PATH && emitter.path_id != 0U)) {
@@ -594,7 +743,7 @@ static bool af_particle_record_valid(const uint8_t *record, const uint8_t *bytes
             return false;
         }
     }
-    for (uint32_t reserved = 188U; reserved < AF_PARTICLE_RECORD_SIZE; reserved += 4U) {
+    for (uint32_t reserved = 352U; reserved < AF_PARTICLE_RECORD_SIZE; reserved += 4U) {
         if (af_read_u32(record + reserved) != 0U) {
             return false;
         }
@@ -1094,7 +1243,8 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
         path_commands->size != (uint64_t)path_commands->count * AF_PATH_COMMAND_RECORD_SIZE ||
         styles->size != (uint64_t)styles->count * AF_STYLE_RECORD_SIZE ||
         layouts->size != AF_LAYOUT_HEADER_SIZE + (uint64_t)layouts->count * AF_LAYOUT_RECORD_SIZE ||
-        particles->size != (uint64_t)particles->count * AF_PARTICLE_RECORD_SIZE ||
+        particles->size !=
+            AF_PARTICLE_HEADER_SIZE + (uint64_t)particles->count * AF_PARTICLE_RECORD_SIZE ||
         strings->size == 0U || strings->size > 1048576U ||
         strings->count != (uint32_t)strings->size ||
         bytes[strings->offset + strings->size - 1U] != 0U) {
@@ -1128,10 +1278,30 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
         return AF_RESULT_INVALID_PACKAGE;
     }
     {
+        const uint8_t *header = bytes + particles->offset;
+        const float spawn_rate_scale = af_read_f32(header + 4U);
+        const float simulation_frequency_scale = af_read_f32(header + 8U);
+        const float distance_start = af_read_f32(header + 12U);
+        const float distance_end = af_read_f32(header + 16U);
+        if (af_read_u32(header) == 0U || af_read_u32(header) > AF_MAX_PARTICLES ||
+            !isfinite(spawn_rate_scale) || spawn_rate_scale < 0.0F || spawn_rate_scale > 1.0F ||
+            !isfinite(simulation_frequency_scale) || simulation_frequency_scale <= 0.0F ||
+            simulation_frequency_scale > 1.0F || !isfinite(distance_start) ||
+            !isfinite(distance_end) || distance_start < 0.0F || distance_end < distance_start ||
+            af_read_u32(header + 20U) > 1U) {
+            return AF_RESULT_INVALID_PACKAGE;
+        }
+        for (uint32_t reserved = 24U; reserved < AF_PARTICLE_HEADER_SIZE; reserved += 4U) {
+            if (af_read_u32(header + reserved) != 0U) {
+                return AF_RESULT_INVALID_PACKAGE;
+            }
+        }
+    }
+    {
         uint64_t total_capacity = 0U;
         for (index = 0U; index < particles->count; ++index) {
-            const uint8_t *record =
-                bytes + particles->offset + (uint64_t)index * AF_PARTICLE_RECORD_SIZE;
+            const uint8_t *record = bytes + particles->offset + AF_PARTICLE_HEADER_SIZE +
+                                    (uint64_t)index * AF_PARTICLE_RECORD_SIZE;
             if (!af_particle_record_valid(record, bytes, nodes, paths)) {
                 return AF_RESULT_INVALID_PACKAGE;
             }
@@ -1140,10 +1310,24 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
                 return AF_RESULT_INVALID_PACKAGE;
             }
             for (uint32_t other = index + 1U; other < particles->count; ++other) {
-                const uint8_t *candidate =
-                    bytes + particles->offset + (uint64_t)other * AF_PARTICLE_RECORD_SIZE;
+                const uint8_t *candidate = bytes + particles->offset + AF_PARTICLE_HEADER_SIZE +
+                                           (uint64_t)other * AF_PARTICLE_RECORD_SIZE;
                 if (af_read_u64(record) == af_read_u64(candidate) ||
                     af_read_u64(record + 8U) == af_read_u64(candidate + 8U)) {
+                    return AF_RESULT_INVALID_PACKAGE;
+                }
+            }
+            if (af_read_u64(record + 328U) != 0U) {
+                bool found = false;
+                for (uint32_t target = 0U; target < particles->count; ++target) {
+                    const uint8_t *candidate = bytes + particles->offset + AF_PARTICLE_HEADER_SIZE +
+                                               (uint64_t)target * AF_PARTICLE_RECORD_SIZE;
+                    if (af_read_u64(candidate) == af_read_u64(record + 328U)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
                     return AF_RESULT_INVALID_PACKAGE;
                 }
             }
@@ -1774,7 +1958,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     const AfStyleData empty_styles = {0};
     const AfComponentData empty_components = {0};
     const AfStateMachineData empty_state_machines = {0};
-    const AfParticleData empty_particles = {0};
+    AfParticleData empty_particles = {0};
     const AfLayoutData default_layouts = {.reference_size = {1280.0F, 720.0F},
                                           .target_size = {1280.0F, 720.0F},
                                           .scale_mode = AF_CANVAS_SCALE_FIT};
@@ -1789,6 +1973,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
         out_blob == NULL) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
+    empty_particles.lod = af_vfx_lod_default();
     *out_blob = (AfPackageBlob){0};
     path_data = source->scene->paths == NULL ? &empty_paths : source->scene->paths;
     style_data = source->scene->styles == NULL ? &empty_styles : source->scene->styles;
@@ -1821,7 +2006,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     sizes[8] = AF_LAYOUT_HEADER_SIZE + (uint64_t)layout_data->count * AF_LAYOUT_RECORD_SIZE;
     sizes[9] = af_component_section_size(component_data);
     sizes[10] = af_state_machine_section_size(state_machine_data);
-    sizes[11] = (uint64_t)particle_data->count * AF_PARTICLE_RECORD_SIZE;
+    sizes[11] = AF_PARTICLE_HEADER_SIZE + (uint64_t)particle_data->count * AF_PARTICLE_RECORD_SIZE;
     for (index = 0U; index < AF_SECTION_COUNT; ++index) {
         offsets[index] = af_align_u64(total_size, 8U);
         if (af_u64_add_overflow(offsets[index], sizes[index], &total_size) ||
@@ -1963,8 +2148,19 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     }
     af_write_components(bytes + offsets[9], component_data);
     af_write_state_machines(bytes + offsets[10], state_machine_data);
+    {
+        const AfVfxLodSettings lod =
+            particle_data->lod.maximum_particles == 0U ? af_vfx_lod_default() : particle_data->lod;
+        af_write_u32(bytes + offsets[11], lod.maximum_particles);
+        af_write_f32(bytes + offsets[11] + 4U, lod.spawn_rate_scale);
+        af_write_f32(bytes + offsets[11] + 8U, lod.simulation_frequency_scale);
+        af_write_f32(bytes + offsets[11] + 12U, lod.distance_start);
+        af_write_f32(bytes + offsets[11] + 16U, lod.distance_end);
+        af_write_u32(bytes + offsets[11] + 20U, lod.renderer_enabled ? 1U : 0U);
+    }
     for (index = 0U; index < particle_data->count; ++index) {
-        af_write_particle(bytes + offsets[11] + (uint64_t)index * AF_PARTICLE_RECORD_SIZE,
+        af_write_particle(bytes + offsets[11] + AF_PARTICLE_HEADER_SIZE +
+                              (uint64_t)index * AF_PARTICLE_RECORD_SIZE,
                           &particle_data->emitters[index]);
     }
     af_write_u32(bytes + 48U, af_checksum(bytes + AF_PACKAGE_HEADER_SIZE,
@@ -2086,6 +2282,14 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
     out_package->layout_data.capacity = layouts->count;
     out_package->particle_data.count = particles->count;
     out_package->particle_data.capacity = particles->count;
+    out_package->particle_data.lod = (AfVfxLodSettings){
+        .maximum_particles = af_read_u32(bytes + particles->offset),
+        .spawn_rate_scale = af_read_f32(bytes + particles->offset + 4U),
+        .simulation_frequency_scale = af_read_f32(bytes + particles->offset + 8U),
+        .distance_start = af_read_f32(bytes + particles->offset + 12U),
+        .distance_end = af_read_f32(bytes + particles->offset + 16U),
+        .host_quality = 1.0F,
+        .renderer_enabled = af_read_u32(bytes + particles->offset + 20U) != 0U};
     out_package->layout_data.reference_size =
         (AfVec2){af_read_f32(bytes + layouts->offset), af_read_f32(bytes + layouts->offset + 4U)};
     out_package->layout_data.target_size = (AfVec2){af_read_f32(bytes + layouts->offset + 8U),
@@ -2182,7 +2386,8 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
     }
     for (index = 0U; index < particles->count; ++index) {
         out_package->particle_data.emitters[index] =
-            af_read_particle(bytes + particles->offset + (uint64_t)index * AF_PARTICLE_RECORD_SIZE);
+            af_read_particle(bytes + particles->offset + AF_PARTICLE_HEADER_SIZE +
+                             (uint64_t)index * AF_PARTICLE_RECORD_SIZE);
     }
     return af_scene_evaluate_world(&out_package->scene);
 }

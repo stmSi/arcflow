@@ -42,6 +42,13 @@ typedef enum AfPlaybackDirection {
     AF_PLAYBACK_REVERSE = -1
 } AfPlaybackDirection;
 
+typedef enum AfVfxQuality {
+    AF_VFX_QUALITY_DISABLED = 0,
+    AF_VFX_QUALITY_LOW = 1,
+    AF_VFX_QUALITY_MEDIUM = 2,
+    AF_VFX_QUALITY_HIGH = 3
+} AfVfxQuality;
+
 AfResult af_runtime_create(const AfRuntimeCreateInfo *create_info, AfRuntime **out_runtime);
 void af_runtime_destroy(AfRuntime *runtime);
 
@@ -62,6 +69,10 @@ AfResult af_instance_set_direction(AfRuntime *runtime, AfInstanceHandle instance
                                    AfPlaybackDirection direction);
 AfResult af_instance_resize(AfRuntime *runtime, AfInstanceHandle instance,
                             const AfCanvasInfo *canvas);
+AfResult af_instance_set_vfx_quality(AfRuntime *runtime, AfInstanceHandle instance,
+                                     AfVfxQuality quality, float view_distance);
+AfResult af_instance_trigger_vfx(AfRuntime *runtime, AfInstanceHandle instance, uint64_t emitter_id,
+                                 uint32_t burst_count);
 AfResult af_instance_pointer_move(AfRuntime *runtime, AfInstanceHandle instance, float x, float y,
                                   double timestamp);
 AfResult af_instance_pointer_down(AfRuntime *runtime, AfInstanceHandle instance, float x, float y,

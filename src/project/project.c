@@ -164,8 +164,8 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
                                           .target_size = project->canvas_size,
                                           .scale_mode = AF_CANVAS_SCALE_FIT};
     project->scene.layouts = &project->layout_data;
-    project->particle_data =
-        (AfParticleData){.emitters = emitters, .capacity = AF_MAX_PARTICLE_EMITTERS};
+    project->particle_data = (AfParticleData){
+        .emitters = emitters, .capacity = AF_MAX_PARTICLE_EMITTERS, .lod = af_vfx_lod_default()};
     project->scene.particles = &project->particle_data;
     project->validation_ids = validation_ids;
     project->allocator = allocator;
@@ -1386,7 +1386,7 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_mul_overflow(project->layout_data.count, 512U, &animation_capacity) ||
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
-        af_size_mul_overflow(project->particle_data.count, 1024U, &animation_capacity) ||
+        af_size_mul_overflow(project->particle_data.count, 2048U, &animation_capacity) ||
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_add_overflow(capacity, 256U, &capacity)) {
         return AF_RESULT_INVALID_ARGUMENT;
@@ -1400,14 +1400,19 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
     result = af_project_writer_append(
         &writer,
         "arcflow_project %u\ncanvas %.9g %.9g\nnext_id %llu\nnext_animation_id %llu\n"
-        "layout_canvas %.9g %.9g %.9g %.9g %u %.9g %.9g %.9g %.9g\n",
+        "layout_canvas %.9g %.9g %.9g %.9g %u %.9g %.9g %.9g %.9g\n"
+        "vfx_lod %u %.9g %.9g %.9g %.9g %u\n",
         AF_PROJECT_FORMAT_VERSION, project->canvas_size.x, project->canvas_size.y,
         (unsigned long long)project->next_id, (unsigned long long)project->next_animation_id,
         project->layout_data.reference_size.x, project->layout_data.reference_size.y,
         project->layout_data.target_size.x, project->layout_data.target_size.y,
         (uint32_t)project->layout_data.scale_mode, project->layout_data.safe_area.left,
         project->layout_data.safe_area.top, project->layout_data.safe_area.right,
-        project->layout_data.safe_area.bottom);
+        project->layout_data.safe_area.bottom, project->particle_data.lod.maximum_particles,
+        project->particle_data.lod.spawn_rate_scale,
+        project->particle_data.lod.simulation_frequency_scale,
+        project->particle_data.lod.distance_start, project->particle_data.lod.distance_end,
+        project->particle_data.lod.renderer_enabled ? 1U : 0U);
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->scene.count; ++index) {
         const AfSceneNode *node = &project->scene.nodes[index];
         char parent[32] = {0};
@@ -1511,6 +1516,34 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
             emitter->gravity.y, emitter->wind.x, emitter->wind.y, emitter->drag,
             emitter->flipbook_columns, emitter->flipbook_rows, emitter->flipbook_frames_per_second,
             emitter->enabled ? 1U : 0U);
+        if (result == AF_RESULT_SUCCESS) {
+            result = af_project_writer_append(
+                &writer,
+                "vfx_emitter %llu "
+                "%.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g "
+                "%.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g "
+                "%.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g "
+                "%u %u %llu %u %u %u %u\n",
+                (unsigned long long)emitter->id, emitter->turbulence_strength,
+                emitter->turbulence_frequency, emitter->force_center.x, emitter->force_center.y,
+                emitter->radial_force, emitter->vortex_force, emitter->attractor_position.x,
+                emitter->attractor_position.y, emitter->attractor_strength,
+                emitter->attractor_radius, emitter->repulsor_position.x,
+                emitter->repulsor_position.y, emitter->repulsor_strength, emitter->repulsor_radius,
+                emitter->vector_field_direction.x, emitter->vector_field_direction.y,
+                emitter->vector_field_strength, emitter->collision_plane_normal.x,
+                emitter->collision_plane_normal.y, emitter->collision_plane_offset,
+                emitter->collision_restitution, emitter->collision_friction, emitter->depth_min,
+                emitter->depth_max, emitter->depth_velocity_min, emitter->depth_velocity_max,
+                emitter->trail_length, emitter->trail_width, emitter->mesh_scale,
+                emitter->decal_rotation_offset, emitter->distortion_strength,
+                emitter->soft_fade_distance, emitter->light_radius,
+                emitter->collision_plane_enabled ? 1U : 0U,
+                emitter->depth_collision_enabled ? 1U : 0U,
+                (unsigned long long)emitter->sub_emitter_id, emitter->sub_emit_birth_count,
+                emitter->sub_emit_death_count, emitter->max_recursion_depth,
+                emitter->event_burst_count);
+        }
     }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->path_data.path_count;
          ++index) {
@@ -1853,7 +1886,7 @@ static bool af_project_parse_particle_line(const char *line, AfParticleEmitter *
         !af_project_next_u64_token(&cursor, &emitter->node_id) ||
         !af_project_next_u64_token(&cursor, &emitter->path_id) ||
         !af_project_next_u32_token(&cursor, &type) || type > AF_PARTICLE_EMITTER_VECTOR_PATH ||
-        !af_project_next_u32_token(&cursor, &output) || output > AF_PARTICLE_OUTPUT_FLIPBOOK ||
+        !af_project_next_u32_token(&cursor, &output) || output > AF_PARTICLE_OUTPUT_LIGHT_PROXY ||
         !af_project_next_u32_token(&cursor, &emitter->capacity) ||
         !af_project_next_u32_token(&cursor, &emitter->seed) ||
         !af_project_next_float_token(&cursor, &emitter->spawn_rate) ||
@@ -1875,6 +1908,97 @@ static bool af_project_parse_particle_line(const char *line, AfParticleEmitter *
     emitter->type = (AfParticleEmitterType)type;
     emitter->output = (AfParticleOutputType)output;
     emitter->enabled = enabled != 0U;
+    return true;
+}
+
+static bool af_project_parse_vfx_lod_line(const char *line, AfVfxLodSettings *lod) {
+    const char *cursor = line;
+    uint32_t renderer_enabled = 0U;
+    if (strncmp(line, "vfx_lod ", 8U) != 0) {
+        return false;
+    }
+    cursor += 8U;
+    if (!af_project_next_u32_token(&cursor, &lod->maximum_particles) ||
+        !af_project_next_float_token(&cursor, &lod->spawn_rate_scale) ||
+        !af_project_next_float_token(&cursor, &lod->simulation_frequency_scale) ||
+        !af_project_next_float_token(&cursor, &lod->distance_start) ||
+        !af_project_next_float_token(&cursor, &lod->distance_end) ||
+        !af_project_next_u32_token(&cursor, &renderer_enabled) || renderer_enabled > 1U ||
+        !af_project_parse_end(cursor)) {
+        return false;
+    }
+    lod->host_quality = 1.0F;
+    lod->view_distance = 0.0F;
+    lod->renderer_enabled = renderer_enabled != 0U;
+    return true;
+}
+
+static bool af_project_parse_vfx_emitter_line(const char *line, uint64_t *out_id,
+                                              AfParticleEmitter *emitter) {
+    const char *cursor = line;
+    uint32_t collision_plane_enabled = 0U;
+    uint32_t depth_collision_enabled = 0U;
+    float *values[] = {
+        &emitter->turbulence_strength,
+        &emitter->turbulence_frequency,
+        &emitter->force_center.x,
+        &emitter->force_center.y,
+        &emitter->radial_force,
+        &emitter->vortex_force,
+        &emitter->attractor_position.x,
+        &emitter->attractor_position.y,
+        &emitter->attractor_strength,
+        &emitter->attractor_radius,
+        &emitter->repulsor_position.x,
+        &emitter->repulsor_position.y,
+        &emitter->repulsor_strength,
+        &emitter->repulsor_radius,
+        &emitter->vector_field_direction.x,
+        &emitter->vector_field_direction.y,
+        &emitter->vector_field_strength,
+        &emitter->collision_plane_normal.x,
+        &emitter->collision_plane_normal.y,
+        &emitter->collision_plane_offset,
+        &emitter->collision_restitution,
+        &emitter->collision_friction,
+        &emitter->depth_min,
+        &emitter->depth_max,
+        &emitter->depth_velocity_min,
+        &emitter->depth_velocity_max,
+        &emitter->trail_length,
+        &emitter->trail_width,
+        &emitter->mesh_scale,
+        &emitter->decal_rotation_offset,
+        &emitter->distortion_strength,
+        &emitter->soft_fade_distance,
+        &emitter->light_radius,
+    };
+    if (strncmp(line, "vfx_emitter ", 12U) != 0) {
+        return false;
+    }
+    cursor += 12U;
+    if (!af_project_next_u64_token(&cursor, out_id)) {
+        return false;
+    }
+    for (uint32_t index = 0U; index < sizeof(values) / sizeof(values[0]); ++index) {
+        if (!af_project_next_float_token(&cursor, values[index])) {
+            return false;
+        }
+    }
+    if (!af_project_next_u32_token(&cursor, &collision_plane_enabled) ||
+        collision_plane_enabled > 1U ||
+        !af_project_next_u32_token(&cursor, &depth_collision_enabled) ||
+        depth_collision_enabled > 1U ||
+        !af_project_next_u64_token(&cursor, &emitter->sub_emitter_id) ||
+        !af_project_next_u32_token(&cursor, &emitter->sub_emit_birth_count) ||
+        !af_project_next_u32_token(&cursor, &emitter->sub_emit_death_count) ||
+        !af_project_next_u32_token(&cursor, &emitter->max_recursion_depth) ||
+        !af_project_next_u32_token(&cursor, &emitter->event_burst_count) ||
+        !af_project_parse_end(cursor)) {
+        return false;
+    }
+    emitter->collision_plane_enabled = collision_plane_enabled != 0U;
+    emitter->depth_collision_enabled = depth_collision_enabled != 0U;
     return true;
 }
 
@@ -2237,6 +2361,7 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
     bool header_seen = false;
     bool canvas_seen = false;
     bool layout_canvas_seen = false;
+    bool vfx_lod_seen = false;
     bool next_id_seen = false;
     bool next_animation_id_seen = false;
     uint64_t parsed_next_id = 0U;
@@ -2285,13 +2410,69 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
             continue;
         }
         if (strncmp(line, "particle ", 9U) == 0) {
-            AfParticleEmitter emitter = {0};
+            AfParticleEmitter emitter = af_particle_emitter_default(1U, 1U);
             if (in_node || in_clip || in_track || in_keyframe || in_path ||
                 project.particle_data.count >= project.particle_data.capacity ||
                 !af_project_parse_particle_line(line, &emitter)) {
                 goto cleanup;
             }
             project.particle_data.emitters[project.particle_data.count++] = emitter;
+            continue;
+        }
+        if (strncmp(line, "vfx_emitter ", 12U) == 0) {
+            AfParticleEmitter parsed = {0};
+            AfParticleEmitter *emitter = NULL;
+            uint64_t emitter_id = 0U;
+            if (in_node || in_clip || in_track || in_keyframe || in_path ||
+                !af_project_parse_vfx_emitter_line(line, &emitter_id, &parsed) ||
+                (emitter = af_project_find_emitter(&project, emitter_id)) == NULL ||
+                emitter->event_sequence != 0U) {
+                goto cleanup;
+            }
+            emitter->turbulence_strength = parsed.turbulence_strength;
+            emitter->turbulence_frequency = parsed.turbulence_frequency;
+            emitter->force_center = parsed.force_center;
+            emitter->radial_force = parsed.radial_force;
+            emitter->vortex_force = parsed.vortex_force;
+            emitter->attractor_position = parsed.attractor_position;
+            emitter->attractor_strength = parsed.attractor_strength;
+            emitter->attractor_radius = parsed.attractor_radius;
+            emitter->repulsor_position = parsed.repulsor_position;
+            emitter->repulsor_strength = parsed.repulsor_strength;
+            emitter->repulsor_radius = parsed.repulsor_radius;
+            emitter->vector_field_direction = parsed.vector_field_direction;
+            emitter->vector_field_strength = parsed.vector_field_strength;
+            emitter->collision_plane_normal = parsed.collision_plane_normal;
+            emitter->collision_plane_offset = parsed.collision_plane_offset;
+            emitter->collision_restitution = parsed.collision_restitution;
+            emitter->collision_friction = parsed.collision_friction;
+            emitter->depth_min = parsed.depth_min;
+            emitter->depth_max = parsed.depth_max;
+            emitter->depth_velocity_min = parsed.depth_velocity_min;
+            emitter->depth_velocity_max = parsed.depth_velocity_max;
+            emitter->trail_length = parsed.trail_length;
+            emitter->trail_width = parsed.trail_width;
+            emitter->mesh_scale = parsed.mesh_scale;
+            emitter->decal_rotation_offset = parsed.decal_rotation_offset;
+            emitter->distortion_strength = parsed.distortion_strength;
+            emitter->soft_fade_distance = parsed.soft_fade_distance;
+            emitter->light_radius = parsed.light_radius;
+            emitter->sub_emitter_id = parsed.sub_emitter_id;
+            emitter->sub_emit_birth_count = parsed.sub_emit_birth_count;
+            emitter->sub_emit_death_count = parsed.sub_emit_death_count;
+            emitter->max_recursion_depth = parsed.max_recursion_depth;
+            emitter->event_burst_count = parsed.event_burst_count;
+            emitter->collision_plane_enabled = parsed.collision_plane_enabled;
+            emitter->depth_collision_enabled = parsed.depth_collision_enabled;
+            emitter->event_sequence = 1U;
+            continue;
+        }
+        if (strncmp(line, "vfx_lod ", 8U) == 0) {
+            if (vfx_lod_seen || in_node || in_clip || in_track || in_keyframe || in_path ||
+                !af_project_parse_vfx_lod_line(line, &project.particle_data.lod)) {
+                goto cleanup;
+            }
+            vfx_lod_seen = true;
             continue;
         }
         if (strncmp(line, "layout_canvas ", 14U) == 0) {
@@ -2490,6 +2671,10 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
     if (!layout_canvas_seen) {
         project.layout_data.reference_size = project.canvas_size;
         project.layout_data.target_size = project.canvas_size;
+    }
+    for (uint32_t emitter_index = 0U; emitter_index < project.particle_data.count;
+         ++emitter_index) {
+        project.particle_data.emitters[emitter_index].event_sequence = 0U;
     }
     if (af_project_validate(&project) != AF_RESULT_SUCCESS ||
         af_scene_evaluate_world(&project.scene) != AF_RESULT_SUCCESS) {

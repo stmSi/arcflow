@@ -147,9 +147,17 @@ static AfResult af_write_demo(const char *path) {
     AfResult result = AF_RESULT_SUCCESS;
     particle.type = AF_PARTICLE_EMITTER_VECTOR_PATH;
     particle.path_id = vector_path.id;
-    particle.output = AF_PARTICLE_OUTPUT_UI_BILLBOARD;
     particle.spawn_rate = 90.0F;
     particle.capacity = 4096U;
+    particle.output = AF_PARTICLE_OUTPUT_TRAIL;
+    particle.turbulence_strength = 160.0F;
+    particle.turbulence_frequency = 0.018F;
+    particle.vortex_force = 90.0F;
+    particle.vector_field_direction = (AfVec2){1.0F, 0.2F};
+    particle.vector_field_strength = 22.0F;
+    particle.trail_length = 52.0F;
+    particle.trail_width = 7.0F;
+    particle_data.lod = af_vfx_lod_default();
     af_allocator_init_default(&allocator);
     result = af_package_write(&source, &allocator, &blob);
     if (result == AF_RESULT_SUCCESS) {
