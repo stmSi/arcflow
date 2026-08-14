@@ -988,7 +988,9 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     if (af_editor_workflow_key(editor, event)) {
         return;
     }
-    if (control &&
+    if (alt && (event->key == SDLK_RETURN || event->key == SDLK_KP_ENTER)) {
+        af_editor_execute_menu_action(editor, AF_EDITOR_MENU_ACTION_FULLSCREEN, width, height);
+    } else if (control &&
         (event->key == SDLK_Y || ((event->mod & SDL_KMOD_SHIFT) != 0U && event->key == SDLK_Z))) {
         if (af_editor_history_redo(&editor->history, &editor->project) == AF_RESULT_SUCCESS) {
             af_editor_mark_dirty(editor);
@@ -1149,16 +1151,7 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
 }
 
 static void af_editor_mouse_scale(const AfEditorState *editor, float *x, float *y) {
-    int logical_width = 0;
-    int logical_height = 0;
-    int pixel_width = 0;
-    int pixel_height = 0;
-    if (SDL_GetWindowSize(editor->window.window, &logical_width, &logical_height) &&
-        SDL_GetWindowSizeInPixels(editor->window.window, &pixel_width, &pixel_height) &&
-        logical_width > 0 && logical_height > 0) {
-        *x *= (float)pixel_width / (float)logical_width;
-        *y *= (float)pixel_height / (float)logical_height;
-    }
+    (void)af_platform_window_point_to_pixels(&editor->window, x, y);
 }
 
 static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int width, int height) {
@@ -1171,7 +1164,9 @@ static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int 
     } else if (event->type == editor->dialog_event_type) {
         af_editor_handle_dialog_event(editor, &event->user);
     } else if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
-               event->type == SDL_EVENT_WINDOW_RESIZED) {
+               event->type == SDL_EVENT_WINDOW_RESIZED ||
+               event->type == SDL_EVENT_WINDOW_DISPLAY_CHANGED ||
+               event->type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
         af_vk_renderer_request_resize(editor->renderer);
     } else if (event->type == SDL_EVENT_KEY_DOWN) {
         af_editor_key(editor, width, height, &event->key);
@@ -1196,6 +1191,21 @@ static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int 
         SDL_MouseWheelEvent wheel = event->wheel;
         af_editor_mouse_scale(editor, &wheel.mouse_x, &wheel.mouse_y);
         af_editor_mouse_wheel(editor, width, height, &wheel);
+    } else if (event->type == SDL_EVENT_PEN_DOWN) {
+        SDL_MouseButtonEvent button = {.button = SDL_BUTTON_LEFT,
+                                       .down = true,
+                                       .x = event->ptouch.x,
+                                       .y = event->ptouch.y};
+        af_editor_mouse_scale(editor, &button.x, &button.y);
+        af_editor_mouse_down(editor, width, height, &button, SDL_GetModState());
+    } else if (event->type == SDL_EVENT_PEN_UP) {
+        af_editor_mouse_up(editor, width, height);
+    } else if (event->type == SDL_EVENT_PEN_MOTION) {
+        SDL_MouseMotionEvent motion = {.x = event->pmotion.x, .y = event->pmotion.y};
+        af_editor_mouse_scale(editor, &motion.x, &motion.y);
+        motion.xrel = motion.x - editor->mouse_position.x;
+        motion.yrel = motion.y - editor->mouse_position.y;
+        af_editor_mouse_motion(editor, width, height, &motion);
     }
 }
 
@@ -1225,6 +1235,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->menu_smoke = true;
         } else if (strcmp(arguments[index], "--workflow-smoke") == 0) {
             editor->workflow_smoke = true;
+        } else if (strcmp(arguments[index], "--platform-smoke") == 0) {
+            editor->platform_smoke = true;
+        } else if (strcmp(arguments[index], "--release-smoke") == 0) {
+            editor->release_smoke = true;
         } else if (strcmp(arguments[index], "--sequence") == 0 && index + 1 < argument_count) {
             (void)snprintf(editor->sequence_prefix, sizeof(editor->sequence_prefix), "%s",
                            arguments[++index]);
@@ -1241,6 +1255,8 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
                                  : editor->vector_animation_smoke ? 18U
                                  : editor->image_smoke            ? 16U
                                  : editor->workflow_smoke         ? 18U
+                                 : editor->platform_smoke         ? 4U
+                                 : editor->release_smoke          ? 4U
                                  : editor->menu_smoke             ? 12U
                                  : editor->tooltip_smoke          ? 2U
                                                                   : 1U;
@@ -1249,6 +1265,8 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
                                  : editor->vector_animation_smoke ? 18U
                                  : editor->image_smoke            ? 16U
                                  : editor->workflow_smoke         ? 18U
+                                 : editor->platform_smoke         ? 4U
+                                 : editor->release_smoke          ? 4U
                                  : editor->menu_smoke             ? 12U
                                  : editor->vfx_smoke              ? AF_EDITOR_PARTICLE_PAGE_COUNT
                                                                   : 60U;
@@ -1258,6 +1276,6 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->resize_smoke || editor->context_smoke || editor->tooltip_smoke ||
         editor->selection_smoke || editor->vfx_smoke || editor->particle_view_smoke ||
         editor->vector_animation_smoke || editor->image_smoke || editor->menu_smoke ||
-        editor->workflow_smoke;
+        editor->workflow_smoke || editor->platform_smoke || editor->release_smoke;
     af_editor_derive_package_path(editor);
 }

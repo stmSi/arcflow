@@ -58,6 +58,9 @@ static bool af_test_package(void) {
     af_test_write_u32(first.data + 8U, AF_PACKAGE_FORMAT_VERSION + 1U);
     CHECK(af_package_validate(first.data, first.size) == AF_RESULT_UNSUPPORTED_VERSION);
     af_test_write_u32(first.data + 8U, AF_PACKAGE_FORMAT_VERSION);
+    af_test_write_u32(first.data + 12U, AF_RUNTIME_VERSION + 1U);
+    CHECK(af_package_validate(first.data, first.size) == AF_RESULT_UNSUPPORTED_VERSION);
+    af_test_write_u32(first.data + 12U, AF_RUNTIME_VERSION);
     af_test_write_u32(first.data + 44U, 1U);
     CHECK(af_package_validate(first.data, first.size) == AF_RESULT_UNSUPPORTED_FEATURE);
     af_test_write_u32(first.data + 44U, 0U);

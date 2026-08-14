@@ -38,6 +38,7 @@ int af_player_run(const char *title, int argument_count, char **arguments) {
     const char *output_path = NULL;
     const char *sequence_prefix = NULL;
     char sequence_path[AF_PLAYER_CAPTURE_PATH_CAPACITY];
+    char default_package_path[AF_PLAYER_CAPTURE_PATH_CAPACITY];
     int argument_index = 1;
     int exit_code = 1;
     for (argument_index = 1; argument_index < argument_count; ++argument_index) {
@@ -67,6 +68,12 @@ int af_player_run(const char *title, int argument_count, char **arguments) {
     }
     af_allocator_init_default(&allocator);
     result = af_file_read_limited(package_path, AF_PACKAGE_MAX_SIZE, &allocator, &file);
+    if (result != AF_RESULT_SUCCESS && strcmp(package_path, ARCFLOW_DEMO_PACKAGE) == 0 &&
+        af_platform_resource_path("assets/arcflow_demo.afp", default_package_path,
+                                  sizeof(default_package_path)) == AF_RESULT_SUCCESS) {
+        package_path = default_package_path;
+        result = af_file_read_limited(package_path, AF_PACKAGE_MAX_SIZE, &allocator, &file);
+    }
     if (result != AF_RESULT_SUCCESS) {
         af_log(AF_LOG_ERROR, "Cannot read package '%s': %s", package_path,
                af_result_string(result));
@@ -107,12 +114,17 @@ int af_player_run(const char *title, int argument_count, char **arguments) {
             if (event.type == SDL_EVENT_QUIT) {
                 running = false;
             } else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
-                       event.type == SDL_EVENT_WINDOW_RESIZED) {
+                       event.type == SDL_EVENT_WINDOW_RESIZED ||
+                       event.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED ||
+                       event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
                 int width = 0;
                 int height = 0;
                 af_vk_renderer_request_resize(renderer);
-                if (SDL_GetWindowSizeInPixels(window.window, &width, &height) && width > 0 &&
-                    height > 0) {
+                AfPlatformWindowMetrics metrics = {0};
+                if (af_platform_window_metrics(&window, &metrics) == AF_RESULT_SUCCESS &&
+                    metrics.pixel_width > 0 && metrics.pixel_height > 0) {
+                    width = metrics.pixel_width;
+                    height = metrics.pixel_height;
                     const AfCanvasInfo canvas = {.width = (float)width, .height = (float)height};
                     (void)af_instance_resize(runtime, instance, &canvas);
                 }

@@ -1,5 +1,7 @@
 #include "editor/editor_app.h"
 
+#include "arcflow/arcflow_build_info.h"
+#include "arcflow/arcflow_version.h"
 #include "core/allocator.h"
 #include "core/file_io.h"
 #include "core/hash.h"
@@ -16,6 +18,7 @@
 #include "renderer/vk_renderer.h"
 #include "scene/scene.h"
 #include "text/text.h"
+#include "update/update.h"
 
 #include <SDL3/SDL.h>
 #include <ctype.h>
@@ -132,7 +135,8 @@ typedef enum AfEditorDialogAction {
     AF_EDITOR_DIALOG_OPEN_PROJECT,
     AF_EDITOR_DIALOG_SAVE_PROJECT_AS,
     AF_EDITOR_DIALOG_IMPORT_IMAGE,
-    AF_EDITOR_DIALOG_REPAIR_IMAGE
+    AF_EDITOR_DIALOG_REPAIR_IMAGE,
+    AF_EDITOR_DIALOG_UPDATE_MANIFEST
 } AfEditorDialogAction;
 
 typedef struct AfEditorContextMenuInfo {
@@ -247,6 +251,8 @@ typedef struct AfEditorState {
     bool image_smoke;
     bool menu_smoke;
     bool workflow_smoke;
+    bool platform_smoke;
+    bool release_smoke;
     bool vector_animation_smoke_prepared;
     bool dialog_active;
     bool help_overlay;
@@ -255,6 +261,9 @@ typedef struct AfEditorState {
     bool hierarchy_search_active;
     bool profiler_visible;
     bool validation_visible;
+    bool platform_panel_visible;
+    bool update_panel_visible;
+    bool update_checked;
     bool recovery_overlay;
     bool preset_panel_visible;
     bool template_panel_visible;
@@ -264,6 +273,8 @@ typedef struct AfEditorState {
     bool measurement_visible;
     bool workflow_initialized;
     bool preferences_read_only;
+    bool project_read_only;
+    bool external_change_visible;
     uint64_t selected_asset_id;
     char hierarchy_search[AF_EDITOR_COMMAND_QUERY_CAPACITY];
     char preferences_path[AF_EDITOR_PATH_CAPACITY * 2U];
@@ -278,6 +289,13 @@ typedef struct AfEditorState {
     AfEditorRecoveryState recovery;
     AfEditorRecoveryCandidate recovery_candidate;
     AfPerformanceMetrics performance;
+    AfPlatformCapabilities platform_capabilities;
+    AfUpdateManifest update_manifest;
+    AfUpdateStatus update_status;
+    AfProjectLock project_lock;
+    AfProjectFingerprint project_fingerprint;
+    uint64_t external_check_ticks;
+    char project_lock_owner[AF_PROJECT_LOCK_OWNER_CAPACITY];
     float last_frame_ms;
     int window_width;
     int window_height;
@@ -310,10 +328,15 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
 static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEvent *event);
 static bool af_editor_workflow_text(AfEditorState *editor, const char *text);
 static void af_editor_workflow_drop_file(AfEditorState *editor, const char *path);
+static void af_editor_collaboration_release(AfEditorState *editor);
+static void af_editor_collaboration_track_path(AfEditorState *editor);
+static void af_editor_collaboration_saved(AfEditorState *editor);
+static void af_editor_collaboration_update(AfEditorState *editor, uint64_t now_ns);
 static bool af_editor_hierarchy_name_matches(const AfEditorState *editor, uint32_t node_index);
 
 // clang-format off
 #include "editor/editor_app_core.inc"
+#include "editor/editor_app_collaboration.inc"
 #include "editor/editor_app_images.inc"
 #include "editor/editor_app_draw.inc"
 #include "editor/editor_app_timeline.inc"
@@ -433,6 +456,14 @@ int af_editor_run(int argument_count, char **arguments) {
                                            .command_capacity = AF_MAX_PATH_COMMANDS};
     result = af_file_read_limited(ARCFLOW_EDITOR_FONT_PATH, 4U * 1024U * 1024U, &editor.allocator,
                                   &editor.font_file);
+    if (result != AF_RESULT_SUCCESS) {
+        char font_path[AF_EDITOR_PATH_CAPACITY];
+        if (af_platform_resource_path("fonts/NotoSans-Bold.ttf", font_path, sizeof(font_path)) ==
+            AF_RESULT_SUCCESS) {
+            result = af_file_read_limited(font_path, 4U * 1024U * 1024U, &editor.allocator,
+                                          &editor.font_file);
+        }
+    }
     if (result == AF_RESULT_SUCCESS) {
         result = af_text_engine_create(&editor.allocator, &editor.text_engine);
     }
@@ -468,10 +499,11 @@ int af_editor_run(int argument_count, char **arguments) {
         goto cleanup;
     }
     {
-        int initial_width = 1440;
-        int initial_height = 840;
-        (void)SDL_GetWindowSizeInPixels(editor.window.window, &initial_width, &initial_height);
-        result = af_editor_workflow_init(&editor, initial_width, initial_height);
+        AfPlatformWindowMetrics metrics = {0};
+        result = af_platform_window_metrics(&editor.window, &metrics);
+        if (result == AF_RESULT_SUCCESS) {
+            result = af_editor_workflow_init(&editor, metrics.pixel_width, metrics.pixel_height);
+        }
         if (result != AF_RESULT_SUCCESS) {
             goto cleanup;
         }
@@ -491,10 +523,13 @@ int af_editor_run(int argument_count, char **arguments) {
         int height = 0;
         uint64_t current_ticks = 0U;
         float delta_time = 0.0F;
-        if (!SDL_GetWindowSizeInPixels(editor.window.window, &width, &height) || width <= 0 ||
-            height <= 0) {
+        AfPlatformWindowMetrics metrics = {0};
+        if (af_platform_window_metrics(&editor.window, &metrics) != AF_RESULT_SUCCESS ||
+            metrics.pixel_width <= 0 || metrics.pixel_height <= 0) {
             continue;
         }
+        width = metrics.pixel_width;
+        height = metrics.pixel_height;
         editor.window_width = width;
         editor.window_height = height;
         while (SDL_PollEvent(&event)) {
@@ -505,6 +540,7 @@ int af_editor_run(int argument_count, char **arguments) {
         editor.last_frame_ms = delta_time * 1000.0F;
         editor.previous_ticks = current_ticks;
         af_editor_workflow_update(&editor, current_ticks);
+        af_editor_collaboration_update(&editor, current_ticks);
         if (editor.preview_playing) {
             const AfProjectClip *clip =
                 af_project_find_clip_const(&editor.project, editor.selected_clip_id);
@@ -603,6 +639,14 @@ int af_editor_run(int argument_count, char **arguments) {
                 (AfVec2){editor.context_position.x + 52.0F,
                          editor.context_position.y + AF_EDITOR_CONTEXT_HEADER_HEIGHT +
                              AF_EDITOR_CONTEXT_ITEM_HEIGHT + 12.0F};
+        } else if (editor.release_smoke) {
+            editor.update_panel_visible = true;
+            editor.update_checked = false;
+            af_editor_status(&editor, "Programmatic release, version and update capture");
+        } else if (editor.platform_smoke) {
+            editor.platform_panel_visible = true;
+            (void)af_platform_query_capabilities(&editor.window, &editor.platform_capabilities);
+            af_editor_status(&editor, "Programmatic display, DPI and input capability capture");
         } else if (editor.workflow_smoke) {
             const uint32_t stage = (editor.rendered_frames / 2U) % 9U;
             editor.command_palette.open = false;
@@ -704,6 +748,7 @@ cleanup:
         af_log(AF_LOG_ERROR, "Arcflow Editor: %s", af_result_string(result));
     }
     af_editor_workflow_shutdown(&editor);
+    af_editor_collaboration_release(&editor);
     af_vk_renderer_destroy(editor.renderer);
     af_platform_window_destroy(&editor.window);
     af_text_engine_destroy(editor.text_engine);

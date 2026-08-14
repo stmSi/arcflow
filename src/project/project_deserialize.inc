@@ -25,6 +25,7 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
     bool next_id_seen = false;
     bool next_animation_id_seen = false;
     bool next_asset_id_seen = false;
+    bool metadata_seen = false;
     uint64_t parsed_next_id = 0U;
     uint64_t parsed_next_animation_id = 0U;
     uint64_t parsed_next_asset_id = 0U;
@@ -352,6 +353,31 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
             }
             project.canvas_size = (AfVec2){values[0], values[1]};
             canvas_seen = true;
+        } else if ((value = af_project_value(line, "metadata")) != NULL) {
+            unsigned long long revision = 0ULL;
+            char trailing = '\0';
+            if (metadata_seen ||
+                sscanf(value, "%63s %llu %c", project.metadata.project_id, &revision,
+                       &trailing) != 2) {
+                goto cleanup;
+            }
+            project.metadata.revision = (uint64_t)revision;
+            project.metadata.change_count = 0U;
+            metadata_seen = true;
+        } else if ((value = af_project_value(line, "change")) != NULL) {
+            AfProjectChange *change = NULL;
+            unsigned long long revision = 0ULL;
+            char trailing = '\0';
+            if (!metadata_seen || project.metadata.change_count >= AF_PROJECT_MAX_CHANGES) {
+                goto cleanup;
+            }
+            change = &project.metadata.changes[project.metadata.change_count];
+            if (sscanf(value, "%llu %63s %63s %c", &revision, change->author, change->summary,
+                       &trailing) != 3) {
+                goto cleanup;
+            }
+            change->revision = (uint64_t)revision;
+            ++project.metadata.change_count;
         } else if ((value = af_project_value(line, "next_id")) != NULL) {
             if (next_id_seen || !af_project_parse_u64(value, &parsed_next_id)) {
                 goto cleanup;
@@ -370,7 +396,8 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
         }
     }
     if (in_node || in_clip || in_track || in_keyframe || in_path ||
-        binding_targets_remaining != 0U || !header_seen || !canvas_seen) {
+        binding_targets_remaining != 0U || !header_seen || !canvas_seen ||
+        (format_version >= 11U && !metadata_seen)) {
         goto cleanup;
     }
     if (next_id_seen && parsed_next_id > project.next_id) {

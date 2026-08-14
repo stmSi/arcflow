@@ -1,8 +1,11 @@
 #include "animation/animation.h"
+#include "arcflow/arcflow_build_info.h"
 #include "assets/package.h"
 #include "core/allocator.h"
 #include "core/file_io.h"
+#include "core/hash.h"
 #include "project/project.h"
+#include "project/project_collaboration.h"
 #include "scene/scene.h"
 
 #include <stdio.h>
@@ -161,7 +164,7 @@ static AfResult af_write_demo(const char *path) {
     af_allocator_init_default(&allocator);
     result = af_package_write(&source, &allocator, &blob);
     if (result == AF_RESULT_SUCCESS) {
-        result = af_file_write(path, blob.data, blob.size);
+        result = af_file_write_atomic(path, blob.data, blob.size, 1U);
     }
     af_package_blob_destroy(&allocator, &blob);
     return result;
@@ -180,39 +183,216 @@ static AfResult af_validate_file(const char *path) {
     return result;
 }
 
+static AfResult af_report_project_conflicts(const char *path, AfAllocator *allocator) {
+    AfFileData file = {0};
+    AfProjectConflictReport conflicts = {0};
+    AfResult result = af_file_read_limited(path, AF_PROJECT_MAX_FILE_SIZE, allocator, &file);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_conflicts_scan(file.data, file.size, &conflicts);
+    }
+    if (result == AF_RESULT_INVALID_PACKAGE && conflicts.count != 0U) {
+        for (uint32_t index = 0U; index < conflicts.count; ++index) {
+            (void)fprintf(stderr,
+                          "%s:%u: merge conflict marker (%s); resolve this source-control "
+                          "conflict before validation\n",
+                          path, conflicts.entries[index].line,
+                          af_project_conflict_marker_name(conflicts.entries[index].marker));
+        }
+        if (conflicts.truncated) {
+            (void)fprintf(stderr, "%s: additional conflict markers omitted\n", path);
+        }
+    }
+    af_file_data_destroy(allocator, &file);
+    return result;
+}
+
+static AfResult af_load_project_checked(const char *path, AfAllocator *allocator,
+                                        AfProject *out_project) {
+    AfResult result = af_report_project_conflicts(path, allocator);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_load_file(path, allocator, out_project);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        for (uint32_t index = 0U; index < out_project->image_data.asset_count; ++index) {
+            const AfImageAsset *asset = &out_project->image_data.assets[index];
+            if (asset->missing) {
+                (void)fprintf(stderr, "%s: asset %llu source '%s' is missing or changed\n", path,
+                              (unsigned long long)asset->id, asset->source_path);
+                result = AF_RESULT_NOT_FOUND;
+            }
+        }
+    }
+    return result;
+}
+
+static AfResult af_validate_project_file(const char *path) {
+    AfAllocator allocator = {0};
+    AfProject project = {0};
+    AfResult result = AF_RESULT_SUCCESS;
+    af_allocator_init_default(&allocator);
+    result = af_load_project_checked(path, &allocator, &project);
+    if (result == AF_RESULT_SUCCESS) {
+        (void)fprintf(stdout, "%s: valid project '%s' revision %llu (%u objects, %u assets)\n",
+                      path, project.metadata.project_id,
+                      (unsigned long long)project.metadata.revision, project.scene.count,
+                      project.image_data.asset_count);
+    }
+    af_project_destroy(&project);
+    return result;
+}
+
+static AfResult af_write_new_project(const char *path) {
+    AfAllocator allocator = {0};
+    AfProject project = {0};
+    AfResult result = AF_RESULT_SUCCESS;
+    af_allocator_init_default(&allocator);
+    result = af_project_create(&project, &allocator, 1U);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_save_file(&project, path, &allocator);
+    }
+    af_project_destroy(&project);
+    return result;
+}
+
 static AfResult af_compile_project(const char *input_path, const char *output_path, bool release) {
     AfAllocator allocator = {0};
     AfProject project = {0};
     AfPackageBlob package = {0};
     AfResult result = AF_RESULT_SUCCESS;
     af_allocator_init_default(&allocator);
-    result = af_project_load_file(input_path, &allocator, &project);
+    result = af_load_project_checked(input_path, &allocator, &project);
     if (result == AF_RESULT_SUCCESS) {
         result = release ? af_project_compile_release(&project, &allocator, &package)
                          : af_project_compile(&project, &allocator, &package);
     }
     if (result == AF_RESULT_SUCCESS) {
-        result = af_file_write(output_path, package.data, package.size);
+        result = af_file_write_atomic(output_path, package.data, package.size, 1U);
     }
     af_package_blob_destroy(&allocator, &package);
     af_project_destroy(&project);
     return result;
 }
 
+static AfResult af_check_project_determinism(const char *input_path) {
+    AfAllocator allocator = {0};
+    AfProject project = {0};
+    AfPackageBlob first = {0};
+    AfPackageBlob second = {0};
+    AfResult result = AF_RESULT_SUCCESS;
+    af_allocator_init_default(&allocator);
+    result = af_load_project_checked(input_path, &allocator, &project);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_compile_release(&project, &allocator, &first);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_compile_release(&project, &allocator, &second);
+    }
+    if (result == AF_RESULT_SUCCESS &&
+        (first.size != second.size || memcmp(first.data, second.data, first.size) != 0)) {
+        (void)fprintf(stderr, "%s: identical inputs produced different package bytes\n",
+                      input_path);
+        result = AF_RESULT_INVALID_PACKAGE;
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        (void)fprintf(stdout, "%s: deterministic package (%zu bytes)\n", input_path, first.size);
+    }
+    af_package_blob_destroy(&allocator, &second);
+    af_package_blob_destroy(&allocator, &first);
+    af_project_destroy(&project);
+    return result;
+}
+
+static bool af_update_manifest_token_valid(const char *token, size_t capacity) {
+    size_t length = 0U;
+    if (token == NULL || token[0] == '\0') {
+        return false;
+    }
+    while (length < capacity && token[length] != '\0') {
+        const unsigned char byte = (unsigned char)token[length];
+        if (byte <= 32U || byte == 127U) {
+            return false;
+        }
+        ++length;
+    }
+    return length < capacity;
+}
+
+static AfResult af_write_update_manifest(const char *artifact_path, const char *url,
+                                         const char *signature, const char *output_path) {
+    AfAllocator allocator = {0};
+    AfFileData artifact = {0};
+    char manifest[2048];
+    int written = 0;
+    AfResult result = AF_RESULT_SUCCESS;
+    if (!af_update_manifest_token_valid(url, 512U) ||
+        !af_update_manifest_token_valid(signature, 256U)) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    af_allocator_init_default(&allocator);
+    result = af_file_read_limited(artifact_path, 512U * 1024U * 1024U, &allocator, &artifact);
+    if (result == AF_RESULT_SUCCESS) {
+        written = snprintf(
+            manifest, sizeof(manifest),
+            "arcflow_update 1\nversion %s\nchannel %s\nruntime_min %u\npackage_min %u\n"
+            "size %zu\nhash %016llx\nurl %s\nsignature %s\n",
+            AF_VERSION_STRING, AF_RELEASE_CHANNEL, AF_RUNTIME_VERSION, AF_PACKAGE_FORMAT_VERSION,
+            artifact.size, (unsigned long long)af_hash_bytes(artifact.data, artifact.size), url,
+            signature);
+        result = written < 0 || (size_t)written >= sizeof(manifest) ? AF_RESULT_LIMIT_EXCEEDED
+                                                                    : AF_RESULT_SUCCESS;
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_file_write_atomic(output_path, manifest, (size_t)written, 1U);
+    }
+    af_file_data_destroy(&allocator, &artifact);
+    return result;
+}
+
+static void af_print_usage(void) {
+    (void)fprintf(stderr,
+                  "usage:\n"
+                  "  arcflow_compiler --compile INPUT.afproj OUTPUT.afp\n"
+                  "  arcflow_compiler --compile-release INPUT.afproj OUTPUT.afp\n"
+                  "  arcflow_compiler --validate-project INPUT.afproj\n"
+                  "  arcflow_compiler --check-determinism INPUT.afproj\n"
+                  "  arcflow_compiler --validate INPUT.afp\n"
+                  "  arcflow_compiler --new-project OUTPUT.afproj\n"
+                  "  arcflow_compiler --make-update-manifest ARTIFACT URL SIGNATURE OUTPUT\n"
+                  "  arcflow_compiler --version\n"
+                  "  arcflow_compiler --demo OUTPUT.afp\n");
+}
+
 int main(int argument_count, char **arguments) {
     AfResult result = AF_RESULT_INVALID_ARGUMENT;
-    if (argument_count == 3 && strcmp(arguments[1], "--demo") == 0) {
+    if (argument_count == 2 && strcmp(arguments[1], "--version") == 0) {
+        (void)fprintf(stdout,
+                      "Arcflow %s channel %s build %s project-format %u package-format %u runtime "
+                      "%u\n",
+                      AF_VERSION_STRING, AF_RELEASE_CHANNEL, AF_BUILD_ID, AF_PROJECT_FORMAT_VERSION,
+                      AF_PACKAGE_FORMAT_VERSION, AF_RUNTIME_VERSION);
+        return 0;
+    }
+    if (argument_count == 6 && strcmp(arguments[1], "--make-update-manifest") == 0) {
+        result = af_write_update_manifest(arguments[2], arguments[3], arguments[4], arguments[5]);
+    } else if (argument_count == 3 && strcmp(arguments[1], "--demo") == 0) {
         result = af_write_demo(arguments[2]);
+    } else if (argument_count == 3 && strcmp(arguments[1], "--new-project") == 0) {
+        result = af_write_new_project(arguments[2]);
     } else if (argument_count == 3 && strcmp(arguments[1], "--validate") == 0) {
         result = af_validate_file(arguments[2]);
-    } else if (argument_count == 4 && strcmp(arguments[1], "--release") == 0) {
+    } else if (argument_count == 3 && strcmp(arguments[1], "--validate-project") == 0) {
+        result = af_validate_project_file(arguments[2]);
+    } else if (argument_count == 3 && strcmp(arguments[1], "--check-determinism") == 0) {
+        result = af_check_project_determinism(arguments[2]);
+    } else if (argument_count == 4 && (strcmp(arguments[1], "--release") == 0 ||
+                                       strcmp(arguments[1], "--compile-release") == 0)) {
         result = af_compile_project(arguments[2], arguments[3], true);
+    } else if (argument_count == 4 && strcmp(arguments[1], "--compile") == 0) {
+        result = af_compile_project(arguments[2], arguments[3], false);
     } else if (argument_count == 3) {
         result = af_compile_project(arguments[1], arguments[2], false);
     } else {
-        (void)fprintf(stderr,
-                      "usage: arcflow_compiler INPUT.afproj OUTPUT.afp | --demo OUTPUT.afp | "
-                      "--validate INPUT.afp | --release INPUT.afproj OUTPUT.afp\n");
+        af_print_usage();
         return 2;
     }
     if (result != AF_RESULT_SUCCESS) {

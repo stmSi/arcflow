@@ -328,6 +328,7 @@ static AfResult af_editor_workflow_init(AfEditorState *editor, int width, int he
     if (result == AF_RESULT_SUCCESS) {
         af_performance_metrics_init(&editor->performance);
         editor->workflow_initialized = true;
+        af_editor_collaboration_track_path(editor);
         af_editor_refresh_recovery(editor, true);
         if (editor->dirty) {
             af_editor_mark_dirty(editor);
@@ -365,6 +366,7 @@ static void af_editor_after_project_saved(AfEditorState *editor) {
         (void)af_editor_recovery_mark_project_saved(&editor->recovery,
                                                     SDL_GetTicksNS() / UINT64_C(1000000));
     }
+    af_editor_collaboration_saved(editor);
 }
 
 static void af_editor_project_changed(AfEditorState *editor) {
@@ -374,6 +376,7 @@ static void af_editor_project_changed(AfEditorState *editor) {
     if (editor->project_path[0] != '\0') {
         (void)af_editor_preferences_add_recent_project(&editor->preferences, editor->project_path);
     }
+    af_editor_collaboration_track_path(editor);
     af_editor_refresh_recovery(editor, true);
 }
 
@@ -792,13 +795,13 @@ static void af_editor_execute_workflow_action(AfEditorState *editor, AfEditorMen
     case AF_EDITOR_MENU_ACTION_FIND_HIERARCHY:
         editor->hierarchy_search_active = true;
         editor->timeline_focus = false;
-        SDL_StartTextInput(editor->window.window);
+        (void)af_platform_text_input_set(&editor->window, true);
         af_editor_status(editor, "Type to filter the scene hierarchy; Esc clears");
         break;
     case AF_EDITOR_MENU_ACTION_COMMAND_PALETTE:
         (void)af_editor_command_palette_open(&editor->command_palette,
                                              AF_EDITOR_ACTION_CONTEXT_ALL);
-        SDL_StartTextInput(editor->window.window);
+        (void)af_platform_text_input_set(&editor->window, true);
         break;
     case AF_EDITOR_MENU_ACTION_ALIGN_LEFT:
         af_editor_align_selection(editor, AF_EDITOR_ALIGN_LEFT);
@@ -848,6 +851,13 @@ static void af_editor_execute_workflow_action(AfEditorState *editor, AfEditorMen
         break;
     case AF_EDITOR_MENU_ACTION_VALIDATION:
         editor->validation_visible = !editor->validation_visible;
+        break;
+    case AF_EDITOR_MENU_ACTION_SYSTEM_INFO:
+        editor->platform_panel_visible = !editor->platform_panel_visible;
+        if (editor->platform_panel_visible) {
+            (void)af_platform_query_capabilities(&editor->window,
+                                                 &editor->platform_capabilities);
+        }
         break;
     case AF_EDITOR_MENU_ACTION_AUTOSAVE:
     case AF_EDITOR_MENU_ACTION_RECOVERY:

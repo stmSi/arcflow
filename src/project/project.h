@@ -6,12 +6,13 @@
 #include "binding/binding.h"
 #include "core/allocator.h"
 #include "layout/layout.h"
+#include "project/project_collaboration.h"
 #include "scene/scene.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
-#define AF_PROJECT_FORMAT_VERSION 10U
+#define AF_PROJECT_FORMAT_VERSION 11U
 #define AF_PROJECT_MAX_FILE_SIZE (32U * 1024U * 1024U)
 #define AF_PROJECT_NAME_CAPACITY 64U
 #define AF_PROJECT_MAX_CLIPS 64U
@@ -44,6 +45,7 @@ typedef struct AfProjectKeyframe {
 
 typedef struct AfProject {
     AfScene scene;
+    AfProjectMetadata metadata;
     char (*names)[AF_PROJECT_NAME_CAPACITY];
     AfVec2 canvas_size;
     uint64_t next_id;

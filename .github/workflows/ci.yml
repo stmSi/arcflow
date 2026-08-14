@@ -1,0 +1,54 @@
+name: Arcflow CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build glslc spirv-tools
+      - name: Configure
+        run: cmake --preset development -DARCFLOW_BUILD_GPU_TESTS=OFF
+      - name: Validate and compile
+        run: cmake --build --preset development --target arcflow_ci
+      - name: Release configure
+        run: cmake --preset release -DARCFLOW_BUILD_GPU_TESTS=OFF
+      - name: Release build
+        run: cmake --build --preset release --target arcflow_ci arcflow_release_bundle arcflow_reproducibility
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcflow-linux-release
+          path: build/release/Arcflow-*
+
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-shaderc
+            mingw-w64-x86_64-spirv-tools
+      - name: Configure
+        shell: msys2 {0}
+        run: cmake --preset release -DARCFLOW_BUILD_GPU_TESTS=OFF
+      - name: Build and test
+        shell: msys2 {0}
+        run: cmake --build --preset release --target arcflow_ci arcflow_release_bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcflow-windows-release
+          path: build/release/Arcflow-*

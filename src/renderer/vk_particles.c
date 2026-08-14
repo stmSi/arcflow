@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "particle/particle.h"
+#include "platform/platform_sdl.h"
 
 #include <volk.h>
 
@@ -226,8 +227,17 @@ static AfResult af_vk_particle_shader(AfVkParticleSystem *system, const char *pa
                                       VkShaderModule *out_shader) {
     uint32_t code[65536];
     FILE *file = fopen(path, "rb");
+    char resource_path[1024];
+    char relative_path[256];
+    const char *name = strrchr(path, '/');
     long length = 0L;
     VkShaderModuleCreateInfo create_info = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    name = name == NULL ? path : name + 1;
+    if (file == NULL && snprintf(relative_path, sizeof(relative_path), "shaders/%s", name) > 0 &&
+        af_platform_resource_path(relative_path, resource_path, sizeof(resource_path)) ==
+            AF_RESULT_SUCCESS) {
+        file = fopen(resource_path, "rb");
+    }
     if (file == NULL) {
         return AF_RESULT_IO_ERROR;
     }

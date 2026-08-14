@@ -90,6 +90,7 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
     memset(binding_targets, 0, AF_MAX_BINDING_TARGETS * sizeof(*binding_targets));
     memset(validation_ids, 0, AF_PROJECT_VALIDATION_ID_CAPACITY * sizeof(*validation_ids));
     af_scene_init(&project->scene, nodes, capacity);
+    af_project_metadata_default(&project->metadata);
     project->names = names;
     project->canvas_size = (AfVec2){1280.0F, 720.0F};
     project->next_id = 1U;
@@ -228,6 +229,7 @@ AfResult af_project_validate(const AfProject *project) {
         project->keyframe_capacity > AF_PROJECT_MAX_KEYFRAMES || project->next_animation_id == 0U ||
         project->next_animation_id == UINT64_MAX || project->next_asset_id == 0U ||
         project->next_asset_id == UINT64_MAX ||
+        af_project_metadata_validate(&project->metadata) != AF_RESULT_SUCCESS ||
         af_scene_validate(&project->scene) != AF_RESULT_SUCCESS ||
         af_path_data_validate(&project->path_data) != AF_RESULT_SUCCESS ||
         af_style_data_validate(&project->style_data) != AF_RESULT_SUCCESS ||

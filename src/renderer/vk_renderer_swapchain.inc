@@ -140,6 +140,17 @@ static AfResult af_vk_load_shader(AfVkRenderer *renderer, const char *path,
     }
     file = fopen(path, "rb");
     if (file == NULL) {
+        char resource_path[1024];
+        const char *name = strrchr(path, '/');
+        char relative_path[256];
+        name = name == NULL ? path : name + 1;
+        if (snprintf(relative_path, sizeof(relative_path), "shaders/%s", name) > 0 &&
+            af_platform_resource_path(relative_path, resource_path, sizeof(resource_path)) ==
+                AF_RESULT_SUCCESS) {
+            file = fopen(resource_path, "rb");
+        }
+    }
+    if (file == NULL) {
         af_log(AF_LOG_ERROR, "Unable to load SPIR-V shader: %s", path);
         return AF_RESULT_IO_ERROR;
     }

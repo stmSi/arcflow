@@ -683,7 +683,7 @@ static void af_editor_begin_rename(AfEditorState *editor) {
     }
     (void)snprintf(editor->rename_buffer, sizeof(editor->rename_buffer), "%s", name);
     editor->rename_active = true;
-    (void)SDL_StartTextInput(editor->window.window);
+    (void)af_platform_text_input_set(&editor->window, true);
 }
 
 static void af_editor_finish_rename(AfEditorState *editor, bool commit) {
@@ -698,7 +698,7 @@ static void af_editor_finish_rename(AfEditorState *editor, bool commit) {
         af_editor_status(editor, "Node renamed");
     }
     editor->rename_active = false;
-    SDL_StopTextInput(editor->window.window);
+    (void)af_platform_text_input_set(&editor->window, false);
 }
 
 static void af_editor_backspace_utf8(char *text) {

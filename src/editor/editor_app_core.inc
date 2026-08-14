@@ -249,6 +249,18 @@ static void af_editor_derive_package_path(AfEditorState *editor) {
 
 static AfResult af_editor_save(AfEditorState *editor) {
     AfResult result = AF_RESULT_INVALID_ARGUMENT;
+    const AfProjectMetadata metadata_before = editor->project.metadata;
+    if (editor->project_read_only || editor->external_change_visible) {
+        af_editor_status(editor, editor->project_read_only
+                                     ? "Project is locked by another editor; use Save As"
+                                     : "Project changed on disk; reload or use Save As");
+        return AF_RESULT_STALE_HANDLE;
+    }
+    if (editor->dirty &&
+        af_project_metadata_record(&editor->project.metadata, "local", "editor-save") !=
+            AF_RESULT_SUCCESS) {
+        return AF_RESULT_LIMIT_EXCEEDED;
+    }
     if (editor->project_path[0] != '\0') {
         result = af_project_save_file(&editor->project, editor->project_path, &editor->allocator);
     }
@@ -257,6 +269,7 @@ static AfResult af_editor_save(AfEditorState *editor) {
         af_editor_after_project_saved(editor);
         af_editor_status(editor, "Project saved");
     } else {
+        editor->project.metadata = metadata_before;
         af_editor_status(editor, "Project save failed");
     }
     return result;
@@ -268,7 +281,7 @@ static AfResult af_editor_compile(AfEditorState *editor) {
                           ? AF_RESULT_INVALID_ARGUMENT
                           : af_project_compile(&editor->project, &editor->allocator, &package);
     if (result == AF_RESULT_SUCCESS) {
-        result = af_file_write(editor->package_path, package.data, package.size);
+        result = af_file_write_atomic(editor->package_path, package.data, package.size, 1U);
     }
     af_package_blob_destroy(&editor->allocator, &package);
     af_editor_status(editor, result == AF_RESULT_SUCCESS ? "Runtime package compiled"

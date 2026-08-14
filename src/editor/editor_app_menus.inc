@@ -2,6 +2,7 @@ typedef enum AfEditorMenuAction {
     AF_EDITOR_MENU_ACTION_NONE = 0,
     AF_EDITOR_MENU_ACTION_NEW_PROJECT,
     AF_EDITOR_MENU_ACTION_OPEN_PROJECT,
+    AF_EDITOR_MENU_ACTION_RELOAD_PROJECT,
     AF_EDITOR_MENU_ACTION_SAVE_PROJECT,
     AF_EDITOR_MENU_ACTION_SAVE_PROJECT_AS,
     AF_EDITOR_MENU_ACTION_COMPILE,
@@ -18,6 +19,7 @@ typedef enum AfEditorMenuAction {
     AF_EDITOR_MENU_ACTION_ZOOM_OUT,
     AF_EDITOR_MENU_ACTION_RESET_VIEW,
     AF_EDITOR_MENU_ACTION_FIT_CANVAS,
+    AF_EDITOR_MENU_ACTION_FULLSCREEN,
     AF_EDITOR_MENU_ACTION_PLAY,
     AF_EDITOR_MENU_ACTION_STOP,
     AF_EDITOR_MENU_ACTION_ADD_KEY,
@@ -51,12 +53,14 @@ typedef enum AfEditorMenuAction {
     AF_EDITOR_MENU_ACTION_TOGGLE_SMART_GUIDES,
     AF_EDITOR_MENU_ACTION_PROFILER,
     AF_EDITOR_MENU_ACTION_VALIDATION,
+    AF_EDITOR_MENU_ACTION_SYSTEM_INFO,
     AF_EDITOR_MENU_ACTION_AUTOSAVE,
     AF_EDITOR_MENU_ACTION_RECOVERY,
     AF_EDITOR_MENU_ACTION_RESET_WORKSPACE,
     AF_EDITOR_MENU_ACTION_PRESET_LIBRARY,
     AF_EDITOR_MENU_ACTION_BUTTON_GUIDE,
     AF_EDITOR_MENU_ACTION_SHORTCUTS,
+    AF_EDITOR_MENU_ACTION_CHECK_UPDATES,
     AF_EDITOR_MENU_ACTION_ABOUT
 } AfEditorMenuAction;
 
@@ -72,7 +76,7 @@ typedef struct AfEditorMenuItem {
 typedef struct AfEditorTopMenuInfo {
     const char *label;
     float width;
-    AfEditorMenuItem items[8];
+    AfEditorMenuItem items[10];
     uint32_t item_count;
 } AfEditorTopMenuInfo;
 
@@ -85,11 +89,12 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
                    {"NEW FROM TEMPLATE", "", AF_EDITOR_MENU_ACTION_NEW_FROM_TEMPLATE},
                    {"OPEN PROJECT...", "CTRL+O", AF_EDITOR_MENU_ACTION_OPEN_PROJECT},
                    {"OPEN RECENT", "", AF_EDITOR_MENU_ACTION_OPEN_RECENT},
+                   {"RELOAD FROM DISK", "", AF_EDITOR_MENU_ACTION_RELOAD_PROJECT},
                    {"SAVE PROJECT", "CTRL+S", AF_EDITOR_MENU_ACTION_SAVE_PROJECT},
                    {"SAVE PROJECT AS...", "CTRL+SHIFT+S", AF_EDITOR_MENU_ACTION_SAVE_PROJECT_AS},
                    {"COMPILE RUNTIME", "F5", AF_EDITOR_MENU_ACTION_COMPILE},
                    {"EXIT", "ALT+F4", AF_EDITOR_MENU_ACTION_EXIT}},
-         .item_count = 8U},
+         .item_count = 9U},
         {.label = "EDIT",
          .width = 52.0F,
          .items = {{"UNDO", "CTRL+Z", AF_EDITOR_MENU_ACTION_UNDO},
@@ -108,8 +113,9 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
                    {"ZOOM IN", "+", AF_EDITOR_MENU_ACTION_ZOOM_IN},
                    {"ZOOM OUT", "-", AF_EDITOR_MENU_ACTION_ZOOM_OUT},
                    {"RESET VIEW", "0", AF_EDITOR_MENU_ACTION_RESET_VIEW},
-                   {"FIT CANVAS", "SHIFT+0", AF_EDITOR_MENU_ACTION_FIT_CANVAS}},
-         .item_count = 6U},
+                   {"FIT CANVAS", "SHIFT+0", AF_EDITOR_MENU_ACTION_FIT_CANVAS},
+                   {"FULLSCREEN", "ALT+ENTER", AF_EDITOR_MENU_ACTION_FULLSCREEN}},
+         .item_count = 7U},
         {.label = "ANIMATION",
          .width = 94.0F,
          .items = {{"PLAY / PAUSE", "SPACE", AF_EDITOR_MENU_ACTION_PLAY},
@@ -133,11 +139,12 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
                    {"FIND IN HIERARCHY", "CTRL+F", AF_EDITOR_MENU_ACTION_FIND_HIERARCHY},
                    {"PROFILE PANEL", "F10", AF_EDITOR_MENU_ACTION_PROFILER},
                    {"VALIDATION PANEL", "F11", AF_EDITOR_MENU_ACTION_VALIDATION},
+                   {"SYSTEM / DISPLAYS", "", AF_EDITOR_MENU_ACTION_SYSTEM_INFO},
                    {"RULERS", "", AF_EDITOR_MENU_ACTION_TOGGLE_RULERS},
                    {"MEASUREMENTS", "", AF_EDITOR_MENU_ACTION_TOGGLE_MEASUREMENTS},
                    {"SMART GUIDES", "", AF_EDITOR_MENU_ACTION_TOGGLE_SMART_GUIDES},
                    {"RESET WORKSPACE", "", AF_EDITOR_MENU_ACTION_RESET_WORKSPACE}},
-         .item_count = 8U},
+         .item_count = 9U},
         {.label = "TOOLS",
          .width = 62.0F,
          .items = {{"ALIGN LEFT", "", AF_EDITOR_MENU_ACTION_ALIGN_LEFT},
@@ -153,8 +160,9 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
          .width = 56.0F,
          .items = {{"BUTTON GUIDE", "", AF_EDITOR_MENU_ACTION_BUTTON_GUIDE},
                    {"KEYBOARD SHORTCUTS", "F1", AF_EDITOR_MENU_ACTION_SHORTCUTS},
+                   {"CHECK FOR UPDATES...", "", AF_EDITOR_MENU_ACTION_CHECK_UPDATES},
                    {"ABOUT ARCFLOW", "", AF_EDITOR_MENU_ACTION_ABOUT}},
-         .item_count = 3U}};
+         .item_count = 4U}};
     return menu > AF_EDITOR_MENU_NONE && menu <= AF_EDITOR_MENU_HELP ? &menus[menu] : NULL;
 }
 
@@ -195,6 +203,7 @@ static AfResult af_editor_adopt_project(AfEditorState *editor, AfProject *projec
         af_project_validate(project) != AF_RESULT_SUCCESS) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
+    af_editor_collaboration_release(editor);
     af_project_destroy(&editor->project);
     editor->project = *project;
     *project = (AfProject){0};
@@ -335,6 +344,8 @@ static void af_editor_show_project_dialog(AfEditorState *editor, AfEditorDialogA
         {"JPEG", "jpg;jpeg"},
         {"KTX2", "ktx2"},
         {"SVG", "svg"}};
+    static const SDL_DialogFileFilter update_filters[] = {
+        {"Arcflow Update Manifest", "afupdate"}};
     if (editor->dialog_active || action == AF_EDITOR_DIALOG_NONE) {
         return;
     }
@@ -345,16 +356,21 @@ static void af_editor_show_project_dialog(AfEditorState *editor, AfEditorDialogA
     editor->dialog_active = true;
     editor->dialog_action = action;
     if (action == AF_EDITOR_DIALOG_OPEN_PROJECT) {
-        SDL_ShowOpenFileDialog(
-            af_editor_project_dialog_callback, editor, editor->window.window, filters, 1,
+        (void)af_platform_show_open_file_dialog(
+            &editor->window, af_editor_project_dialog_callback, editor, filters, 1,
             editor->project_path[0] == '\0' ? NULL : editor->project_path, false);
     } else if (action == AF_EDITOR_DIALOG_SAVE_PROJECT_AS) {
-        SDL_ShowSaveFileDialog(
-            af_editor_project_dialog_callback, editor, editor->window.window, filters, 1,
+        (void)af_platform_show_save_file_dialog(
+            &editor->window, af_editor_project_dialog_callback, editor, filters, 1,
             editor->project_path[0] == '\0' ? "untitled.afproj" : editor->project_path);
+    } else if (action == AF_EDITOR_DIALOG_UPDATE_MANIFEST) {
+        (void)af_platform_show_open_file_dialog(
+            &editor->window, af_editor_project_dialog_callback, editor, update_filters, 1, NULL,
+            false);
     } else {
-        SDL_ShowOpenFileDialog(af_editor_project_dialog_callback, editor, editor->window.window,
-                               image_filters, 5, NULL, false);
+        (void)af_platform_show_open_file_dialog(&editor->window,
+                                                af_editor_project_dialog_callback, editor,
+                                                image_filters, 5, NULL, false);
     }
 }
 
@@ -373,9 +389,25 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
     } else if (action == AF_EDITOR_DIALOG_SAVE_PROJECT_AS) {
         char project_path[AF_EDITOR_PATH_CAPACITY];
         if (af_editor_project_path_with_extension(path, project_path, sizeof(project_path))) {
+            char previous_path[AF_EDITOR_PATH_CAPACITY];
+            char previous_package_path[AF_EDITOR_PATH_CAPACITY];
+            const bool previous_external_change = editor->external_change_visible;
+            (void)snprintf(previous_path, sizeof(previous_path), "%s", editor->project_path);
+            (void)snprintf(previous_package_path, sizeof(previous_package_path), "%s",
+                           editor->package_path);
+            af_editor_collaboration_release(editor);
             (void)snprintf(editor->project_path, sizeof(editor->project_path), "%s", project_path);
             af_editor_derive_package_path(editor);
-            (void)af_editor_save(editor);
+            af_editor_collaboration_track_path(editor);
+            if (af_editor_save(editor) != AF_RESULT_SUCCESS) {
+                af_editor_collaboration_release(editor);
+                (void)snprintf(editor->project_path, sizeof(editor->project_path), "%s",
+                               previous_path);
+                (void)snprintf(editor->package_path, sizeof(editor->package_path), "%s",
+                               previous_package_path);
+                af_editor_collaboration_track_path(editor);
+                editor->external_change_visible = previous_external_change;
+            }
         } else {
             af_editor_status(editor, "Project path is too long");
         }
@@ -389,6 +421,35 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
         } else {
             af_editor_status(editor, "Replacement image is invalid or could not be copied");
         }
+    } else if (action == AF_EDITOR_DIALOG_UPDATE_MANIFEST) {
+        AfFileData manifest_file = {0};
+        AfSemanticVersion current = {0};
+        AfReleaseChannel channel = AF_RELEASE_CHANNEL_DEVELOPMENT;
+        AfResult update_result = af_file_read_limited(path, AF_UPDATE_MANIFEST_MAX_SIZE,
+                                                       &editor->allocator, &manifest_file);
+        if (update_result == AF_RESULT_SUCCESS) {
+            update_result = af_update_manifest_parse(manifest_file.data, manifest_file.size,
+                                                     &editor->update_manifest);
+        }
+        if (update_result == AF_RESULT_SUCCESS) {
+            update_result = af_semantic_version_parse(AF_VERSION_STRING, &current);
+        }
+        if (update_result == AF_RESULT_SUCCESS) {
+            update_result = af_release_channel_parse(AF_RELEASE_CHANNEL, &channel);
+        }
+        if (update_result == AF_RESULT_SUCCESS) {
+            editor->update_status = af_update_check(&editor->update_manifest, current, channel,
+                                                    AF_RUNTIME_VERSION,
+                                                    AF_PACKAGE_FORMAT_VERSION);
+            editor->update_checked = true;
+        } else {
+            editor->update_checked = false;
+        }
+        editor->update_panel_visible = true;
+        af_file_data_destroy(&editor->allocator, &manifest_file);
+        af_editor_status(editor, update_result == AF_RESULT_SUCCESS
+                                     ? "Update manifest checked; artifact signature is required"
+                                     : "Update manifest is invalid or unsupported");
     } else if (action == AF_EDITOR_DIALOG_IMPORT_IMAGE) {
         uint64_t asset_id = 0U;
         uint64_t node_id = 0U;
@@ -447,6 +508,15 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         break;
     case AF_EDITOR_MENU_ACTION_OPEN_PROJECT:
         af_editor_show_project_dialog(editor, AF_EDITOR_DIALOG_OPEN_PROJECT);
+        break;
+    case AF_EDITOR_MENU_ACTION_RELOAD_PROJECT:
+        if (editor->project_path[0] == '\0') {
+            af_editor_status(editor, "Save the project before reloading");
+        } else if (af_editor_confirm_discard(editor, "Reload project from disk?")) {
+            char reload_path[AF_EDITOR_PATH_CAPACITY];
+            (void)snprintf(reload_path, sizeof(reload_path), "%s", editor->project_path);
+            (void)af_editor_open_project_path(editor, reload_path);
+        }
         break;
     case AF_EDITOR_MENU_ACTION_SAVE_PROJECT:
         if (editor->project_path[0] == '\0') {
@@ -515,6 +585,15 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
     case AF_EDITOR_MENU_ACTION_FIT_CANVAS:
         af_editor_fit_canvas(editor, width, height);
         break;
+    case AF_EDITOR_MENU_ACTION_FULLSCREEN: {
+        bool fullscreen = false;
+        const AfResult fullscreen_result =
+            af_platform_window_toggle_fullscreen(&editor->window, &fullscreen);
+        af_editor_status(editor, fullscreen_result == AF_RESULT_SUCCESS
+                                     ? (fullscreen ? "Fullscreen enabled" : "Fullscreen disabled")
+                                     : "Fullscreen transition failed");
+        break;
+    }
     case AF_EDITOR_MENU_ACTION_PLAY:
         editor->preview_playing = !editor->preview_playing;
         break;
@@ -582,6 +661,7 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
     case AF_EDITOR_MENU_ACTION_TOGGLE_SMART_GUIDES:
     case AF_EDITOR_MENU_ACTION_PROFILER:
     case AF_EDITOR_MENU_ACTION_VALIDATION:
+    case AF_EDITOR_MENU_ACTION_SYSTEM_INFO:
     case AF_EDITOR_MENU_ACTION_AUTOSAVE:
     case AF_EDITOR_MENU_ACTION_RECOVERY:
     case AF_EDITOR_MENU_ACTION_RESET_WORKSPACE:
@@ -595,6 +675,10 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
     case AF_EDITOR_MENU_ACTION_SHORTCUTS:
         editor->shortcuts_overlay = true;
         editor->shortcut_capture = false;
+        break;
+    case AF_EDITOR_MENU_ACTION_CHECK_UPDATES:
+        editor->update_panel_visible = true;
+        af_editor_show_project_dialog(editor, AF_EDITOR_DIALOG_UPDATE_MANIFEST);
         break;
     case AF_EDITOR_MENU_ACTION_NONE:
         break;
@@ -749,7 +833,7 @@ static bool af_editor_top_menu_mouse_down(AfEditorState *editor, int width, int 
             } else if (link == 1U) {
                 (void)af_editor_command_palette_open(&editor->command_palette,
                                                      AF_EDITOR_ACTION_CONTEXT_GLOBAL);
-                SDL_StartTextInput(editor->window.window);
+                (void)af_platform_text_input_set(&editor->window, true);
             } else if (link == 2U) {
                 af_editor_refresh_recovery(editor, true);
             } else if (link == 3U) {

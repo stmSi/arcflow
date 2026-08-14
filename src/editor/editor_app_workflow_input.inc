@@ -1,5 +1,13 @@
 static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int height, float x,
                                           float y) {
+    if (editor->platform_panel_visible) {
+        editor->platform_panel_visible = false;
+        return true;
+    }
+    if (editor->update_panel_visible && !editor->dialog_active) {
+        editor->update_panel_visible = false;
+        return true;
+    }
     if (editor->template_panel_visible) {
         const float box_x = ((float)width - 690.0F) * 0.5F;
         const float box_y = ((float)height - 250.0F) * 0.5F;
@@ -186,7 +194,7 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
     }
     if (x < editor->left_width && y >= 48.0F && y < 75.0F) {
         editor->hierarchy_search_active = true;
-        SDL_StartTextInput(editor->window.window);
+        (void)af_platform_text_input_set(&editor->window, true);
         return true;
     }
     return false;
@@ -197,6 +205,18 @@ static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEven
     const uint32_t modifiers = af_editor_shortcut_modifiers(event->mod);
     if (!event->down) {
         return false;
+    }
+    if (editor->platform_panel_visible) {
+        if (event->key == SDLK_ESCAPE) {
+            editor->platform_panel_visible = false;
+        }
+        return true;
+    }
+    if (editor->update_panel_visible) {
+        if (event->key == SDLK_ESCAPE) {
+            editor->update_panel_visible = false;
+        }
+        return true;
     }
     if (editor->template_panel_visible) {
         if (event->key == SDLK_ESCAPE) {
@@ -311,10 +331,10 @@ static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEven
         if (event->key == SDLK_ESCAPE) {
             editor->hierarchy_search[0] = '\0';
             editor->hierarchy_search_active = false;
-            SDL_StopTextInput(editor->window.window);
+            (void)af_platform_text_input_set(&editor->window, false);
         } else if (event->key == SDLK_RETURN || event->key == SDLK_KP_ENTER) {
             editor->hierarchy_search_active = false;
-            SDL_StopTextInput(editor->window.window);
+            (void)af_platform_text_input_set(&editor->window, false);
         } else if (event->key == SDLK_BACKSPACE) {
             af_editor_backspace_utf8(editor->hierarchy_search);
         }

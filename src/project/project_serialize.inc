@@ -71,6 +71,8 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_mul_overflow(project->binding_data.target_count, 192U, &animation_capacity) ||
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
+        af_size_mul_overflow(project->metadata.change_count, 160U, &animation_capacity) ||
+        af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_add_overflow(capacity, 256U, &capacity)) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
@@ -83,12 +85,13 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
     result = af_project_writer_append(
         &writer,
         "arcflow_project %u\ncanvas %.9g %.9g\nnext_id %llu\nnext_animation_id %llu\n"
-        "next_asset_id %llu\n"
+        "next_asset_id %llu\nmetadata %s %llu\n"
         "layout_canvas %.9g %.9g %.9g %.9g %u %.9g %.9g %.9g %.9g\n"
         "vfx_lod %u %.9g %.9g %.9g %.9g %u\n",
         AF_PROJECT_FORMAT_VERSION, project->canvas_size.x, project->canvas_size.y,
         (unsigned long long)project->next_id, (unsigned long long)project->next_animation_id,
-        (unsigned long long)project->next_asset_id, project->layout_data.reference_size.x,
+        (unsigned long long)project->next_asset_id, project->metadata.project_id,
+        (unsigned long long)project->metadata.revision, project->layout_data.reference_size.x,
         project->layout_data.reference_size.y, project->layout_data.target_size.x,
         project->layout_data.target_size.y, (uint32_t)project->layout_data.scale_mode,
         project->layout_data.safe_area.left, project->layout_data.safe_area.top,
@@ -97,6 +100,13 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
         project->particle_data.lod.simulation_frequency_scale,
         project->particle_data.lod.distance_start, project->particle_data.lod.distance_end,
         project->particle_data.lod.renderer_enabled ? 1U : 0U);
+    for (index = 0U; result == AF_RESULT_SUCCESS && index < project->metadata.change_count;
+         ++index) {
+        const AfProjectChange *change = &project->metadata.changes[index];
+        result = af_project_writer_append(&writer, "change %llu %s %s\n",
+                                          (unsigned long long)change->revision, change->author,
+                                          change->summary);
+    }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->scene.count; ++index) {
         const AfSceneNode *node = &project->scene.nodes[index];
         char parent[32] = {0};

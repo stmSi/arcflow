@@ -9,18 +9,34 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": { "CMAKE_EXPORT_COMPILE_COMMANDS": "ON" }
     },
-    { "name": "debug", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
-    { "name": "development", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" } },
-    { "name": "release", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "ARCFLOW_ENABLE_VALIDATION": "OFF" } },
+    { "name": "debug", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "ARCFLOW_RELEASE_CHANNEL": "Development" } },
+    { "name": "development", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "ARCFLOW_RELEASE_CHANNEL": "Development" } },
+    { "name": "release", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "ARCFLOW_ENABLE_VALIDATION": "OFF", "ARCFLOW_RELEASE_CHANNEL": "Stable" } },
+    { "name": "preview", "inherits": "release", "cacheVariables": { "ARCFLOW_RELEASE_CHANNEL": "Preview" } },
+    { "name": "beta", "inherits": "release", "cacheVariables": { "ARCFLOW_RELEASE_CHANNEL": "Beta" } },
     { "name": "asan", "inherits": "debug", "cacheVariables": { "CMAKE_C_FLAGS": "-fsanitize=address -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address", "ARCFLOW_BUILD_GPU_TESTS": "OFF" } },
-    { "name": "ubsan", "inherits": "debug", "cacheVariables": { "CMAKE_C_FLAGS": "-fsanitize=undefined -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=undefined", "ARCFLOW_BUILD_GPU_TESTS": "OFF" } }
+    { "name": "ubsan", "inherits": "debug", "cacheVariables": { "CMAKE_C_FLAGS": "-fsanitize=undefined -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=undefined", "ARCFLOW_BUILD_GPU_TESTS": "OFF" } },
+    {
+      "name": "windows-x64-cross",
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/windows-x64-mingw.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ARCFLOW_ENABLE_VALIDATION": "OFF",
+        "ARCFLOW_BUILD_GPU_TESTS": "OFF",
+        "ARCFLOW_RELEASE_CHANNEL": "Stable"
+      }
+    }
   ],
   "buildPresets": [
     { "name": "debug", "configurePreset": "debug" },
     { "name": "development", "configurePreset": "development" },
     { "name": "release", "configurePreset": "release" },
+    { "name": "preview", "configurePreset": "preview" },
+    { "name": "beta", "configurePreset": "beta" },
     { "name": "asan", "configurePreset": "asan" },
-    { "name": "ubsan", "configurePreset": "ubsan" }
+    { "name": "ubsan", "configurePreset": "ubsan" },
+    { "name": "windows-x64-cross", "configurePreset": "windows-x64-cross" }
   ],
   "testPresets": [
     { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },

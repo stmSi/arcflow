@@ -104,14 +104,128 @@ static void af_editor_render_validation(AfEditorState *editor) {
                        missing == 0U ? (AfColor){0.55F, 0.9F, 0.65F, 1.0F}
                                      : (AfColor){1.0F, 0.68F, 0.3F, 1.0F},
                        202010);
-    af_editor_add_text(editor, x + 16.0F, y + 112.0F,
-                       missing != 0U && affected_id != 0U ? "CLICK HERE: SELECT AFFECTED OBJECT"
+    (void)snprintf(line, sizeof(line), "REVISION %llu   LOCK %s",
+                   (unsigned long long)editor->project.metadata.revision,
+                   editor->project_read_only ? "READ ONLY" : "OWNED");
+    af_editor_add_text(editor, x + 16.0F, y + 112.0F, line, 0.78F, 300.0F,
+                       editor->project_read_only ? (AfColor){1.0F, 0.68F, 0.3F, 1.0F}
+                                                 : (AfColor){0.55F, 0.9F, 0.65F, 1.0F},
+                       202010);
+    af_editor_add_text(editor, x + 16.0F, y + 140.0F,
+                       editor->external_change_visible ? "DISK CHANGED: FILE > RELOAD FROM DISK"
+                                                       : "DISK STATE: CURRENT",
+                       0.68F, 300.0F,
+                       editor->external_change_visible ? (AfColor){1.0F, 0.58F, 0.32F, 1.0F}
+                                                       : (AfColor){0.54F, 0.65F, 0.76F, 1.0F},
+                       202010);
+    af_editor_add_text(editor, x + 16.0F, y + 168.0F,
+                       missing != 0U && affected_id != 0U ? "CLICK: SELECT AFFECTED OBJECT"
                                                           : "NO OBJECT ERRORS TO NAVIGATE",
-                       0.72F, 300.0F, (AfColor){0.62F, 0.73F, 0.9F, 1.0F}, 202010);
-    af_editor_add_text(editor, x + 16.0F, y + 143.0F, "MISSING IMAGE: ASSETS > REIMPORT ASSETS",
-                       0.68F, 300.0F, (AfColor){0.54F, 0.59F, 0.68F, 1.0F}, 202010);
-    af_editor_add_text(editor, x + 16.0F, y + 188.0F, "CLICK TITLE TO CLOSE", 0.65F, 300.0F,
-                       (AfColor){0.45F, 0.51F, 0.61F, 1.0F}, 202010);
+                       0.68F, 300.0F, (AfColor){0.62F, 0.73F, 0.9F, 1.0F}, 202010);
+}
+
+static void af_editor_render_platform(AfEditorState *editor, int width, int height) {
+    AfPlatformWindowMetrics metrics = {0};
+    char line[192];
+    const float box_width = 560.0F;
+    const float box_height = 350.0F;
+    const float x = ((float)width - box_width) * 0.5F;
+    const float y = ((float)height - box_height) * 0.5F;
+    if (!editor->platform_panel_visible) {
+        return;
+    }
+    (void)af_platform_window_metrics(&editor->window, &metrics);
+    af_editor_add_rect(editor, 0.0F, 0.0F, (float)width, (float)height,
+                       (AfColor){0.0F, 0.0F, 0.0F, 0.55F}, 235900);
+    af_editor_add_shape(
+        editor, AF_NODE_ROUNDED_RECTANGLE, (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = y},
+        (AfVec2){box_width, box_height}, (AfColor){0.075F, 0.085F, 0.11F, 1.0F}, 8.0F, 236000);
+    af_editor_add_text(editor, x + 22.0F, y + 18.0F, "SYSTEM, DISPLAYS AND INPUT", 1.2F, 500.0F,
+                       (AfColor){0.61F, 0.82F, 1.0F, 1.0F}, 236010);
+    (void)snprintf(line, sizeof(line), "OS %.78s   VIDEO %.78s",
+                   editor->platform_capabilities.operating_system,
+                   editor->platform_capabilities.video_driver);
+    af_editor_add_text(editor, x + 22.0F, y + 54.0F, line, 0.8F, 510.0F,
+                       (AfColor){0.82F, 0.86F, 0.94F, 1.0F}, 236010);
+    (void)snprintf(line, sizeof(line), "WINDOW %d x %d   PIXELS %d x %d   SCALE %.2f x %.2f",
+                   metrics.logical_width, metrics.logical_height, metrics.pixel_width,
+                   metrics.pixel_height, metrics.pixel_scale_x, metrics.pixel_scale_y);
+    af_editor_add_text(editor, x + 22.0F, y + 84.0F, line, 0.76F, 510.0F,
+                       (AfColor){0.68F, 0.75F, 0.86F, 1.0F}, 236010);
+    (void)snprintf(line, sizeof(line), "DISPLAYS %u%s   KEYBOARDS %u   TOUCH %u",
+                   editor->platform_capabilities.display_count,
+                   editor->platform_capabilities.display_list_truncated ? "+" : "",
+                   editor->platform_capabilities.keyboard_count,
+                   editor->platform_capabilities.touch_device_count);
+    af_editor_add_text(editor, x + 22.0F, y + 114.0F, line, 0.76F, 510.0F,
+                       (AfColor){0.68F, 0.75F, 0.86F, 1.0F}, 236010);
+    for (uint32_t index = 0U; index < editor->platform_capabilities.display_count && index < 4U;
+         ++index) {
+        const AfPlatformDisplay *display = &editor->platform_capabilities.displays[index];
+        (void)snprintf(line, sizeof(line), "%u  %s   %d x %d   DPI %.2f%s", index + 1U,
+                       display->name, display->bounds.w, display->bounds.h, display->content_scale,
+                       display->hdr_enabled ? "   HDR" : "");
+        af_editor_add_text(editor, x + 34.0F, y + 150.0F + (float)index * 27.0F, line, 0.68F,
+                           490.0F, (AfColor){0.61F, 0.68F, 0.79F, 1.0F}, 236010);
+    }
+    af_editor_add_text(editor, x + 22.0F, y + 272.0F,
+                       "TEXT INPUT, CLIPBOARD, FILE DIALOGS AND PEN EVENTS: SDL PLATFORM LAYER",
+                       0.64F, 510.0F, (AfColor){0.53F, 0.65F, 0.78F, 1.0F}, 236010);
+    af_editor_add_text(editor, x + 22.0F, y + 304.0F,
+                       "ALT+ENTER FULLSCREEN   CLICK ANYWHERE TO CLOSE", 0.68F, 510.0F,
+                       (AfColor){0.5F, 0.72F, 0.9F, 1.0F}, 236010);
+}
+
+static void af_editor_render_update(AfEditorState *editor, int width, int height) {
+    static const char *const statuses[] = {"CURRENT", "UPDATE AVAILABLE", "CHANNEL BLOCKED",
+                                           "INCOMPATIBLE"};
+    char line[256];
+    const float box_width = 580.0F;
+    const float box_height = 300.0F;
+    const float x = ((float)width - box_width) * 0.5F;
+    const float y = ((float)height - box_height) * 0.5F;
+    if (!editor->update_panel_visible) {
+        return;
+    }
+    af_editor_add_rect(editor, 0.0F, 0.0F, (float)width, (float)height,
+                       (AfColor){0.0F, 0.0F, 0.0F, 0.55F}, 237900);
+    af_editor_add_shape(
+        editor, AF_NODE_ROUNDED_RECTANGLE, (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = y},
+        (AfVec2){box_width, box_height}, (AfColor){0.075F, 0.085F, 0.11F, 1.0F}, 8.0F, 238000);
+    af_editor_add_text(editor, x + 22.0F, y + 18.0F, "ARCFLOW RELEASE AND UPDATES", 1.2F, 520.0F,
+                       (AfColor){0.61F, 0.82F, 1.0F, 1.0F}, 238010);
+    (void)snprintf(line, sizeof(line), "VERSION %s   CHANNEL %s", AF_VERSION_STRING,
+                   AF_RELEASE_CHANNEL);
+    af_editor_add_text(editor, x + 22.0F, y + 58.0F, line, 0.82F, 530.0F,
+                       (AfColor){0.82F, 0.86F, 0.94F, 1.0F}, 238010);
+    (void)snprintf(line, sizeof(line), "PACKAGE FORMAT %u   RUNTIME ABI %u",
+                   AF_PACKAGE_FORMAT_VERSION, AF_RUNTIME_VERSION);
+    af_editor_add_text(editor, x + 22.0F, y + 88.0F, line, 0.74F, 530.0F,
+                       (AfColor){0.65F, 0.73F, 0.84F, 1.0F}, 238010);
+    (void)snprintf(line, sizeof(line), "BUILD %.96s", AF_BUILD_ID);
+    af_editor_add_text(editor, x + 22.0F, y + 118.0F, line, 0.64F, 530.0F,
+                       (AfColor){0.53F, 0.62F, 0.74F, 1.0F}, 238010);
+    if (editor->update_checked) {
+        (void)snprintf(line, sizeof(line), "MANIFEST %u.%u.%u  %s",
+                       editor->update_manifest.version.major, editor->update_manifest.version.minor,
+                       editor->update_manifest.version.patch,
+                       statuses[(uint32_t)editor->update_status]);
+    } else {
+        (void)snprintf(line, sizeof(line), "SELECT A .AFUPDATE MANIFEST TO CHECK THIS CHANNEL");
+    }
+    af_editor_add_text(editor, x + 22.0F, y + 158.0F, line, 0.78F, 530.0F,
+                       editor->update_checked && editor->update_status == AF_UPDATE_STATUS_AVAILABLE
+                           ? (AfColor){0.6F, 0.9F, 0.68F, 1.0F}
+                           : (AfColor){0.72F, 0.76F, 0.84F, 1.0F},
+                       238010);
+    af_editor_add_text(editor, x + 22.0F, y + 202.0F,
+                       "ARTIFACTS ARE HASHED, SIGNATURE-VERIFIED AND ATOMICALLY STAGED",
+                       0.68F, 530.0F, (AfColor){0.57F, 0.71F, 0.85F, 1.0F}, 238010);
+    af_editor_add_text(editor, x + 22.0F, y + 232.0F,
+                       "AUTOMATIC INSTALL IS OPT-IN; PROJECTS AND SETTINGS ARE OUTSIDE APP FILES",
+                       0.64F, 530.0F, (AfColor){0.52F, 0.61F, 0.73F, 1.0F}, 238010);
+    af_editor_add_text(editor, x + 22.0F, y + 266.0F, "CLICK ANYWHERE TO CLOSE", 0.66F, 530.0F,
+                       (AfColor){0.48F, 0.68F, 0.88F, 1.0F}, 238010);
 }
 
 static void af_editor_render_palette(AfEditorState *editor, int width) {
@@ -404,6 +518,8 @@ static void af_editor_render_workflow(AfEditorState *editor, int width, int heig
     af_editor_render_search(editor);
     af_editor_render_profiler(editor, width);
     af_editor_render_validation(editor);
+    af_editor_render_platform(editor, width, height);
+    af_editor_render_update(editor, width, height);
     af_editor_render_palette(editor, width);
     af_editor_render_shortcuts(editor, width, height);
     af_editor_render_recovery(editor, width, height);

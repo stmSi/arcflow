@@ -1,0 +1,37 @@
+if(NOT DEFINED ARCFLOW_BUILD_DIRECTORY OR NOT DEFINED ARCFLOW_INSTALL_PREFIX)
+    message(FATAL_ERROR "build directory and install prefix are required")
+endif()
+file(REMOVE_RECURSE "${ARCFLOW_INSTALL_PREFIX}")
+set(external_root "${ARCFLOW_BUILD_DIRECTORY}/install-test-user-data")
+file(REMOVE_RECURSE "${external_root}")
+file(MAKE_DIRECTORY "${external_root}/projects" "${external_root}/settings")
+file(WRITE "${external_root}/projects/user-project.afproj" "preserve-project\n")
+file(WRITE "${external_root}/settings/preferences" "preserve-settings\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" --install "${ARCFLOW_BUILD_DIRECTORY}"
+                        --prefix "${ARCFLOW_INSTALL_PREFIX}"
+                RESULT_VARIABLE result)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "clean installation failed")
+endif()
+set(compiler "${ARCFLOW_INSTALL_PREFIX}/bin/arcflow_compiler${CMAKE_EXECUTABLE_SUFFIX}")
+if(NOT EXISTS "${compiler}")
+    message(FATAL_ERROR "installed compiler is missing")
+endif()
+if(NOT CMAKE_CROSSCOMPILING)
+    execute_process(COMMAND "${compiler}" --version RESULT_VARIABLE result)
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "installed compiler did not launch")
+    endif()
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" --install "${ARCFLOW_BUILD_DIRECTORY}"
+                        --prefix "${ARCFLOW_INSTALL_PREFIX}"
+                RESULT_VARIABLE result)
+if(NOT result EQUAL 0 OR NOT EXISTS "${external_root}/projects/user-project.afproj" OR
+   NOT EXISTS "${external_root}/settings/preferences")
+    message(FATAL_ERROR "upgrade installation failed or modified user data")
+endif()
+include("${ARCFLOW_BUILD_DIRECTORY}/cmake_uninstall.cmake")
+if(NOT EXISTS "${external_root}/projects/user-project.afproj" OR
+   NOT EXISTS "${external_root}/settings/preferences")
+    message(FATAL_ERROR "uninstall removed user projects or settings")
+endif()

@@ -3,7 +3,7 @@
 #include "core/safe_math.h"
 
 #include <stdlib.h>
-#if defined(_MSC_VER)
+#if defined(_WIN32)
 #include <malloc.h>
 #endif
 
@@ -20,7 +20,7 @@ static void *af_default_allocate(void *user, size_t size, size_t alignment) {
         return NULL;
     }
     rounded_size &= ~(alignment - 1U);
-#if defined(_MSC_VER)
+#if defined(_WIN32)
     return _aligned_malloc(rounded_size, alignment);
 #else
     return aligned_alloc(alignment, rounded_size);
@@ -29,7 +29,7 @@ static void *af_default_allocate(void *user, size_t size, size_t alignment) {
 
 static void af_default_deallocate(void *user, void *memory) {
     (void)user;
-#if defined(_MSC_VER)
+#if defined(_WIN32)
     _aligned_free(memory);
 #else
     free(memory);
