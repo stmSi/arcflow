@@ -244,6 +244,8 @@ static void af_editor_load_preferences(AfEditorState *editor, int width, int hei
     editor->rulers_visible = true;
     editor->measurement_visible = true;
     editor->smart_guides_visible = true;
+    editor->welcome_visible =
+        !editor->preferences.onboarding_complete && editor->maximum_frames == 0U;
 }
 
 static void af_editor_save_preferences(AfEditorState *editor) {
@@ -711,50 +713,31 @@ static void af_editor_reset_workspace(AfEditorState *editor) {
     af_editor_status(editor, "Default workspace restored");
 }
 
-static AfResult af_editor_create_template(AfEditorState *editor, uint32_t template_index) {
+static bool af_editor_create_template(AfEditorState *editor, uint32_t template_index) {
     AfProject project = {0};
-    AfEditorState staging = {0};
+    const AfProjectTemplateInfo *info =
+        af_project_template_info((AfProjectTemplateId)template_index);
     AfResult result = AF_RESULT_SUCCESS;
-    if (template_index > 2U) {
-        return AF_RESULT_INVALID_ARGUMENT;
+    if (info == NULL) {
+        return false;
     }
     if (!af_editor_confirm_discard(editor, "Create a project from this template?")) {
-        return AF_RESULT_SUCCESS;
+        return false;
     }
-    result = af_project_create(&project, &editor->allocator, AF_EDITOR_PROJECT_CAPACITY);
-    if (result == AF_RESULT_SUCCESS && template_index == 0U) {
-        const AfProjectClip clip = {.id = 1U,
-                                    .name = "Main Clip",
-                                    .duration = 4.0F,
-                                    .loop_start = 0.0F,
-                                    .loop_end = 4.0F,
-                                    .loop = true};
-        result = af_project_add_clip(&project, &clip);
-    } else if (result == AF_RESULT_SUCCESS) {
-        staging.project = project;
-        result = af_editor_default_project(&staging);
-        project = staging.project;
-        if (result == AF_RESULT_SUCCESS && template_index == 1U) {
-            AfParticleEmitter *emitter = af_project_find_node_emitter(&project, 4U);
-            if (emitter != NULL) {
-                result = af_project_remove_emitter(&project, emitter->id);
-            }
-            project.canvas_size = (AfVec2){1440.0F, 900.0F};
-        }
-    }
+    result = af_project_template_build((AfProjectTemplateId)template_index, &editor->allocator,
+                                       AF_EDITOR_PROJECT_CAPACITY, &project);
     if (result == AF_RESULT_SUCCESS) {
         result = af_editor_adopt_project(editor, &project, NULL, false);
     }
     af_project_destroy(&project);
     if (result == AF_RESULT_SUCCESS) {
-        static const char *const names[] = {"Empty canvas template created",
-                                            "UI layout template created",
-                                            "Animated VFX template created"};
-        af_editor_status(editor, names[template_index]);
+        char status[AF_EDITOR_STATUS_CAPACITY];
+        (void)snprintf(status, sizeof(status), "%s template created", info->name);
+        af_editor_status(editor, status);
     } else {
         af_editor_status(editor, "Project template creation failed");
     }
-    return result;
+    return result == AF_RESULT_SUCCESS;
 }
 
 static void af_editor_open_recent_index(AfEditorState *editor, uint32_t index) {
@@ -855,8 +838,7 @@ static void af_editor_execute_workflow_action(AfEditorState *editor, AfEditorMen
     case AF_EDITOR_MENU_ACTION_SYSTEM_INFO:
         editor->platform_panel_visible = !editor->platform_panel_visible;
         if (editor->platform_panel_visible) {
-            (void)af_platform_query_capabilities(&editor->window,
-                                                 &editor->platform_capabilities);
+            (void)af_platform_query_capabilities(&editor->window, &editor->platform_capabilities);
         }
         break;
     case AF_EDITOR_MENU_ACTION_AUTOSAVE:

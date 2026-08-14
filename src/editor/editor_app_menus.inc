@@ -58,6 +58,9 @@ typedef enum AfEditorMenuAction {
     AF_EDITOR_MENU_ACTION_RECOVERY,
     AF_EDITOR_MENU_ACTION_RESET_WORKSPACE,
     AF_EDITOR_MENU_ACTION_PRESET_LIBRARY,
+    AF_EDITOR_MENU_ACTION_WELCOME,
+    AF_EDITOR_MENU_ACTION_GUIDED_PROJECT,
+    AF_EDITOR_MENU_ACTION_EXAMPLE_BROWSER,
     AF_EDITOR_MENU_ACTION_BUTTON_GUIDE,
     AF_EDITOR_MENU_ACTION_SHORTCUTS,
     AF_EDITOR_MENU_ACTION_CHECK_UPDATES,
@@ -158,11 +161,14 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
          .item_count = 8U},
         {.label = "HELP",
          .width = 56.0F,
-         .items = {{"BUTTON GUIDE", "", AF_EDITOR_MENU_ACTION_BUTTON_GUIDE},
+         .items = {{"WELCOME", "", AF_EDITOR_MENU_ACTION_WELCOME},
+                   {"GUIDED FIRST PROJECT", "", AF_EDITOR_MENU_ACTION_GUIDED_PROJECT},
+                   {"EXAMPLE BROWSER", "", AF_EDITOR_MENU_ACTION_EXAMPLE_BROWSER},
+                   {"REFERENCE TOPICS", "", AF_EDITOR_MENU_ACTION_BUTTON_GUIDE},
                    {"KEYBOARD SHORTCUTS", "F1", AF_EDITOR_MENU_ACTION_SHORTCUTS},
                    {"CHECK FOR UPDATES...", "", AF_EDITOR_MENU_ACTION_CHECK_UPDATES},
                    {"ABOUT ARCFLOW", "", AF_EDITOR_MENU_ACTION_ABOUT}},
-         .item_count = 4U}};
+         .item_count = 7U}};
     return menu > AF_EDITOR_MENU_NONE && menu <= AF_EDITOR_MENU_HELP ? &menus[menu] : NULL;
 }
 
@@ -668,7 +674,18 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
     case AF_EDITOR_MENU_ACTION_PRESET_LIBRARY:
         af_editor_execute_workflow_action(editor, action, width, height);
         break;
+    case AF_EDITOR_MENU_ACTION_WELCOME:
+        af_editor_onboarding_show_welcome(editor);
+        break;
+    case AF_EDITOR_MENU_ACTION_GUIDED_PROJECT:
+        af_editor_onboarding_start_guided(editor);
+        break;
+    case AF_EDITOR_MENU_ACTION_EXAMPLE_BROWSER:
+        af_editor_onboarding_show_examples(editor);
+        break;
     case AF_EDITOR_MENU_ACTION_BUTTON_GUIDE:
+        af_editor_onboarding_show_guides(editor, AF_ONBOARDING_QUICK_START);
+        break;
     case AF_EDITOR_MENU_ACTION_ABOUT:
         editor->help_overlay = true;
         break;

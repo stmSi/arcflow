@@ -80,6 +80,7 @@ typedef struct AfEditorPreferences {
     bool show_tooltips;
     bool show_extended_tooltips;
     bool reopen_last_project;
+    bool onboarding_complete;
 } AfEditorPreferences;
 
 void af_editor_preferences_default(AfEditorPreferences *preferences);

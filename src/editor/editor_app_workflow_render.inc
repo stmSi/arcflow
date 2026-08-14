@@ -219,8 +219,8 @@ static void af_editor_render_update(AfEditorState *editor, int width, int height
                            : (AfColor){0.72F, 0.76F, 0.84F, 1.0F},
                        238010);
     af_editor_add_text(editor, x + 22.0F, y + 202.0F,
-                       "ARTIFACTS ARE HASHED, SIGNATURE-VERIFIED AND ATOMICALLY STAGED",
-                       0.68F, 530.0F, (AfColor){0.57F, 0.71F, 0.85F, 1.0F}, 238010);
+                       "ARTIFACTS ARE HASHED, SIGNATURE-VERIFIED AND ATOMICALLY STAGED", 0.68F,
+                       530.0F, (AfColor){0.57F, 0.71F, 0.85F, 1.0F}, 238010);
     af_editor_add_text(editor, x + 22.0F, y + 232.0F,
                        "AUTOMATIC INSTALL IS OPT-IN; PROJECTS AND SETTINGS ARE OUTSIDE APP FILES",
                        0.64F, 530.0F, (AfColor){0.52F, 0.61F, 0.73F, 1.0F}, 238010);
@@ -435,12 +435,8 @@ static void af_editor_render_preset_library(AfEditorState *editor, int width, in
 }
 
 static void af_editor_render_templates(AfEditorState *editor, int width, int height) {
-    static const char *const names[] = {"EMPTY CANVAS", "UI LAYOUT", "ANIMATED VFX"};
-    static const char *const descriptions[] = {"Blank scene with a Main Clip",
-                                               "Responsive 1440 x 900 starter scene",
-                                               "Shapes, animation timeline and particles"};
-    const float box_width = 690.0F;
-    const float box_height = 250.0F;
+    const float box_width = 780.0F;
+    const float box_height = 410.0F;
     const float x = ((float)width - box_width) * 0.5F;
     const float y = ((float)height - box_height) * 0.5F;
     if (!editor->template_panel_visible) {
@@ -454,25 +450,29 @@ static void af_editor_render_templates(AfEditorState *editor, int width, int hei
     af_editor_add_text(editor, x + 22.0F, y + 18.0F, "NEW PROJECT FROM TEMPLATE", 1.18F, 500.0F,
                        (AfColor){0.61F, 0.82F, 1.0F, 1.0F}, 238010);
     af_editor_add_text(editor, x + 22.0F, y + 44.0F,
-                       "LEFT / RIGHT SELECTS  -  ENTER CREATES  -  ESC CLOSES", 0.68F, 640.0F,
+                       "ARROWS SELECT  -  ENTER CREATES  -  ESC CLOSES", 0.68F, 720.0F,
                        (AfColor){0.48F, 0.55F, 0.65F, 1.0F}, 238010);
-    for (uint32_t index = 0U; index < 3U; ++index) {
-        const float card_x = x + 18.0F + (float)index * 222.0F;
+    for (uint32_t index = 0U; index < af_project_template_count(); ++index) {
+        const AfProjectTemplateInfo *info = af_project_template_info((AfProjectTemplateId)index);
+        const float card_x = x + 18.0F + (float)(index % 3U) * 250.0F;
+        const float card_y = y + 75.0F + (float)(index / 3U) * 145.0F;
         const bool selected = index == editor->template_selected_index;
         af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                            (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = card_x, .ty = y + 75.0F},
-                            (AfVec2){210.0F, 145.0F},
+                            (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = card_x, .ty = card_y},
+                            (AfVec2){238.0F, 132.0F},
                             selected ? (AfColor){0.18F, 0.34F, 0.56F, 1.0F}
                                      : (AfColor){0.12F, 0.14F, 0.18F, 1.0F},
                             6.0F, 238010);
-        af_editor_add_rect(editor, card_x + 16.0F, y + 92.0F, 178.0F, 54.0F,
-                           index == 0U   ? (AfColor){0.2F, 0.22F, 0.27F, 1.0F}
-                           : index == 1U ? (AfColor){0.24F, 0.55F, 0.84F, 1.0F}
-                                         : (AfColor){0.49F, 0.32F, 0.76F, 1.0F},
-                           238020);
-        af_editor_add_text(editor, card_x + 16.0F, y + 162.0F, names[index], 0.84F, 178.0F,
+        af_editor_add_rect(
+            editor, card_x + 14.0F, card_y + 14.0F, 210.0F, 38.0F,
+            index == AF_PROJECT_TEMPLATE_BLANK             ? (AfColor){0.2F, 0.22F, 0.27F, 1.0F}
+            : index == AF_PROJECT_TEMPLATE_RESPONSIVE_UI   ? (AfColor){0.24F, 0.55F, 0.84F, 1.0F}
+            : index == AF_PROJECT_TEMPLATE_PARTICLE_EFFECT ? (AfColor){0.49F, 0.32F, 0.76F, 1.0F}
+                                                           : (AfColor){0.2F, 0.45F, 0.58F, 1.0F},
+            238020);
+        af_editor_add_text(editor, card_x + 14.0F, card_y + 62.0F, info->name, 0.78F, 210.0F,
                            (AfColor){0.88F, 0.91F, 0.97F, 1.0F}, 238020);
-        af_editor_add_text(editor, card_x + 16.0F, y + 188.0F, descriptions[index], 0.62F, 178.0F,
+        af_editor_add_text(editor, card_x + 14.0F, card_y + 88.0F, info->description, 0.57F, 210.0F,
                            (AfColor){0.6F, 0.67F, 0.77F, 1.0F}, 238020);
     }
 }
@@ -526,6 +526,7 @@ static void af_editor_render_workflow(AfEditorState *editor, int width, int heig
     af_editor_render_preset_library(editor, width, height);
     af_editor_render_templates(editor, width, height);
     af_editor_render_recent_projects(editor, width, height);
+    af_editor_render_onboarding(editor, width, height);
 }
 
 static void af_editor_render_canvas_workflow(AfEditorState *editor, int width, int height,

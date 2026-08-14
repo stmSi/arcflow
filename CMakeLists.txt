@@ -187,8 +187,10 @@ target_include_directories(arcflow_runtime_shared PUBLIC include third_party/Vul
 target_link_libraries(arcflow_runtime_shared PUBLIC arcflow_core)
 
 add_library(arcflow_project STATIC
+    src/onboarding/onboarding.c
     src/project/project.c
     src/project/project_collaboration.c
+    src/project/project_templates.c
     src/project/image_decode.c
     src/project/image_svg.c
     src/project/project_images.c
@@ -372,12 +374,41 @@ target_include_directories(arcflow_update_tests PRIVATE src include)
 target_link_libraries(arcflow_update_tests PRIVATE arcflow_update)
 add_test(NAME arcflow_update_tests COMMAND arcflow_update_tests)
 
+add_executable(arcflow_onboarding_tests tests/test_onboarding.c)
+target_include_directories(arcflow_onboarding_tests PRIVATE src include)
+target_link_libraries(arcflow_onboarding_tests PRIVATE arcflow_project)
+add_test(NAME arcflow_onboarding_tests COMMAND arcflow_onboarding_tests)
+
+add_executable(arcflow_runtime_sample examples/runtime_sample.c)
+target_include_directories(arcflow_runtime_sample PRIVATE include third_party/Vulkan-Headers/include)
+target_link_libraries(arcflow_runtime_sample PRIVATE arcflow_runtime)
+
+set(ARCFLOW_EXAMPLE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/examples")
+set(ARCFLOW_EXAMPLE_OUTPUTS)
+foreach(example IN ITEMS blank guided-basics vector-animation interactive-button responsive-ui
+                         particle-effect)
+    list(APPEND ARCFLOW_EXAMPLE_OUTPUTS
+        "${ARCFLOW_EXAMPLE_DIRECTORY}/${example}.afproj"
+        "${ARCFLOW_EXAMPLE_DIRECTORY}/${example}.afp")
+endforeach()
+add_custom_command(
+    OUTPUT ${ARCFLOW_EXAMPLE_OUTPUTS}
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${ARCFLOW_EXAMPLE_DIRECTORY}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARCFLOW_EXAMPLE_DIRECTORY}"
+    COMMAND arcflow_compiler --generate-examples "${ARCFLOW_EXAMPLE_DIRECTORY}"
+    DEPENDS arcflow_compiler
+    VERBATIM)
+add_custom_target(arcflow_examples ALL DEPENDS ${ARCFLOW_EXAMPLE_OUTPUTS})
+add_test(NAME arcflow_runtime_sample_tests
+    COMMAND arcflow_runtime_sample "${ARCFLOW_EXAMPLE_DIRECTORY}/guided-basics.afp")
+
 add_custom_target(arcflow_ci
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS arcflow_tests arcflow_performance_tests arcflow_localization_tests
             arcflow_interchange_tests arcflow_editor_workflow_tests
             arcflow_editor_recovery_tests arcflow_collaboration_tests arcflow_compiler
-            arcflow_platform_tests arcflow_update_tests arcflow_editor arcflow_player
+            arcflow_platform_tests arcflow_update_tests arcflow_onboarding_tests
+            arcflow_runtime_sample arcflow_examples arcflow_editor arcflow_player
             arcflow_runtime_shared arcflow_demo_package
     USES_TERMINAL
 )
@@ -408,6 +439,8 @@ set(ARCFLOW_OWN_TARGETS
     arcflow_collaboration_tests
     arcflow_platform_tests
     arcflow_update_tests
+    arcflow_onboarding_tests
+    arcflow_runtime_sample
 )
 foreach(target IN LISTS ARCFLOW_OWN_TARGETS)
     if(MSVC)
@@ -441,7 +474,8 @@ add_custom_command(
 add_custom_target(arcflow_notices ALL DEPENDS "${ARCFLOW_NOTICE_FILE}")
 add_dependencies(arcflow_ci arcflow_notices)
 
-install(TARGETS arcflow_editor arcflow_player arcflow_compiler arcflow_runtime_shared
+install(TARGETS arcflow_editor arcflow_player arcflow_compiler arcflow_runtime_sample
+        arcflow_runtime_shared
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 install(TARGETS arcflow_runtime arcflow_core
@@ -461,6 +495,9 @@ install(FILES
     "${ARCFLOW_SHADER_DIR}/particle.frag.spv"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/shaders")
 install(FILES "${ARCFLOW_DEMO_PACKAGE}" DESTINATION "${CMAKE_INSTALL_BINDIR}/assets")
+install(DIRECTORY "${ARCFLOW_EXAMPLE_DIRECTORY}/" DESTINATION "${CMAKE_INSTALL_BINDIR}/examples")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/examples/runtime_sample.c"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/arcflow/examples")
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/test/api/fonts/NotoSans-Bold.ttf"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/fonts")
@@ -503,6 +540,8 @@ add_test(NAME arcflow_install_tests
     COMMAND "${CMAKE_COMMAND}"
         "-DARCFLOW_BUILD_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
         "-DARCFLOW_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/install-test-root"
+        "-DARCFLOW_CROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+        "-DARCFLOW_EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_install.cmake")
 
 set(CPACK_PACKAGE_NAME "Arcflow")
@@ -525,7 +564,7 @@ include(CPack)
 add_custom_target(arcflow_release_bundle
     COMMAND "${CMAKE_CPACK_COMMAND}" --config "${CMAKE_CURRENT_BINARY_DIR}/CPackConfig.cmake"
     DEPENDS arcflow_editor arcflow_player arcflow_compiler arcflow_runtime_shared
-            arcflow_notices arcflow_demo_package
+            arcflow_runtime_sample arcflow_examples arcflow_notices arcflow_demo_package
     USES_TERMINAL)
 if(TARGET arcflow_symbols)
     add_dependencies(arcflow_release_bundle arcflow_symbols)
@@ -561,7 +600,7 @@ if(NOT WIN32)
             "-DARCFLOW_BUILD_EPOCH=${ARCFLOW_BUILD_EPOCH}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_reproducible_package.cmake"
         DEPENDS arcflow_editor arcflow_player arcflow_compiler arcflow_runtime_shared
-                arcflow_notices arcflow_demo_package
+                arcflow_runtime_sample arcflow_examples arcflow_notices arcflow_demo_package
         USES_TERMINAL)
     if(TARGET arcflow_symbols)
         add_dependencies(arcflow_reproducibility arcflow_symbols)

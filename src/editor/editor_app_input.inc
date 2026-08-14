@@ -1239,6 +1239,8 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->platform_smoke = true;
         } else if (strcmp(arguments[index], "--release-smoke") == 0) {
             editor->release_smoke = true;
+        } else if (strcmp(arguments[index], "--onboarding-smoke") == 0) {
+            editor->onboarding_smoke = true;
         } else if (strcmp(arguments[index], "--sequence") == 0 && index + 1 < argument_count) {
             (void)snprintf(editor->sequence_prefix, sizeof(editor->sequence_prefix), "%s",
                            arguments[++index]);
@@ -1257,6 +1259,7 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
                                  : editor->workflow_smoke         ? 18U
                                  : editor->platform_smoke         ? 4U
                                  : editor->release_smoke          ? 4U
+                                 : editor->onboarding_smoke       ? 18U
                                  : editor->menu_smoke             ? 12U
                                  : editor->tooltip_smoke          ? 2U
                                                                   : 1U;
@@ -1267,6 +1270,7 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
                                  : editor->workflow_smoke         ? 18U
                                  : editor->platform_smoke         ? 4U
                                  : editor->release_smoke          ? 4U
+                                 : editor->onboarding_smoke       ? 18U
                                  : editor->menu_smoke             ? 12U
                                  : editor->vfx_smoke              ? AF_EDITOR_PARTICLE_PAGE_COUNT
                                                                   : 60U;
@@ -1276,6 +1280,7 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->resize_smoke || editor->context_smoke || editor->tooltip_smoke ||
         editor->selection_smoke || editor->vfx_smoke || editor->particle_view_smoke ||
         editor->vector_animation_smoke || editor->image_smoke || editor->menu_smoke ||
-        editor->workflow_smoke || editor->platform_smoke || editor->release_smoke;
+        editor->workflow_smoke || editor->platform_smoke || editor->release_smoke ||
+        editor->onboarding_smoke;
     af_editor_derive_package_path(editor);
 }

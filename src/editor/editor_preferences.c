@@ -42,7 +42,8 @@ void af_editor_preferences_default(AfEditorPreferences *preferences) {
                                          .theme = AF_EDITOR_THEME_DARK,
                                          .show_tooltips = true,
                                          .show_extended_tooltips = true,
-                                         .reopen_last_project = true};
+                                         .reopen_last_project = true,
+                                         .onboarding_complete = false};
     af_accessibility_settings_default(&preferences->accessibility);
     preferences->workspace.docks[AF_EDITOR_DOCK_HIERARCHY] = (AfEditorDockPreference){
         .extent_pixels = 260U, .placement = AF_EDITOR_DOCK_LEFT, .visible = true};
@@ -411,13 +412,14 @@ AfResult af_editor_preferences_serialize(const AfEditorPreferences *preferences,
         result = af_editor_preference_write(
             &writer,
             "theme %u\nautosave %u\ntext_scale_milli %u\nreduced_motion %u\nhigh_contrast "
-            "%u\ncolor_blind %u\ntooltips %u\nextended_tooltips %u\nreopen_last %u\n",
+            "%u\ncolor_blind %u\ntooltips %u\nextended_tooltips %u\nreopen_last %u\n"
+            "onboarding_complete %u\n",
             (uint32_t)preferences->theme, preferences->autosave_interval_seconds, text_scale_milli,
             (uint32_t)preferences->accessibility.reduced_motion,
             preferences->accessibility.high_contrast ? 1U : 0U,
             (uint32_t)preferences->accessibility.color_blind_preview,
             preferences->show_tooltips ? 1U : 0U, preferences->show_extended_tooltips ? 1U : 0U,
-            preferences->reopen_last_project ? 1U : 0U);
+            preferences->reopen_last_project ? 1U : 0U, preferences->onboarding_complete ? 1U : 0U);
     }
     for (uint32_t index = 0U; result == AF_RESULT_SUCCESS && index < AF_EDITOR_DOCK_COUNT;
          ++index) {
@@ -544,6 +546,11 @@ static AfResult af_editor_preference_parse_scalar(AfEditorPreferences *preferenc
             return AF_RESULT_INVALID_ARGUMENT;
         }
         preferences->reopen_last_project = value != 0U;
+    } else if (strcmp(tokens[0], "onboarding_complete") == 0) {
+        if (value > 1U) {
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
+        preferences->onboarding_complete = value != 0U;
     } else {
         return AF_RESULT_NOT_FOUND;
     }

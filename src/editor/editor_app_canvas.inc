@@ -180,6 +180,26 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     uint32_t index = 0U;
     editor->render_scene.count = 0U;
     af_editor_layout(editor, width, height, &canvas_x, &canvas_y, &canvas_width, &canvas_height);
+    if (editor->welcome_visible || editor->example_browser_visible ||
+        editor->guide_browser_visible) {
+        editor->render_path_data.path_count = 0U;
+        editor->render_path_data.command_count = 0U;
+        af_editor_add_rect(editor, 0.0F, 0.0F, (float)width, (float)height,
+                           (AfColor){0.055F, 0.06F, 0.075F, 1.0F}, -100000);
+        af_editor_add_rect(editor, 0.0F, 0.0F, editor->left_width, (float)height,
+                           (AfColor){0.085F, 0.092F, 0.115F, 1.0F}, -99990);
+        af_editor_add_rect(editor, (float)width - editor->right_width, 0.0F, editor->right_width,
+                           (float)height, (AfColor){0.095F, 0.102F, 0.125F, 1.0F}, -99990);
+        af_editor_add_rect(editor, editor->left_width, 0.0F,
+                           (float)width - editor->left_width - editor->right_width,
+                           AF_EDITOR_TOOLBAR_HEIGHT, (AfColor){0.11F, 0.12F, 0.145F, 1.0F}, -99980);
+        af_editor_add_rect(editor, canvas_x, canvas_y, canvas_width, canvas_height,
+                           (AfColor){0.145F, 0.155F, 0.18F, 1.0F}, -99990);
+        af_editor_add_text(editor, editor->left_width + 18.0F, 18.0F, "ARCFLOW EDITOR", 0.82F,
+                           180.0F, (AfColor){0.6F, 0.68F, 0.8F, 1.0F}, -99970);
+        af_editor_render_onboarding(editor, width, height);
+        return;
+    }
     af_editor_add_rect(editor, canvas_x, canvas_y, canvas_width, canvas_height,
                        (AfColor){0.145F, 0.155F, 0.18F, 1.0F}, -100000);
     af_editor_add_text(editor, canvas_x + 12.0F, canvas_y + 12.0F, "CANVAS", 1.0F, 54.0F,

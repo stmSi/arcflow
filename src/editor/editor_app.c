@@ -11,10 +11,12 @@
 #include "editor/editor_preferences.h"
 #include "editor/editor_recovery.h"
 #include "editor/editor_workflow.h"
+#include "onboarding/onboarding.h"
 #include "performance/metrics.h"
 #include "platform/platform_sdl.h"
 #include "project/image_import.h"
 #include "project/project.h"
+#include "project/project_templates.h"
 #include "renderer/vk_renderer.h"
 #include "scene/scene.h"
 #include "text/text.h"
@@ -253,6 +255,7 @@ typedef struct AfEditorState {
     bool workflow_smoke;
     bool platform_smoke;
     bool release_smoke;
+    bool onboarding_smoke;
     bool vector_animation_smoke_prepared;
     bool dialog_active;
     bool help_overlay;
@@ -268,6 +271,10 @@ typedef struct AfEditorState {
     bool preset_panel_visible;
     bool template_panel_visible;
     bool recent_panel_visible;
+    bool welcome_visible;
+    bool guided_tour_visible;
+    bool example_browser_visible;
+    bool guide_browser_visible;
     bool smart_guides_visible;
     bool rulers_visible;
     bool measurement_visible;
@@ -302,6 +309,10 @@ typedef struct AfEditorState {
     uint32_t shortcut_selected_index;
     uint32_t template_selected_index;
     uint32_t recent_selected_index;
+    uint32_t guided_step;
+    uint32_t example_selected_index;
+    uint32_t guide_step;
+    AfOnboardingTopic guide_topic;
     bool shortcut_capture;
     bool running;
     bool dirty;
@@ -323,11 +334,16 @@ static void af_editor_workflow_update(AfEditorState *editor, uint64_t now_ns);
 static void af_editor_render_workflow(AfEditorState *editor, int width, int height);
 static void af_editor_render_canvas_workflow(AfEditorState *editor, int width, int height,
                                              AfAffine2 camera);
+static void af_editor_render_onboarding(AfEditorState *editor, int width, int height);
 static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int height, float x,
                                           float y);
 static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEvent *event);
 static bool af_editor_workflow_text(AfEditorState *editor, const char *text);
 static void af_editor_workflow_drop_file(AfEditorState *editor, const char *path);
+static void af_editor_onboarding_start_guided(AfEditorState *editor);
+static void af_editor_onboarding_show_welcome(AfEditorState *editor);
+static void af_editor_onboarding_show_examples(AfEditorState *editor);
+static void af_editor_onboarding_show_guides(AfEditorState *editor, AfOnboardingTopic topic);
 static void af_editor_collaboration_release(AfEditorState *editor);
 static void af_editor_collaboration_track_path(AfEditorState *editor);
 static void af_editor_collaboration_saved(AfEditorState *editor);
@@ -349,6 +365,7 @@ static bool af_editor_hierarchy_name_matches(const AfEditorState *editor, uint32
 #include "editor/editor_app_properties.inc"
 #include "editor/editor_app_menus.inc"
 #include "editor/editor_app_workflow_core.inc"
+#include "editor/editor_app_onboarding.inc"
 #include "editor/editor_app_workflow_render.inc"
 #include "editor/editor_app_workflow_input.inc"
 #include "editor/editor_app_input.inc"
@@ -643,6 +660,27 @@ int af_editor_run(int argument_count, char **arguments) {
             editor.update_panel_visible = true;
             editor.update_checked = false;
             af_editor_status(&editor, "Programmatic release, version and update capture");
+        } else if (editor.onboarding_smoke) {
+            const uint32_t stage = editor.rendered_frames / 3U;
+            editor.welcome_visible = false;
+            editor.guided_tour_visible = false;
+            editor.example_browser_visible = false;
+            editor.guide_browser_visible = false;
+            if (stage == 0U) {
+                editor.welcome_visible = true;
+            } else if (stage == 1U) {
+                editor.guided_tour_visible = true;
+                editor.guided_step = 2U;
+            } else if (stage == 2U) {
+                editor.example_browser_visible = true;
+                editor.example_selected_index = AF_PROJECT_TEMPLATE_VECTOR_ANIMATION;
+            } else {
+                editor.guide_browser_visible = true;
+                editor.guide_topic = stage == 3U   ? AF_ONBOARDING_RUNTIME_INTEGRATION
+                                     : stage == 4U ? AF_ONBOARDING_SECURITY
+                                                   : AF_ONBOARDING_LIMITATIONS;
+            }
+            af_editor_status(&editor, "Programmatic Milestone 28 onboarding capture");
         } else if (editor.platform_smoke) {
             editor.platform_panel_visible = true;
             (void)af_platform_query_capabilities(&editor.window, &editor.platform_capabilities);

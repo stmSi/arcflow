@@ -1,5 +1,8 @@
 static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int height, float x,
                                           float y) {
+    if (af_editor_onboarding_mouse_down(editor, width, height, x, y)) {
+        return true;
+    }
     if (editor->platform_panel_visible) {
         editor->platform_panel_visible = false;
         return true;
@@ -9,11 +12,13 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
         return true;
     }
     if (editor->template_panel_visible) {
-        const float box_x = ((float)width - 690.0F) * 0.5F;
-        const float box_y = ((float)height - 250.0F) * 0.5F;
-        if (x >= box_x + 18.0F && x < box_x + 684.0F && y >= box_y + 75.0F && y < box_y + 220.0F) {
-            const uint32_t index = (uint32_t)((x - box_x - 18.0F) / 222.0F);
-            if (index < 3U) {
+        const float box_x = ((float)width - 780.0F) * 0.5F;
+        const float box_y = ((float)height - 410.0F) * 0.5F;
+        if (x >= box_x + 18.0F && x < box_x + 768.0F && y >= box_y + 75.0F && y < box_y + 352.0F) {
+            const uint32_t column = (uint32_t)((x - box_x - 18.0F) / 250.0F);
+            const uint32_t row = (uint32_t)((y - box_y - 75.0F) / 145.0F);
+            const uint32_t index = row * 3U + column;
+            if (index < af_project_template_count()) {
                 editor->template_selected_index = index;
                 editor->template_panel_visible = false;
                 (void)af_editor_create_template(editor, index);
@@ -206,6 +211,9 @@ static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEven
     if (!event->down) {
         return false;
     }
+    if (af_editor_onboarding_key(editor, event)) {
+        return true;
+    }
     if (editor->platform_panel_visible) {
         if (event->key == SDLK_ESCAPE) {
             editor->platform_panel_visible = false;
@@ -223,8 +231,14 @@ static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEven
             editor->template_panel_visible = false;
         } else if (event->key == SDLK_LEFT && editor->template_selected_index > 0U) {
             --editor->template_selected_index;
-        } else if (event->key == SDLK_RIGHT && editor->template_selected_index < 2U) {
+        } else if (event->key == SDLK_RIGHT &&
+                   editor->template_selected_index + 1U < af_project_template_count()) {
             ++editor->template_selected_index;
+        } else if (event->key == SDLK_UP && editor->template_selected_index >= 3U) {
+            editor->template_selected_index -= 3U;
+        } else if (event->key == SDLK_DOWN &&
+                   editor->template_selected_index + 3U < af_project_template_count()) {
+            editor->template_selected_index += 3U;
         } else if (event->key == SDLK_RETURN || event->key == SDLK_KP_ENTER) {
             const uint32_t index = editor->template_selected_index;
             editor->template_panel_visible = false;

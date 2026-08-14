@@ -191,6 +191,7 @@ static bool af_test_preferences_round_trip(void) {
     preferences.accessibility.high_contrast = true;
     preferences.accessibility.color_blind_preview = AF_COLOR_BLIND_PREVIEW_TRITANOPIA;
     preferences.show_extended_tooltips = false;
+    preferences.onboarding_complete = true;
     CHECK(af_editor_preferences_set_dock(&preferences, AF_EDITOR_DOCK_PROFILER, &profiler) ==
           AF_RESULT_SUCCESS);
     CHECK(af_editor_preferences_set_shortcut(
@@ -213,6 +214,7 @@ static bool af_test_preferences_round_trip(void) {
     CHECK(size != 0U && strstr(serialized, "Project%20One") != NULL &&
           strstr(serialized, "scene%25main") != NULL);
     CHECK(af_editor_preferences_parse(serialized, size, &parsed) == AF_RESULT_SUCCESS);
+    CHECK(parsed.onboarding_complete);
     CHECK(strcmp(parsed.workspace.name, "Animation & VFX") == 0);
     CHECK(parsed.theme == AF_EDITOR_THEME_LIGHT && parsed.autosave_interval_seconds == 45U);
     CHECK(parsed.accessibility.text_scale == 1.5F && parsed.accessibility.high_contrast);

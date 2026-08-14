@@ -4,12 +4,21 @@
 #include "core/allocator.h"
 #include "core/file_io.h"
 #include "core/hash.h"
+#include "onboarding/onboarding.h"
 #include "project/project.h"
 #include "project/project_collaboration.h"
+#include "project/project_templates.h"
 #include "scene/scene.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
+
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 static AfKeyframe af_key(float time, float x, float y, float z, float w,
                          AfInterpolation interpolation) {
@@ -348,8 +357,10 @@ static AfResult af_write_update_manifest(const char *artifact_path, const char *
     return result;
 }
 
-static void af_print_usage(void) {
-    (void)fprintf(stderr,
+#include "compiler/compiler_onboarding.inc"
+
+static void af_print_usage(FILE *stream) {
+    (void)fprintf(stream,
                   "usage:\n"
                   "  arcflow_compiler --compile INPUT.afproj OUTPUT.afp\n"
                   "  arcflow_compiler --compile-release INPUT.afproj OUTPUT.afp\n"
@@ -357,8 +368,14 @@ static void af_print_usage(void) {
                   "  arcflow_compiler --check-determinism INPUT.afproj\n"
                   "  arcflow_compiler --validate INPUT.afp\n"
                   "  arcflow_compiler --new-project OUTPUT.afproj\n"
+                  "  arcflow_compiler --new-project-template TEMPLATE OUTPUT.afproj\n"
+                  "  arcflow_compiler --generate-examples DIRECTORY\n"
+                  "  arcflow_compiler --list-templates\n"
+                  "  arcflow_compiler --list-guides\n"
+                  "  arcflow_compiler --guide TOPIC\n"
                   "  arcflow_compiler --make-update-manifest ARTIFACT URL SIGNATURE OUTPUT\n"
                   "  arcflow_compiler --version\n"
+                  "  arcflow_compiler --help\n"
                   "  arcflow_compiler --demo OUTPUT.afp\n");
 }
 
@@ -372,7 +389,28 @@ int main(int argument_count, char **arguments) {
                       AF_PACKAGE_FORMAT_VERSION, AF_RUNTIME_VERSION);
         return 0;
     }
-    if (argument_count == 6 && strcmp(arguments[1], "--make-update-manifest") == 0) {
+    if (argument_count == 2 &&
+        (strcmp(arguments[1], "--help") == 0 || strcmp(arguments[1], "-h") == 0)) {
+        af_print_usage(stdout);
+        return 0;
+    }
+    if (argument_count == 2 && strcmp(arguments[1], "--list-templates") == 0) {
+        af_compiler_templates_print();
+        return 0;
+    }
+    if (argument_count == 2 && strcmp(arguments[1], "--list-guides") == 0) {
+        af_compiler_guides_print();
+        return 0;
+    }
+    if (argument_count == 3 && strcmp(arguments[1], "--guide") == 0) {
+        result = af_compiler_guide_print(arguments[2]);
+    } else if (argument_count == 4 && strcmp(arguments[1], "--new-project-template") == 0) {
+        const AfProjectTemplateInfo *info = af_project_template_find(arguments[2]);
+        result =
+            info == NULL ? AF_RESULT_NOT_FOUND : af_compiler_template_write(info, arguments[3]);
+    } else if (argument_count == 3 && strcmp(arguments[1], "--generate-examples") == 0) {
+        result = af_compiler_examples_generate(arguments[2]);
+    } else if (argument_count == 6 && strcmp(arguments[1], "--make-update-manifest") == 0) {
         result = af_write_update_manifest(arguments[2], arguments[3], arguments[4], arguments[5]);
     } else if (argument_count == 3 && strcmp(arguments[1], "--demo") == 0) {
         result = af_write_demo(arguments[2]);
@@ -392,7 +430,7 @@ int main(int argument_count, char **arguments) {
     } else if (argument_count == 3) {
         result = af_compile_project(arguments[1], arguments[2], false);
     } else {
-        af_print_usage();
+        af_print_usage(stderr);
         return 2;
     }
     if (result != AF_RESULT_SUCCESS) {
