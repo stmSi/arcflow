@@ -15,6 +15,7 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
     const AfSectionView *state_machines = NULL;
     const AfSectionView *particles = NULL;
     const AfSectionView *images = NULL;
+    const AfSectionView *bindings = NULL;
     uint32_t index = 0U;
     AfResult result = AF_RESULT_SUCCESS;
     if (allocator == NULL || out_package == NULL) {
@@ -41,6 +42,7 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
     state_machines = af_find_section(sections, section_count, AF_SECTION_STATE_MACHINES);
     particles = af_find_section(sections, section_count, AF_SECTION_PARTICLES);
     images = af_find_section(sections, section_count, AF_SECTION_IMAGES);
+    bindings = af_find_section(sections, section_count, AF_SECTION_BINDINGS);
     out_package->scene.nodes =
         af_allocate_array(allocator, nodes->count, sizeof(AfSceneNode), alignof(AfSceneNode));
     out_package->base_nodes =
@@ -87,6 +89,11 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
         return result;
     }
     result = af_decode_images(bytes + images->offset, allocator, &out_package->image_data);
+    if (result != AF_RESULT_SUCCESS) {
+        af_loaded_package_destroy(allocator, out_package);
+        return result;
+    }
+    result = af_decode_bindings(bytes + bindings->offset, allocator, &out_package->binding_data);
     if (result != AF_RESULT_SUCCESS) {
         af_loaded_package_destroy(allocator, out_package);
         return result;
@@ -215,7 +222,21 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
             af_read_particle(bytes + particles->offset + AF_PARTICLE_HEADER_SIZE +
                              (uint64_t)index * AF_PARTICLE_RECORD_SIZE);
     }
-    return af_scene_evaluate_world(&out_package->scene);
+    result = af_scene_evaluate_world(&out_package->scene);
+    if (result == AF_RESULT_SUCCESS) {
+        const AfBindingValidationContext context = {.scene = &out_package->scene,
+                                                    .animation = &out_package->animation,
+                                                    .state_machines =
+                                                        &out_package->state_machine_data,
+                                                    .components = &out_package->component_data,
+                                                    .images = &out_package->image_data,
+                                                    .particles = &out_package->particle_data};
+        result = af_binding_data_validate(&out_package->binding_data, &context);
+    }
+    if (result != AF_RESULT_SUCCESS) {
+        af_loaded_package_destroy(allocator, out_package);
+    }
+    return result;
 }
 
 void af_loaded_package_destroy(AfAllocator *allocator, AfLoadedPackage *package) {
@@ -242,6 +263,8 @@ void af_loaded_package_destroy(AfAllocator *allocator, AfLoadedPackage *package)
     af_deallocate(allocator, package->state_machine_data.inputs);
     af_deallocate(allocator, package->state_machine_data.conditions);
     af_deallocate(allocator, package->particle_data.emitters);
+    af_deallocate(allocator, package->binding_data.targets);
+    af_deallocate(allocator, package->binding_data.properties);
     af_image_data_destroy(&package->image_data);
     *package = (AfLoadedPackage){0};
 }

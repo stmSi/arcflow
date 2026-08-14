@@ -22,6 +22,8 @@ AfResult af_project_import_image(AfProject *project, const char *project_path,
                                  uint64_t *out_node_id);
 AfResult af_project_reimport_images(AfProject *project, const char *project_path,
                                     uint32_t *out_missing_count);
+AfResult af_project_repair_image_source(AfProject *project, const char *project_path,
+                                        uint64_t asset_id, const char *replacement_path);
 
 AfResult af_image_decode_svg(const void *data, size_t size, AfAllocator *allocator,
                              AfDecodedImage *out_image);

@@ -68,6 +68,7 @@ typedef struct AfProjectTextWriter {
 #include "project/project_model.inc"
 #include "project/project_authoring.inc"
 #include "project/project_image_tokens.inc"
+#include "project/project_bindings.inc"
 #include "project/project_serialize.inc"
 #include "project/project_parse_values.inc"
 #include "project/project_parse_entities.inc"

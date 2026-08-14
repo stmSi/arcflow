@@ -11,6 +11,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     const AfStateMachineData empty_state_machines = {0};
     AfParticleData empty_particles = {0};
     const AfImageData empty_images = {0};
+    const AfBindingData empty_bindings = {0};
     AfImagePackagePlan image_plan = {0};
     const AfLayoutData default_layouts = {.reference_size = {1280.0F, 720.0F},
                                           .target_size = {1280.0F, 720.0F},
@@ -22,6 +23,8 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     const AfStateMachineData *state_machine_data = NULL;
     const AfParticleData *particle_data = NULL;
     const AfImageData *image_data = NULL;
+    const AfBindingData *binding_data = NULL;
+    AfBindingValidationContext binding_context = {0};
     AfResult result = AF_RESULT_SUCCESS;
     if (source == NULL || source->scene == NULL || source->animation == NULL || allocator == NULL ||
         out_blob == NULL) {
@@ -37,6 +40,13 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
         source->state_machines == NULL ? &empty_state_machines : source->state_machines;
     particle_data = source->scene->particles == NULL ? &empty_particles : source->scene->particles;
     image_data = source->scene->images == NULL ? &empty_images : source->scene->images;
+    binding_data = source->bindings == NULL ? &empty_bindings : source->bindings;
+    binding_context = (AfBindingValidationContext){.scene = source->scene,
+                                                   .animation = source->animation,
+                                                   .state_machines = state_machine_data,
+                                                   .components = component_data,
+                                                   .images = image_data,
+                                                   .particles = particle_data};
     result = af_scene_validate(source->scene);
     if (result != AF_RESULT_SUCCESS ||
         af_animation_validate(source->animation, source->scene) != AF_RESULT_SUCCESS ||
@@ -50,7 +60,8 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
         af_particle_data_validate(particle_data, source->scene) != AF_RESULT_SUCCESS ||
         (source->scene->images != NULL &&
          af_image_data_validate(image_data, false) != AF_RESULT_SUCCESS) ||
-        (image_data->asset_count != 0U && image_data->atlas_count == 0U)) {
+        (image_data->asset_count != 0U && image_data->atlas_count == 0U) ||
+        af_binding_data_validate(binding_data, &binding_context) != AF_RESULT_SUCCESS) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
     result = af_image_package_plan_create(image_data, allocator, &image_plan);
@@ -70,6 +81,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
     sizes[10] = af_state_machine_section_size(state_machine_data);
     sizes[11] = AF_PARTICLE_HEADER_SIZE + (uint64_t)particle_data->count * AF_PARTICLE_RECORD_SIZE;
     sizes[12] = af_image_section_size(image_data, &image_plan);
+    sizes[13] = af_binding_section_size(binding_data);
     for (index = 0U; index < AF_SECTION_COUNT; ++index) {
         offsets[index] = af_align_u64(total_size, 8U);
         if (af_u64_add_overflow(offsets[index], sizes[index], &total_size) ||
@@ -122,6 +134,8 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
                      AF_SECTION_PARTICLES, offsets[11], sizes[11], 8U, particle_data->count);
     af_write_section(bytes + AF_PACKAGE_HEADER_SIZE + 12U * AF_PACKAGE_SECTION_SIZE,
                      AF_SECTION_IMAGES, offsets[12], sizes[12], 8U, image_data->asset_count);
+    af_write_section(bytes + AF_PACKAGE_HEADER_SIZE + 13U * AF_PACKAGE_SECTION_SIZE,
+                     AF_SECTION_BINDINGS, offsets[13], sizes[13], 8U, binding_data->property_count);
     for (index = 0U; index < source->scene->count; ++index) {
         const AfSceneNode *node = &source->scene->nodes[index];
         uint8_t *record = bytes + offsets[0] + (uint64_t)index * AF_NODE_RECORD_SIZE;
@@ -232,6 +246,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
                           &particle_data->emitters[index]);
     }
     af_write_images(bytes + offsets[12], image_data, &image_plan);
+    af_write_bindings(bytes + offsets[13], binding_data, source->strip_debug_names);
     af_image_package_plan_destroy(&image_plan);
     af_write_u32(bytes + 48U, af_checksum(bytes + AF_PACKAGE_HEADER_SIZE,
                                           (size_t)total_size - AF_PACKAGE_HEADER_SIZE));

@@ -94,6 +94,9 @@ set(ARCFLOW_PROJECT_SOURCES
     src/style/style.c
     src/layout/layout.c
     src/text/text.c
+    src/binding/binding.c
+    src/localization/localization.c
+    src/performance/metrics.c
     src/component/component.c
     src/interaction/interaction.c
     src/state_machine/state_machine.c
@@ -106,6 +109,7 @@ set(ARCFLOW_PROJECT_SOURCES
 )
 
 add_library(arcflow_core STATIC ${ARCFLOW_PROJECT_SOURCES})
+set_target_properties(arcflow_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(arcflow_core PUBLIC include PRIVATE src)
 if(UNIX)
 target_link_libraries(arcflow_core PUBLIC m)
@@ -114,21 +118,39 @@ target_link_libraries(arcflow_core PUBLIC freetype harfbuzz)
 
 add_library(arcflow_runtime STATIC
     src/runtime/public_api.c
+    src/runtime/runtime_bindings.c
+    src/runtime/host_sdk.c
 )
 target_include_directories(arcflow_runtime PUBLIC include third_party/Vulkan-Headers/include PRIVATE src)
 target_link_libraries(arcflow_runtime PUBLIC arcflow_core)
+
+add_library(arcflow_runtime_shared SHARED
+    src/runtime/public_api.c
+    src/runtime/runtime_bindings.c
+    src/runtime/host_sdk.c
+)
+set_target_properties(arcflow_runtime_shared PROPERTIES OUTPUT_NAME arcflow_runtime)
+target_include_directories(arcflow_runtime_shared PUBLIC include third_party/Vulkan-Headers/include
+    PRIVATE src)
+target_link_libraries(arcflow_runtime_shared PUBLIC arcflow_core)
 
 add_library(arcflow_project STATIC
     src/project/project.c
     src/project/image_decode.c
     src/project/image_svg.c
     src/project/project_images.c
+    src/project/interchange.c
 )
 target_include_directories(arcflow_project PUBLIC src PRIVATE include)
 target_link_libraries(arcflow_project PUBLIC arcflow_core PRIVATE SDL3::SDL3-static)
 
 add_library(arcflow_editor_core STATIC
     src/editor/editor_commands.c
+    src/editor/editor_actions.c
+    src/editor/editor_preferences.c
+    src/editor/editor_recovery.c
+    src/editor/editor_workflow.c
+    src/plugin/plugin_host.c
 )
 target_include_directories(arcflow_editor_core PUBLIC src PRIVATE include)
 target_link_libraries(arcflow_editor_core PUBLIC arcflow_project)
@@ -246,6 +268,31 @@ target_link_libraries(arcflow_tests PRIVATE arcflow_core arcflow_runtime arcflow
 add_dependencies(arcflow_tests arcflow_shaders)
 add_test(NAME arcflow_tests COMMAND arcflow_tests)
 
+add_executable(arcflow_performance_tests tests/test_performance.c)
+target_include_directories(arcflow_performance_tests PRIVATE src include)
+target_link_libraries(arcflow_performance_tests PRIVATE arcflow_core)
+add_test(NAME arcflow_performance_tests COMMAND arcflow_performance_tests)
+
+add_executable(arcflow_localization_tests tests/test_localization.c)
+target_include_directories(arcflow_localization_tests PRIVATE src include)
+target_link_libraries(arcflow_localization_tests PRIVATE arcflow_core)
+add_test(NAME arcflow_localization_tests COMMAND arcflow_localization_tests)
+
+add_executable(arcflow_interchange_tests tests/test_interchange.c src/project/interchange.c)
+target_include_directories(arcflow_interchange_tests PRIVATE src include)
+target_link_libraries(arcflow_interchange_tests PRIVATE arcflow_core)
+add_test(NAME arcflow_interchange_tests COMMAND arcflow_interchange_tests)
+
+add_executable(arcflow_editor_workflow_tests tests/test_editor_workflow.c)
+target_include_directories(arcflow_editor_workflow_tests PRIVATE src include)
+target_link_libraries(arcflow_editor_workflow_tests PRIVATE arcflow_editor_core)
+add_test(NAME arcflow_editor_workflow_tests COMMAND arcflow_editor_workflow_tests)
+
+add_executable(arcflow_editor_recovery_tests tests/test_editor_recovery.c)
+target_include_directories(arcflow_editor_recovery_tests PRIVATE src include)
+target_link_libraries(arcflow_editor_recovery_tests PRIVATE arcflow_editor_core)
+add_test(NAME arcflow_editor_recovery_tests COMMAND arcflow_editor_recovery_tests)
+
 find_program(ARCFLOW_CLANG_FORMAT clang-format)
 if(ARCFLOW_CLANG_FORMAT)
     file(GLOB_RECURSE ARCFLOW_FORMAT_FILES CONFIGURE_DEPENDS
@@ -261,8 +308,13 @@ if(ARCFLOW_CLANG_FORMAT)
 endif()
 
 set(ARCFLOW_OWN_TARGETS
-    arcflow_core arcflow_runtime arcflow_project arcflow_editor_core arcflow_renderer
+    arcflow_core arcflow_runtime arcflow_runtime_shared arcflow_project arcflow_editor_core arcflow_renderer
     arcflow_compiler arcflow_player_app arcflow_player arcflow_editor arcflow_tests
+    arcflow_performance_tests
+    arcflow_localization_tests
+    arcflow_interchange_tests
+    arcflow_editor_workflow_tests
+    arcflow_editor_recovery_tests
 )
 foreach(target IN LISTS ARCFLOW_OWN_TARGETS)
     if(MSVC)

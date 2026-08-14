@@ -4,6 +4,7 @@
 #include "animation/animation.h"
 #include "arcflow/arcflow_result.h"
 #include "arcflow/arcflow_version.h"
+#include "binding/binding.h"
 #include "component/component.h"
 #include "core/allocator.h"
 #include "layout/layout.h"
@@ -26,6 +27,8 @@ typedef struct AfPackageSource {
     const AfAnimationData *animation;
     const AfComponentData *components;
     const AfStateMachineData *state_machines;
+    const AfBindingData *bindings;
+    bool strip_debug_names;
 } AfPackageSource;
 
 typedef struct AfPackageBlob {
@@ -43,6 +46,7 @@ typedef struct AfLoadedPackage {
     AfStateMachineData state_machine_data;
     AfParticleData particle_data;
     AfImageData image_data;
+    AfBindingData binding_data;
     AfSceneNode *base_nodes;
 } AfLoadedPackage;
 

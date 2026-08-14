@@ -32,7 +32,7 @@ static void af_editor_timeline_commit_keys(AfEditorState *editor, AfEditorMergeK
     }
     result = af_editor_history_execute(&editor->history, &editor->project, &command, true, false);
     if (result == AF_RESULT_SUCCESS) {
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Timeline edit committed");
     }
 }
@@ -52,7 +52,7 @@ static void af_editor_timeline_commit_clip(AfEditorState *editor) {
     command.clip_after_count = 1U;
     if (af_editor_history_execute(&editor->history, &editor->project, &command, true, false) ==
         AF_RESULT_SUCCESS) {
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Loop region edited");
     }
 }
@@ -412,7 +412,7 @@ static void af_editor_commit_path_drag(AfEditorState *editor) {
                 af_editor_history_execute(&editor->history, &editor->project, &command, true, true);
         }
         if (result == AF_RESULT_SUCCESS) {
-            editor->dirty = true;
+            af_editor_mark_dirty(editor);
             af_editor_status(editor, "Vector keyframe edited");
         }
         editor->path_key_drag = false;
@@ -443,7 +443,7 @@ static void af_editor_commit_path_drag(AfEditorState *editor) {
             af_editor_history_execute(&editor->history, &editor->project, &command, true, false);
     }
     if (result == AF_RESULT_SUCCESS) {
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Path point edited");
     }
 }
@@ -529,6 +529,9 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
     float canvas_width = 0.0F;
     float canvas_height = 0.0F;
     editor->mouse_position = (AfVec2){x, y};
+    if (af_editor_workflow_mouse_down(editor, width, height, x, y)) {
+        return;
+    }
     if (event->button == SDL_BUTTON_RIGHT) {
         editor->top_menu = AF_EDITOR_MENU_NONE;
         af_editor_open_context_menu(editor, width, height, x, y);
@@ -851,6 +854,19 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
                     roundf(node->local_transform.position.y / editor->grid_step) *
                     editor->grid_step;
             }
+            if (editor->smart_guides_visible && node->parent_id == AF_INVALID_NODE_ID) {
+                const float threshold = 8.0F / editor->zoom;
+                const float center_x = node->local_transform.position.x + node->bounds.x * 0.5F;
+                const float center_y = node->local_transform.position.y + node->bounds.y * 0.5F;
+                if (fabsf(center_x - editor->project.canvas_size.x * 0.5F) <= threshold) {
+                    node->local_transform.position.x =
+                        editor->project.canvas_size.x * 0.5F - node->bounds.x * 0.5F;
+                }
+                if (fabsf(center_y - editor->project.canvas_size.y * 0.5F) <= threshold) {
+                    node->local_transform.position.y =
+                        editor->project.canvas_size.y * 0.5F - node->bounds.y * 0.5F;
+                }
+            }
         }
         (void)af_scene_evaluate_world(&editor->project.scene);
     }
@@ -969,16 +985,19 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
         }
         return;
     }
+    if (af_editor_workflow_key(editor, event)) {
+        return;
+    }
     if (control &&
         (event->key == SDLK_Y || ((event->mod & SDL_KMOD_SHIFT) != 0U && event->key == SDLK_Z))) {
         if (af_editor_history_redo(&editor->history, &editor->project) == AF_RESULT_SUCCESS) {
-            editor->dirty = true;
+            af_editor_mark_dirty(editor);
             af_editor_reconcile_selection(editor);
             af_editor_status(editor, "Redo");
         }
     } else if (control && event->key == SDLK_Z) {
         if (af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS) {
-            editor->dirty = true;
+            af_editor_mark_dirty(editor);
             af_editor_reconcile_selection(editor);
             af_editor_status(editor, "Undo");
         }
@@ -1157,7 +1176,11 @@ static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int 
     } else if (event->type == SDL_EVENT_KEY_DOWN) {
         af_editor_key(editor, width, height, &event->key);
     } else if (event->type == SDL_EVENT_TEXT_INPUT) {
-        af_editor_append_text(editor, event->text.text);
+        if (!af_editor_workflow_text(editor, event->text.text)) {
+            af_editor_append_text(editor, event->text.text);
+        }
+    } else if (event->type == SDL_EVENT_DROP_FILE) {
+        af_editor_workflow_drop_file(editor, event->drop.data);
     } else if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
         SDL_MouseButtonEvent button = event->button;
         af_editor_mouse_scale(editor, &button.x, &button.y);
@@ -1200,6 +1223,8 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->image_smoke = true;
         } else if (strcmp(arguments[index], "--menu-smoke") == 0) {
             editor->menu_smoke = true;
+        } else if (strcmp(arguments[index], "--workflow-smoke") == 0) {
+            editor->workflow_smoke = true;
         } else if (strcmp(arguments[index], "--sequence") == 0 && index + 1 < argument_count) {
             (void)snprintf(editor->sequence_prefix, sizeof(editor->sequence_prefix), "%s",
                            arguments[++index]);
@@ -1215,6 +1240,7 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->maximum_frames = editor->particle_view_smoke      ? 24U
                                  : editor->vector_animation_smoke ? 18U
                                  : editor->image_smoke            ? 16U
+                                 : editor->workflow_smoke         ? 18U
                                  : editor->menu_smoke             ? 12U
                                  : editor->tooltip_smoke          ? 2U
                                                                   : 1U;
@@ -1222,9 +1248,16 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->maximum_frames = editor->particle_view_smoke      ? 24U
                                  : editor->vector_animation_smoke ? 18U
                                  : editor->image_smoke            ? 16U
+                                 : editor->workflow_smoke         ? 18U
                                  : editor->menu_smoke             ? 12U
                                  : editor->vfx_smoke              ? AF_EDITOR_PARTICLE_PAGE_COUNT
                                                                   : 60U;
     }
+    editor->preferences_read_only =
+        editor->output_path[0] != '\0' || editor->sequence_prefix[0] != '\0' ||
+        editor->resize_smoke || editor->context_smoke || editor->tooltip_smoke ||
+        editor->selection_smoke || editor->vfx_smoke || editor->particle_view_smoke ||
+        editor->vector_animation_smoke || editor->image_smoke || editor->menu_smoke ||
+        editor->workflow_smoke;
     af_editor_derive_package_path(editor);
 }

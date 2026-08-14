@@ -186,7 +186,7 @@ static bool af_test_project(void) {
         style->stroke.dash_count = 2U;
     }
     CHECK(af_project_serialize(&project, &allocator, &text) == AF_RESULT_SUCCESS);
-    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 9"));
+    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 10"));
     CHECK(af_test_project_contains(text.data, text.size, "property path_control_in"));
     CHECK(af_test_project_contains(text.data, text.size, "element 1"));
     CHECK(af_test_project_contains(text.data, text.size, "particle "));

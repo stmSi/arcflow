@@ -67,6 +67,10 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_mul_overflow(project->image_data.sequence_frame_count, 32U, &animation_capacity) ||
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
+        af_size_mul_overflow(project->binding_data.property_count, 2048U, &animation_capacity) ||
+        af_size_add_overflow(capacity, animation_capacity, &capacity) ||
+        af_size_mul_overflow(project->binding_data.target_count, 192U, &animation_capacity) ||
+        af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_add_overflow(capacity, 256U, &capacity)) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
@@ -279,6 +283,69 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
             (unsigned long long)binding->sequence_id, (uint32_t)binding->display_mode,
             binding->borders.left, binding->borders.top, binding->borders.right,
             binding->borders.bottom, binding->frames_per_second, binding->loop ? 1U : 0U);
+    }
+    for (index = 0U; result == AF_RESULT_SUCCESS && index < project->binding_data.property_count;
+         ++index) {
+        const AfExposedProperty *property = &project->binding_data.properties[index];
+        float scalar = 0.0F;
+        int32_t integer = 0;
+        uint32_t boolean = 0U;
+        AfColor color = {0};
+        uint64_t resource = 0U;
+        const char *text_value = "";
+        char name[AF_BINDING_NAME_CAPACITY * 3U];
+        char text[AF_BINDING_TEXT_CAPACITY * 3U];
+        char prefix[AF_BINDING_AFFIX_CAPACITY * 3U];
+        char suffix[AF_BINDING_AFFIX_CAPACITY * 3U];
+        char singular[AF_BINDING_PLURAL_CAPACITY * 3U];
+        char plural[AF_BINDING_PLURAL_CAPACITY * 3U];
+        if (property->type == AF_BINDING_VALUE_SCALAR) {
+            scalar = property->default_value.scalar;
+        } else if (property->type == AF_BINDING_VALUE_INTEGER) {
+            integer = property->default_value.integer;
+        } else if (property->type == AF_BINDING_VALUE_BOOLEAN) {
+            boolean = property->default_value.boolean ? 1U : 0U;
+        } else if (property->type == AF_BINDING_VALUE_COLOR) {
+            color = property->default_value.color;
+        } else if (property->type == AF_BINDING_VALUE_TEXT) {
+            text_value = property->default_value.text;
+        } else if (property->type == AF_BINDING_VALUE_IMAGE) {
+            resource = property->default_value.image_id;
+        } else if (property->type == AF_BINDING_VALUE_VISIBILITY) {
+            boolean = property->default_value.visibility ? 1U : 0U;
+        } else if (property->type == AF_BINDING_VALUE_PROGRESS) {
+            scalar = property->default_value.progress;
+        } else if (property->type == AF_BINDING_VALUE_ANIMATION) {
+            resource = property->default_value.animation_id;
+        }
+        if (!af_project_binding_encode_token(property->debug_name, name, sizeof(name)) ||
+            !af_project_binding_encode_token(text_value, text, sizeof(text)) ||
+            !af_project_binding_encode_token(property->format.prefix, prefix, sizeof(prefix)) ||
+            !af_project_binding_encode_token(property->format.suffix, suffix, sizeof(suffix)) ||
+            !af_project_binding_encode_token(property->format.singular, singular,
+                                             sizeof(singular)) ||
+            !af_project_binding_encode_token(property->format.plural, plural, sizeof(plural))) {
+            result = AF_RESULT_INVALID_ARGUMENT;
+        } else {
+            result = af_project_writer_append(
+                &writer,
+                "binding_property %llu %u %u %u %u %.9g %d %u %.9g %.9g %.9g %.9g %llu "
+                "%s %s %s %s %s %s\n",
+                (unsigned long long)property->id, (uint32_t)property->type, property->target_count,
+                (uint32_t)property->format.mode, property->format.precision, scalar, integer,
+                boolean, color.r, color.g, color.b, color.a, (unsigned long long)resource, name,
+                text, prefix, suffix, singular, plural);
+        }
+        for (uint32_t target_index = 0U;
+             result == AF_RESULT_SUCCESS && target_index < property->target_count; ++target_index) {
+            const AfBindingTarget *target =
+                &project->binding_data.targets[property->target_start + target_index];
+            result = af_project_writer_append(
+                &writer, "binding_target %llu %u %u %llu %llu %u\n",
+                (unsigned long long)property->id, (uint32_t)target->type,
+                (uint32_t)target->property, (unsigned long long)target->object_id,
+                (unsigned long long)target->member_id, target->text_capacity);
+        }
     }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->path_data.path_count;
          ++index) {

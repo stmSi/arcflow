@@ -185,6 +185,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     af_editor_add_text(editor, canvas_x + 12.0F, canvas_y + 12.0F, "CANVAS", 1.0F, 54.0F,
                        (AfColor){0.46F, 0.5F, 0.58F, 1.0F}, -89990);
     af_editor_render_grid(editor, width, height, camera);
+    af_editor_render_canvas_workflow(editor, width, height, camera);
     for (index = 0U; index < editor->preview_scene.count; ++index) {
         const AfSceneNode *source = &editor->preview_scene.nodes[index];
         AfSceneNode *target = NULL;
@@ -228,6 +229,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     af_editor_render_context_menu(editor, width, height);
     af_editor_render_tooltip(editor, width, height);
     af_editor_render_top_menu(editor, width, height);
+    af_editor_render_workflow(editor, width, height);
 }
 
 static void af_editor_update_title(AfEditorState *editor) {

@@ -33,7 +33,7 @@ static AfResult af_editor_create_primitive(AfEditorState *editor, AfNodeType typ
     if (result == AF_RESULT_SUCCESS) {
         af_editor_select_only(editor, id);
         editor->selected_path_command = UINT32_MAX;
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Primitive created");
     }
     return result;
@@ -109,7 +109,7 @@ static AfResult af_editor_create_path(AfEditorState *editor, int width, int heig
     if (result == AF_RESULT_SUCCESS) {
         af_editor_select_only(editor, id);
         editor->selected_path_command = 1U;
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Editable path created");
     }
     return result;
@@ -218,7 +218,7 @@ static AfResult af_editor_apply_path_edit(AfEditorState *editor, const AfPathCom
             af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
     }
     if (result == AF_RESULT_SUCCESS) {
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, status);
     } else {
         af_editor_status(editor, "Path edit rejected");
@@ -497,7 +497,7 @@ static AfResult af_editor_delete_selection(AfEditorState *editor) {
     if (result == AF_RESULT_SUCCESS) {
         af_editor_select_only(editor, 0U);
         editor->selected_path_command = UINT32_MAX;
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, root_count == 1U ? "Object deleted" : "Objects deleted");
     }
     return result;
@@ -669,7 +669,7 @@ static AfResult af_editor_duplicate_selection(AfEditorState *editor) {
             af_path_find_node_const(&editor->project.path_data, editor->selected_id) != NULL
                 ? 0U
                 : UINT32_MAX;
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, root_count == 1U ? "Object duplicated" : "Objects duplicated");
     }
     return result;

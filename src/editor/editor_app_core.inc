@@ -147,7 +147,7 @@ static AfResult af_editor_commit_selection_modify(AfEditorState *editor, AfEdito
     result = af_editor_history_execute(&editor->history, &editor->project, &command, true,
                                        allow_merge && editor->selection_drag_count == 1U);
     if (result == AF_RESULT_SUCCESS) {
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
     }
     return result;
 }
@@ -254,6 +254,7 @@ static AfResult af_editor_save(AfEditorState *editor) {
     }
     if (result == AF_RESULT_SUCCESS) {
         editor->dirty = false;
+        af_editor_after_project_saved(editor);
         af_editor_status(editor, "Project saved");
     } else {
         af_editor_status(editor, "Project save failed");
@@ -294,6 +295,17 @@ static void af_editor_hierarchy_visit(AfEditorState *editor, uint64_t parent_id,
 static void af_editor_build_hierarchy(AfEditorState *editor) {
     editor->hierarchy_count = 0U;
     af_editor_hierarchy_visit(editor, AF_INVALID_NODE_ID, 0U);
+    if (editor->hierarchy_search[0] != '\0') {
+        uint32_t write = 0U;
+        for (uint32_t index = 0U; index < editor->hierarchy_count; ++index) {
+            if (af_editor_hierarchy_name_matches(editor, editor->hierarchy_order[index])) {
+                editor->hierarchy_order[write] = editor->hierarchy_order[index];
+                editor->hierarchy_depth[write] = editor->hierarchy_depth[index];
+                ++write;
+            }
+        }
+        editor->hierarchy_count = write;
+    }
     if (editor->hierarchy_scroll > editor->hierarchy_count) {
         editor->hierarchy_scroll = editor->hierarchy_count;
     }

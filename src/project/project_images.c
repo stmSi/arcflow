@@ -256,3 +256,62 @@ AfResult af_project_reimport_images(AfProject *project, const char *project_path
     }
     return missing == 0U ? AF_RESULT_SUCCESS : AF_RESULT_NOT_FOUND;
 }
+
+AfResult af_project_repair_image_source(AfProject *project, const char *project_path,
+                                        uint64_t asset_id, const char *replacement_path) {
+    AfDecodedImage decoded = {0};
+    AfFileData source = {0};
+    AfImageAsset staged = {0};
+    AfImageAsset *asset = NULL;
+    char relative[AF_IMAGE_PATH_CAPACITY];
+    uint64_t source_hash = 0U;
+    AfResult result = AF_RESULT_SUCCESS;
+    if (project == NULL || project_path == NULL || project_path[0] == '\0' || asset_id == 0U ||
+        replacement_path == NULL || replacement_path[0] == '\0') {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    asset = af_image_find(&project->image_data, asset_id);
+    if (asset == NULL) {
+        return AF_RESULT_NOT_FOUND;
+    }
+    result = af_file_read_limited(replacement_path, AF_MAX_IMAGE_SOURCE_SIZE, project->allocator,
+                                  &source);
+    if (result == AF_RESULT_SUCCESS) {
+        source_hash = af_hash_bytes(source.data, source.size);
+        result = af_image_decode_file(replacement_path, project->allocator, &decoded);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_copy_image_source(project_path, replacement_path, source_hash, relative,
+                                              sizeof(relative));
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        staged = *asset;
+        staged.width = decoded.width;
+        staged.height = decoded.height;
+        staged.trim_x = 0U;
+        staged.trim_y = 0U;
+        staged.trim_width = decoded.width;
+        staged.trim_height = decoded.height;
+        staged.atlas_index = 0U;
+        staged.atlas_x = 0U;
+        staged.atlas_y = 0U;
+        staged.pixel_size = decoded.width * decoded.height * 4U;
+        staged.pixels = decoded.pixels;
+        staged.source_format = decoded.format;
+        staged.color_space = decoded.color_space;
+        staged.content_hash = af_hash_bytes(staged.pixels, staged.pixel_size);
+        staged.missing = false;
+        (void)snprintf(staged.source_path, sizeof(staged.source_path), "%s", relative);
+        af_project_image_name(replacement_path, staged.name);
+        result = af_image_trim(&staged);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        af_deallocate(project->allocator, asset->pixels);
+        *asset = staged;
+        decoded.pixels = NULL;
+        ++project->image_data.generation;
+    }
+    af_decoded_image_destroy(&decoded);
+    af_file_data_destroy(project->allocator, &source);
+    return result;
+}

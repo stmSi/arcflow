@@ -51,7 +51,7 @@ static AfResult af_editor_reimport_images(AfEditorState *editor) {
     }
     result = af_project_reimport_images(&editor->project, editor->project_path, &missing);
     (void)af_image_build_atlases(&editor->project.image_data);
-    editor->dirty = true;
+    af_editor_mark_dirty(editor);
     if (result == AF_RESULT_SUCCESS) {
         af_editor_status(editor, "All image assets reimported");
     } else {
@@ -103,7 +103,7 @@ static AfResult af_editor_create_flipbook(AfEditorState *editor) {
         return result;
     }
     ++editor->project.next_asset_id;
-    editor->dirty = true;
+    af_editor_mark_dirty(editor);
     af_editor_status(editor, "Flipbook created from all imported images");
     return AF_RESULT_SUCCESS;
 }
@@ -131,13 +131,13 @@ static AfResult af_editor_remove_flipbook(AfEditorState *editor) {
     }
     for (uint32_t index = 0U; index < editor->project.image_data.binding_count; ++index) {
         if (editor->project.image_data.bindings[index].sequence_id == sequence_id) {
-            editor->dirty = true;
+            af_editor_mark_dirty(editor);
             af_editor_status(editor, "Flipbook removed from selected image");
             return AF_RESULT_SUCCESS;
         }
     }
     (void)af_image_remove_sequence(&editor->project.image_data, sequence_id);
-    editor->dirty = true;
+    af_editor_mark_dirty(editor);
     af_editor_status(editor, "Flipbook removed");
     return AF_RESULT_SUCCESS;
 }
@@ -152,7 +152,7 @@ static void af_editor_toggle_image_nine_slice(AfEditorState *editor) {
                                 ? AF_IMAGE_DISPLAY_NINE_SLICE
                                 : AF_IMAGE_DISPLAY_STRETCH;
     ++editor->project.image_data.generation;
-    editor->dirty = true;
+    af_editor_mark_dirty(editor);
     af_editor_status(editor, binding->display_mode == AF_IMAGE_DISPLAY_NINE_SLICE
                                  ? "Nine-slice enabled"
                                  : "Image stretch enabled");

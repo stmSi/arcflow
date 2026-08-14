@@ -180,7 +180,7 @@ static AfResult af_validate_file(const char *path) {
     return result;
 }
 
-static AfResult af_compile_project(const char *input_path, const char *output_path) {
+static AfResult af_compile_project(const char *input_path, const char *output_path, bool release) {
     AfAllocator allocator = {0};
     AfProject project = {0};
     AfPackageBlob package = {0};
@@ -188,7 +188,8 @@ static AfResult af_compile_project(const char *input_path, const char *output_pa
     af_allocator_init_default(&allocator);
     result = af_project_load_file(input_path, &allocator, &project);
     if (result == AF_RESULT_SUCCESS) {
-        result = af_project_compile(&project, &allocator, &package);
+        result = release ? af_project_compile_release(&project, &allocator, &package)
+                         : af_project_compile(&project, &allocator, &package);
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_file_write(output_path, package.data, package.size);
@@ -204,12 +205,14 @@ int main(int argument_count, char **arguments) {
         result = af_write_demo(arguments[2]);
     } else if (argument_count == 3 && strcmp(arguments[1], "--validate") == 0) {
         result = af_validate_file(arguments[2]);
+    } else if (argument_count == 4 && strcmp(arguments[1], "--release") == 0) {
+        result = af_compile_project(arguments[2], arguments[3], true);
     } else if (argument_count == 3) {
-        result = af_compile_project(arguments[1], arguments[2]);
+        result = af_compile_project(arguments[1], arguments[2], false);
     } else {
         (void)fprintf(stderr,
                       "usage: arcflow_compiler INPUT.afproj OUTPUT.afp | --demo OUTPUT.afp | "
-                      "--validate INPUT.afp\n");
+                      "--validate INPUT.afp | --release INPUT.afproj OUTPUT.afp\n");
         return 2;
     }
     if (result != AF_RESULT_SUCCESS) {

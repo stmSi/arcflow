@@ -3,6 +3,7 @@
 
 #include "arcflow/arcflow_result.h"
 #include "assets/package.h"
+#include "binding/binding.h"
 #include "core/allocator.h"
 #include "layout/layout.h"
 #include "scene/scene.h"
@@ -10,7 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AF_PROJECT_FORMAT_VERSION 9U
+#define AF_PROJECT_FORMAT_VERSION 10U
 #define AF_PROJECT_MAX_FILE_SIZE (32U * 1024U * 1024U)
 #define AF_PROJECT_NAME_CAPACITY 64U
 #define AF_PROJECT_MAX_CLIPS 64U
@@ -62,6 +63,7 @@ typedef struct AfProject {
     AfLayoutData layout_data;
     AfParticleData particle_data;
     AfImageData image_data;
+    AfBindingData binding_data;
     uint64_t *validation_ids;
     AfAllocator *allocator;
 } AfProject;
@@ -172,5 +174,10 @@ AfResult af_project_save_file(const AfProject *project, const char *path, AfAllo
 AfResult af_project_load_file(const char *path, AfAllocator *allocator, AfProject *out_project);
 AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
                             AfPackageBlob *out_package);
+AfResult af_project_compile_release(const AfProject *project, AfAllocator *allocator,
+                                    AfPackageBlob *out_package);
+AfResult af_project_add_exposed_property(AfProject *project, const AfExposedProperty *property,
+                                         const AfBindingTarget *targets);
+AfResult af_project_remove_exposed_property(AfProject *project, uint64_t property_id);
 
 #endif

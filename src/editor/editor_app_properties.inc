@@ -51,7 +51,7 @@ static void af_editor_apply_fill(AfEditorState *editor, AfColor color) {
             (void)af_style_mark_paint_changed(style);
         }
     }
-    editor->dirty = true;
+    af_editor_mark_dirty(editor);
 }
 
 static void af_editor_update_color_picker(AfEditorState *editor, int width, float x, float y) {
@@ -525,7 +525,7 @@ static bool af_editor_handle_image_inspector(AfEditorState *editor, int width, f
         }
         ++editor->project.image_data.generation;
         (void)af_image_build_atlases(&editor->project.image_data);
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Image settings updated");
         return true;
     }
@@ -545,7 +545,7 @@ static bool af_editor_handle_image_inspector(AfEditorState *editor, int width, f
         binding->display_mode = AF_IMAGE_DISPLAY_NINE_SLICE;
         ++editor->project.image_data.generation;
         (void)af_image_build_atlases(&editor->project.image_data);
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Nine-slice border updated");
         return true;
     }
@@ -561,14 +561,14 @@ static bool af_editor_handle_image_inspector(AfEditorState *editor, int width, f
         binding->frames_per_second = af_editor_clamp(
             binding->frames_per_second + (x < panel_x + 35.0F ? -1.0F : 1.0F), 1.0F, 120.0F);
         ++editor->project.image_data.generation;
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Flipbook speed updated");
         return true;
     }
     if (sequence != NULL && y >= 622.0F && y < 650.0F) {
         binding->loop = !binding->loop;
         ++editor->project.image_data.generation;
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor,
                          binding->loop ? "Flipbook looping enabled" : "Flipbook looping disabled");
         return true;
@@ -626,7 +626,7 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
             af_editor_adjust_particle(editor, emitter, row, x < panel_x + 31.0F);
             if (af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_PARTICLE, true) ==
                 AF_RESULT_SUCCESS) {
-                editor->dirty = true;
+                af_editor_mark_dirty(editor);
                 af_editor_status(editor, "Particle emitter updated");
             }
         }
@@ -824,7 +824,7 @@ static void af_editor_toggle_selected_particles(AfEditorState *editor) {
     }
     if (result == AF_RESULT_SUCCESS) {
         (void)af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_PARTICLE, false);
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
     }
 }
 
@@ -881,7 +881,7 @@ static void af_editor_execute_particle_context_item(AfEditorState *editor, uint3
     }
     if (af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_PARTICLE, false) ==
         AF_RESULT_SUCCESS) {
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Particle context action applied");
     }
 }
@@ -912,7 +912,18 @@ static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_
             editor->asset_browser_visible = true;
             af_editor_status(editor, "Image asset shown in browser");
         } else if (item == 3U) {
-            (void)af_editor_reimport_images(editor);
+            const AfImageBinding *binding =
+                af_image_find_binding_const(&editor->project.image_data, editor->selected_id);
+            const AfImageAsset *asset =
+                binding == NULL
+                    ? NULL
+                    : af_image_find_const(&editor->project.image_data, binding->asset_id);
+            if (asset != NULL && asset->missing) {
+                editor->selected_asset_id = asset->id;
+                af_editor_show_project_dialog(editor, AF_EDITOR_DIALOG_REPAIR_IMAGE);
+            } else {
+                (void)af_editor_reimport_images(editor);
+            }
         } else if (item == 4U) {
             (void)af_editor_create_flipbook(editor);
         } else if (item == 5U) {
@@ -928,7 +939,13 @@ static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_
         } else if (item == 1U) {
             (void)af_editor_create_flipbook(editor);
         } else if (item == 2U) {
-            (void)af_editor_reimport_images(editor);
+            const AfImageAsset *asset =
+                af_image_find_const(&editor->project.image_data, editor->selected_asset_id);
+            if (asset != NULL && asset->missing) {
+                af_editor_show_project_dialog(editor, AF_EDITOR_DIALOG_REPAIR_IMAGE);
+            } else {
+                (void)af_editor_reimport_images(editor);
+            }
         } else if (item == 3U) {
             if (af_image_build_atlases(&editor->project.image_data) == AF_RESULT_SUCCESS) {
                 af_editor_status(editor, "Atlases packed deterministically");
@@ -943,7 +960,7 @@ static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_
                     --editor->asset_scroll;
                 }
                 (void)af_image_build_atlases(&editor->project.image_data);
-                editor->dirty = true;
+                af_editor_mark_dirty(editor);
                 af_editor_status(editor, "Unused image asset deleted");
             } else {
                 af_editor_status(editor, "Asset is still used by a scene object or sequence");
@@ -1088,13 +1105,13 @@ static void af_editor_execute_context_item(AfEditorState *editor, uint32_t item,
             editor->snapping = !editor->snapping;
         } else if (item == 4U) {
             if (af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS) {
-                editor->dirty = true;
+                af_editor_mark_dirty(editor);
                 af_editor_reconcile_selection(editor);
                 af_editor_status(editor, "Undo");
             }
         } else if (item == 5U && af_editor_history_redo(&editor->history, &editor->project) ==
                                      AF_RESULT_SUCCESS) {
-            editor->dirty = true;
+            af_editor_mark_dirty(editor);
             af_editor_reconcile_selection(editor);
             af_editor_status(editor, "Redo");
         }

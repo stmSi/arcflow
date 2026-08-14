@@ -2,6 +2,7 @@
 
 #include "animation/animation.h"
 #include "assets/package.h"
+#include "binding/binding.h"
 #include "component/component.h"
 #include "core/allocator.h"
 #include "core/handles.h"
@@ -14,43 +15,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
-
-#define AF_RUNTIME_MAX_PACKAGES 64U
-#define AF_RUNTIME_MAX_INSTANCES 128U
-
-typedef struct AfRuntimePackageSlot {
-    AfLoadedPackage package;
-} AfRuntimePackageSlot;
-
-typedef struct AfRuntimeInstanceSlot {
-    AfPackageHandle package_handle;
-    AfScene scene;
-    AfPlayback playback;
-    AfCanvasInfo canvas;
-    AfLayoutData layout;
-    AfPathData paths;
-    AfParticleData particles;
-    AfParticleEmitter particle_emitters[AF_MAX_PARTICLE_EMITTERS];
-    AfComponentRuntime components;
-    AfComponentInstanceState component_states[AF_MAX_COMPONENT_INSTANCES];
-    AfInteractionSystem interaction;
-    AfInteractionNode interaction_nodes[AF_MAX_INTERACTION_NODES];
-    AfStateMachineRuntime state_machines;
-    AfStateMachineStatus state_machine_statuses[AF_MAX_STATE_MACHINES];
-    AfStateInputState state_machine_inputs[AF_MAX_STATE_INPUTS];
-} AfRuntimeInstanceSlot;
-
-struct AfRuntime {
-    AfAllocator allocator;
-    AfRuntimeCreateInfo create_info;
-    AfHandlePool package_pool;
-    AfHandleSlot package_handles[AF_RUNTIME_MAX_PACKAGES];
-    AfRuntimePackageSlot packages[AF_RUNTIME_MAX_PACKAGES];
-    AfHandlePool instance_pool;
-    AfHandleSlot instance_handles[AF_RUNTIME_MAX_INSTANCES];
-    AfRuntimeInstanceSlot instances[AF_RUNTIME_MAX_INSTANCES];
-    uint64_t last_frame_allocations;
-};
 
 static AfResult af_runtime_package(AfRuntime *runtime, AfPackageHandle handle,
                                    AfLoadedPackage **out_package, uint32_t *out_index) {
@@ -132,6 +96,8 @@ void af_runtime_destroy(AfRuntime *runtime) {
             af_deallocate(&runtime->allocator, runtime->instances[index].scene.nodes);
             af_deallocate(&runtime->allocator, runtime->instances[index].paths.paths);
             af_deallocate(&runtime->allocator, runtime->instances[index].paths.commands);
+            af_deallocate(&runtime->allocator, runtime->instances[index].image_bindings);
+            af_deallocate(&runtime->allocator, runtime->instances[index].binding_values);
         }
     }
     for (index = 0U; index < AF_RUNTIME_MAX_PACKAGES; ++index) {
@@ -216,9 +182,18 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
                                           sizeof(AfPath), alignof(AfPath));
     slot->paths.commands = af_allocate_array(&runtime->allocator, loaded->path_data.command_count,
                                              sizeof(AfPathCommand), alignof(AfPathCommand));
+    slot->image_bindings = af_allocate_array(&runtime->allocator, loaded->image_data.binding_count,
+                                             sizeof(AfImageBinding), alignof(AfImageBinding));
+    slot->binding_values =
+        af_allocate_array(&runtime->allocator, loaded->binding_data.property_count,
+                          sizeof(AfBindingValue), alignof(AfBindingValue));
     if ((loaded->scene.count != 0U && slot->scene.nodes == NULL) ||
         (loaded->path_data.path_count != 0U && slot->paths.paths == NULL) ||
-        (loaded->path_data.command_count != 0U && slot->paths.commands == NULL)) {
+        (loaded->path_data.command_count != 0U && slot->paths.commands == NULL) ||
+        (loaded->image_data.binding_count != 0U && slot->image_bindings == NULL) ||
+        (loaded->binding_data.property_count != 0U && slot->binding_values == NULL)) {
+        af_deallocate(&runtime->allocator, slot->binding_values);
+        af_deallocate(&runtime->allocator, slot->image_bindings);
         af_deallocate(&runtime->allocator, slot->paths.commands);
         af_deallocate(&runtime->allocator, slot->paths.paths);
         af_deallocate(&runtime->allocator, slot->scene.nodes);
@@ -250,6 +225,20 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
                (size_t)loaded->particle_data.count * sizeof(AfParticleEmitter));
     }
     slot->scene.particles = &slot->particles;
+    slot->images = loaded->image_data;
+    slot->images.bindings = slot->image_bindings;
+    slot->images.binding_capacity = loaded->image_data.binding_count;
+    slot->images.allocator = NULL;
+    if (loaded->image_data.binding_count != 0U) {
+        memcpy(slot->image_bindings, loaded->image_data.bindings,
+               (size_t)loaded->image_data.binding_count * sizeof(AfImageBinding));
+    }
+    slot->scene.images = &slot->images;
+    for (uint32_t property_index = 0U; property_index < loaded->binding_data.property_count;
+         ++property_index) {
+        slot->binding_values[property_index] =
+            loaded->binding_data.properties[property_index].default_value;
+    }
     slot->layout = loaded->layout_data;
     slot->scene.layouts = &slot->layout;
     if (loaded->scene.count != 0U) {
@@ -263,6 +252,9 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
                                            AF_MAX_COMPONENT_INSTANCES);
     }
     if (result == AF_RESULT_SUCCESS) {
+        (void)af_accessibility_tree_init(&slot->accessibility, slot->accessibility_nodes,
+                                         AF_MAX_INTERACTION_NODES);
+        af_accessibility_settings_default(&slot->accessibility_settings);
         for (uint32_t node_index = 0U; node_index < slot->scene.count; ++node_index) {
             const bool interactive = slot->scene.nodes[node_index].type != AF_NODE_GROUP;
             slot->interaction_nodes[node_index] =
@@ -270,6 +262,16 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
                                     .enabled = interactive,
                                     .focusable = interactive,
                                     .opacity_threshold = 0.001F};
+            if (interactive) {
+                const AfAccessibilityNode accessibility = {
+                    .node_id = slot->scene.nodes[node_index].id,
+                    .focus_order = node_index,
+                    .role = slot->scene.nodes[node_index].type == AF_NODE_IMAGE
+                                ? AF_ACCESSIBILITY_ROLE_IMAGE
+                                : AF_ACCESSIBILITY_ROLE_BUTTON,
+                    .focusable = true};
+                (void)af_accessibility_set_node(&slot->accessibility, &accessibility);
+            }
         }
         af_interaction_init(&slot->interaction, slot->interaction_nodes, slot->scene.count);
     }
@@ -283,6 +285,8 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
         af_deallocate(&runtime->allocator, slot->paths.commands);
         af_deallocate(&runtime->allocator, slot->paths.paths);
         af_deallocate(&runtime->allocator, slot->scene.nodes);
+        af_deallocate(&runtime->allocator, slot->image_bindings);
+        af_deallocate(&runtime->allocator, slot->binding_values);
         (void)af_handle_release(&runtime->instance_pool, handle);
         *slot = (AfRuntimeInstanceSlot){0};
         return result;
@@ -301,6 +305,8 @@ AfResult af_instance_destroy(AfRuntime *runtime, AfInstanceHandle instance) {
     af_deallocate(&runtime->allocator, slot->scene.nodes);
     af_deallocate(&runtime->allocator, slot->paths.paths);
     af_deallocate(&runtime->allocator, slot->paths.commands);
+    af_deallocate(&runtime->allocator, slot->image_bindings);
+    af_deallocate(&runtime->allocator, slot->binding_values);
     runtime->instances[index] = (AfRuntimeInstanceSlot){0};
     return af_handle_release(&runtime->instance_pool, instance);
 }
@@ -317,6 +323,11 @@ AfResult af_instance_update(AfRuntime *runtime, AfInstanceHandle instance, float
         return result;
     }
     af_allocator_begin_frame(&runtime->allocator);
+    if (slot->accessibility_settings.reduced_motion == AF_REDUCED_MOTION_DISABLE) {
+        delta_time = 0.0F;
+    } else if (slot->accessibility_settings.reduced_motion == AF_REDUCED_MOTION_SIMPLIFY) {
+        delta_time = fminf(delta_time, 1.0F / 30.0F);
+    }
     if (loaded->scene.count != 0U) {
         memcpy(slot->scene.nodes, loaded->base_nodes,
                (size_t)loaded->scene.count * sizeof(AfSceneNode));
@@ -329,11 +340,18 @@ AfResult af_instance_update(AfRuntime *runtime, AfInstanceHandle instance, float
         memcpy(slot->paths.commands, loaded->path_data.commands,
                (size_t)loaded->path_data.command_count * sizeof(AfPathCommand));
     }
-    if (loaded->animation.clip_count != 0U) {
-        af_playback_update(&slot->playback, &loaded->animation.clips[0], delta_time);
-        result = af_animation_apply(&loaded->animation, &loaded->animation.clips[0],
-                                    slot->playback.time, &slot->scene);
-    } else {
+    result = af_runtime_binding_apply_all(slot, loaded, true);
+    if (result == AF_RESULT_SUCCESS && loaded->animation.clip_count != 0U) {
+        const AfAnimationClip *clip = &loaded->animation.clips[slot->active_clip_index];
+        af_playback_update(&slot->playback, clip, delta_time);
+        result = af_animation_apply(&loaded->animation, clip, slot->playback.time, &slot->scene);
+    } else if (result == AF_RESULT_SUCCESS) {
+        result = af_scene_evaluate_world(&slot->scene);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_runtime_binding_apply_all(slot, loaded, false);
+    }
+    if (result == AF_RESULT_SUCCESS) {
         result = af_scene_evaluate_world(&slot->scene);
     }
     if (result == AF_RESULT_SUCCESS) {
@@ -384,7 +402,8 @@ AfResult af_instance_seek(AfRuntime *runtime, AfInstanceHandle instance, float t
     if (result != AF_RESULT_SUCCESS || loaded->animation.clip_count == 0U) {
         return result != AF_RESULT_SUCCESS ? result : AF_RESULT_NOT_FOUND;
     }
-    af_playback_seek(&slot->playback, &loaded->animation.clips[0], time_seconds);
+    af_playback_seek(&slot->playback, &loaded->animation.clips[slot->active_clip_index],
+                     time_seconds);
     return af_instance_update(runtime, instance, 0.0F);
 }
 
@@ -573,6 +592,157 @@ AfResult af_instance_fire_trigger(AfRuntime *runtime, AfInstanceHandle instance,
     return result == AF_RESULT_SUCCESS
                ? af_state_machine_fire_trigger(&slot->state_machines, input_id)
                : result;
+}
+
+AfPropertyId af_property_id(const char *name) { return af_binding_name_id(name); }
+
+AfResult af_instance_property_type(AfRuntime *runtime, AfInstanceHandle instance,
+                                   AfPropertyId property_id, AfRuntimePropertyType *out_type) {
+    AfRuntimeInstanceSlot *slot = NULL;
+    AfLoadedPackage *loaded = NULL;
+    const AfExposedProperty *property = NULL;
+    AfResult result = AF_RESULT_SUCCESS;
+    if (out_type == NULL || property_id == 0U) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    result = af_runtime_instance(runtime, instance, &slot, NULL);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_runtime_package(runtime, slot->package_handle, &loaded, NULL);
+    }
+    if (result != AF_RESULT_SUCCESS) {
+        return result;
+    }
+    property = af_binding_find_const(&loaded->binding_data, property_id);
+    if (property == NULL) {
+        return AF_RESULT_NOT_FOUND;
+    }
+    *out_type = (AfRuntimePropertyType)property->type;
+    return AF_RESULT_SUCCESS;
+}
+
+AfResult af_instance_set_property(AfRuntime *runtime, AfInstanceHandle instance,
+                                  AfPropertyId property_id, AfRuntimePropertyType type,
+                                  const AfRuntimePropertyValue *value) {
+    AfRuntimeInstanceSlot *slot = NULL;
+    AfLoadedPackage *loaded = NULL;
+    AfResult result = af_runtime_instance(runtime, instance, &slot, NULL);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_runtime_package(runtime, slot->package_handle, &loaded, NULL);
+    }
+    return result == AF_RESULT_SUCCESS
+               ? af_runtime_binding_set(slot, loaded, property_id, type, value)
+               : result;
+}
+
+AfResult af_instance_get_property(AfRuntime *runtime, AfInstanceHandle instance,
+                                  AfPropertyId property_id, AfRuntimePropertyType type,
+                                  AfRuntimePropertyValue *out_value) {
+    AfRuntimeInstanceSlot *slot = NULL;
+    AfLoadedPackage *loaded = NULL;
+    AfResult result = af_runtime_instance(runtime, instance, &slot, NULL);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_runtime_package(runtime, slot->package_handle, &loaded, NULL);
+    }
+    return result == AF_RESULT_SUCCESS
+               ? af_runtime_binding_get(slot, loaded, property_id, type, out_value)
+               : result;
+}
+
+AfResult af_instance_format_property(AfRuntime *runtime, AfInstanceHandle instance,
+                                     AfPropertyId property_id, char *output,
+                                     size_t output_capacity) {
+    AfRuntimeInstanceSlot *slot = NULL;
+    AfLoadedPackage *loaded = NULL;
+    const AfExposedProperty *property = NULL;
+    uint32_t index = 0U;
+    AfResult result = af_runtime_instance(runtime, instance, &slot, NULL);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_runtime_package(runtime, slot->package_handle, &loaded, NULL);
+    }
+    if (result != AF_RESULT_SUCCESS) {
+        return result;
+    }
+    property = af_binding_find_const(&loaded->binding_data, property_id);
+    if (property == NULL) {
+        return AF_RESULT_NOT_FOUND;
+    }
+    index = (uint32_t)(property - loaded->binding_data.properties);
+    return af_binding_format_value(property->type, &slot->binding_values[index], &property->format,
+                                   output, output_capacity);
+}
+
+AfResult af_instance_set_locale(AfRuntime *runtime, AfInstanceHandle instance, uint64_t locale_id) {
+    AfRuntimeInstanceSlot *slot = NULL;
+    AfResult result = af_runtime_instance(runtime, instance, &slot, NULL);
+    if (result != AF_RESULT_SUCCESS || locale_id == 0U) {
+        return result != AF_RESULT_SUCCESS ? result : AF_RESULT_INVALID_ARGUMENT;
+    }
+    slot->locale_id = locale_id;
+    return AF_RESULT_SUCCESS;
+}
+
+AfResult af_instance_set_accessibility(AfRuntime *runtime, AfInstanceHandle instance,
+                                       const AfRuntimeAccessibilitySettings *settings) {
+    AfRuntimeInstanceSlot *slot = NULL;
+    AfAccessibilitySettings converted = {0};
+    AfResult result = af_runtime_instance(runtime, instance, &slot, NULL);
+    if (result != AF_RESULT_SUCCESS || settings == NULL ||
+        (settings->high_contrast != 0 && settings->high_contrast != 1)) {
+        return result != AF_RESULT_SUCCESS ? result : AF_RESULT_INVALID_ARGUMENT;
+    }
+    converted = (AfAccessibilitySettings){
+        .text_scale = settings->text_scale,
+        .reduced_motion = (AfReducedMotionMode)settings->reduced_motion,
+        .color_blind_preview = (AfColorBlindPreview)settings->color_blind_preview,
+        .high_contrast = settings->high_contrast != 0};
+    result = af_accessibility_settings_validate(&converted);
+    if (result == AF_RESULT_SUCCESS) {
+        slot->accessibility_settings = converted;
+        if (converted.reduced_motion == AF_REDUCED_MOTION_DISABLE) {
+            af_playback_pause(&slot->playback);
+        }
+    }
+    return result;
+}
+
+AfResult af_instance_accessibility_count(AfRuntime *runtime, AfInstanceHandle instance,
+                                         uint32_t *out_count) {
+    AfRuntimeInstanceSlot *slot = NULL;
+    AfResult result = AF_RESULT_SUCCESS;
+    if (out_count == NULL) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    result = af_runtime_instance(runtime, instance, &slot, NULL);
+    if (result == AF_RESULT_SUCCESS) {
+        *out_count = slot->accessibility.count;
+    }
+    return result;
+}
+
+AfResult af_instance_accessibility_info(AfRuntime *runtime, AfInstanceHandle instance,
+                                        uint32_t index, AfRuntimeAccessibilityInfo *out_info) {
+    AfRuntimeInstanceSlot *slot = NULL;
+    const AfAccessibilityNode *node = NULL;
+    AfResult result = AF_RESULT_SUCCESS;
+    if (out_info == NULL) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    result = af_runtime_instance(runtime, instance, &slot, NULL);
+    if (result != AF_RESULT_SUCCESS) {
+        return result;
+    }
+    if (index >= slot->accessibility.count) {
+        return AF_RESULT_NOT_FOUND;
+    }
+    node = &slot->accessibility.nodes[index];
+    *out_info = (AfRuntimeAccessibilityInfo){.node_id = node->node_id,
+                                             .states = node->states,
+                                             .focus_order = node->focus_order,
+                                             .role = (AfRuntimeAccessibilityRole)node->role,
+                                             .focusable = node->focusable ? 1 : 0};
+    memcpy(out_info->label, node->label, sizeof(out_info->label));
+    memcpy(out_info->description, node->description, sizeof(out_info->description));
+    return AF_RESULT_SUCCESS;
 }
 
 AfResult af_instance_get_scene(AfRuntime *runtime, AfInstanceHandle instance,

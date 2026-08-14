@@ -11,7 +11,7 @@ static AfResult af_editor_commit_modify(AfEditorState *editor, const AfProjectNo
             af_editor_history_execute(&editor->history, &editor->project, &command, true, merge);
     }
     if (result == AF_RESULT_SUCCESS) {
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
     }
     return result;
 }
@@ -170,7 +170,7 @@ static AfResult af_editor_add_keyframe(AfEditorState *editor) {
                 editor->selected_keyframe_count = 1U;
                 editor->selected_keyframes[0] = current->id;
                 editor->timeline_focus = true;
-                editor->dirty = true;
+                af_editor_mark_dirty(editor);
                 af_editor_status(editor, "Keyframe updated");
             }
             return result;
@@ -184,7 +184,7 @@ static AfResult af_editor_add_keyframe(AfEditorState *editor) {
         editor->selected_keyframe_count = 1U;
         editor->selected_keyframes[0] = new_key.id;
         editor->timeline_focus = true;
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Keyframe added");
     }
     return result;
@@ -211,7 +211,7 @@ static AfResult af_editor_delete_keyframes(AfEditorState *editor) {
     }
     if (result == AF_RESULT_SUCCESS) {
         af_editor_clear_key_selection(editor);
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Keyframes deleted");
     }
     return result;
@@ -271,7 +271,7 @@ static AfResult af_editor_paste_keyframes(AfEditorState *editor, bool duplicate)
             af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
     }
     if (result == AF_RESULT_SUCCESS) {
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, duplicate ? "Keyframes duplicated" : "Keyframes pasted");
     }
     return result;
@@ -332,7 +332,7 @@ static AfResult af_editor_modify_selected_keys(AfEditorState *editor, int operat
             af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
     }
     if (result == AF_RESULT_SUCCESS) {
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Keyframes edited");
     }
     return result;
@@ -357,7 +357,7 @@ static AfResult af_editor_new_clip(AfEditorState *editor) {
     if (result == AF_RESULT_SUCCESS) {
         editor->selected_clip_id = clip.id;
         editor->playhead = 0.0F;
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Animation clip created");
     }
     return result;
@@ -406,7 +406,7 @@ static AfResult af_editor_delete_clip(AfEditorState *editor) {
         editor->selected_clip_id = editor->project.clips[0].id;
         editor->playhead = 0.0F;
         af_editor_clear_key_selection(editor);
-        editor->dirty = true;
+        af_editor_mark_dirty(editor);
         af_editor_status(editor, "Animation clip deleted");
     }
     return result;

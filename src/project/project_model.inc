@@ -27,6 +27,8 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
     AfStyle *styles = NULL;
     AfLayoutNode *layouts = NULL;
     AfParticleEmitter *emitters = NULL;
+    AfExposedProperty *properties = NULL;
+    AfBindingTarget *binding_targets = NULL;
     uint64_t *validation_ids = NULL;
     if (project == NULL || allocator == NULL || capacity == 0U || capacity > AF_MAX_NODES) {
         return AF_RESULT_INVALID_ARGUMENT;
@@ -49,12 +51,19 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
         af_allocate_array(allocator, AF_MAX_LAYOUT_NODES, sizeof(*layouts), alignof(AfLayoutNode));
     emitters = af_allocate_array(allocator, AF_MAX_PARTICLE_EMITTERS, sizeof(*emitters),
                                  alignof(AfParticleEmitter));
+    properties = af_allocate_array(allocator, AF_MAX_EXPOSED_PROPERTIES, sizeof(*properties),
+                                   alignof(AfExposedProperty));
+    binding_targets = af_allocate_array(allocator, AF_MAX_BINDING_TARGETS, sizeof(*binding_targets),
+                                        alignof(AfBindingTarget));
     validation_ids = af_allocate_array(allocator, AF_PROJECT_VALIDATION_ID_CAPACITY,
                                        sizeof(*validation_ids), alignof(uint64_t));
     if (nodes == NULL || names == NULL || clips == NULL || tracks == NULL || keyframes == NULL ||
         paths == NULL || path_commands == NULL || styles == NULL || layouts == NULL ||
-        emitters == NULL || validation_ids == NULL) {
+        emitters == NULL || properties == NULL || binding_targets == NULL ||
+        validation_ids == NULL) {
         af_deallocate(allocator, validation_ids);
+        af_deallocate(allocator, binding_targets);
+        af_deallocate(allocator, properties);
         af_deallocate(allocator, path_commands);
         af_deallocate(allocator, styles);
         af_deallocate(allocator, layouts);
@@ -77,6 +86,8 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
     memset(styles, 0, AF_MAX_STYLES * sizeof(*styles));
     memset(layouts, 0, AF_MAX_LAYOUT_NODES * sizeof(*layouts));
     memset(emitters, 0, AF_MAX_PARTICLE_EMITTERS * sizeof(*emitters));
+    memset(properties, 0, AF_MAX_EXPOSED_PROPERTIES * sizeof(*properties));
+    memset(binding_targets, 0, AF_MAX_BINDING_TARGETS * sizeof(*binding_targets));
     memset(validation_ids, 0, AF_PROJECT_VALIDATION_ID_CAPACITY * sizeof(*validation_ids));
     af_scene_init(&project->scene, nodes, capacity);
     project->names = names;
@@ -106,6 +117,10 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
     project->particle_data = (AfParticleData){
         .emitters = emitters, .capacity = AF_MAX_PARTICLE_EMITTERS, .lod = af_vfx_lod_default()};
     project->scene.particles = &project->particle_data;
+    project->binding_data = (AfBindingData){.properties = properties,
+                                            .property_capacity = AF_MAX_EXPOSED_PROPERTIES,
+                                            .targets = binding_targets,
+                                            .target_capacity = AF_MAX_BINDING_TARGETS};
     if (af_image_data_create(&project->image_data, allocator) != AF_RESULT_SUCCESS) {
         af_project_destroy(project);
         return AF_RESULT_OUT_OF_MEMORY;
@@ -121,6 +136,8 @@ void af_project_destroy(AfProject *project) {
     }
     if (project->allocator != NULL) {
         af_image_data_destroy(&project->image_data);
+        af_deallocate(project->allocator, project->binding_data.targets);
+        af_deallocate(project->allocator, project->binding_data.properties);
         af_deallocate(project->allocator, project->validation_ids);
         af_deallocate(project->allocator, project->path_data.commands);
         af_deallocate(project->allocator, project->style_data.styles);
@@ -351,8 +368,18 @@ AfResult af_project_validate(const AfProject *project) {
         }
         maximum_animation_id = id > maximum_animation_id ? id : maximum_animation_id;
     }
-    return project->next_animation_id > maximum_animation_id ? AF_RESULT_SUCCESS
-                                                             : AF_RESULT_INVALID_ARGUMENT;
+    if (project->next_animation_id <= maximum_animation_id) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    {
+        const AfBindingValidationContext context = {.scene = &project->scene,
+                                                    .images = &project->image_data,
+                                                    .particles = &project->particle_data};
+        if (af_binding_data_validate(&project->binding_data, &context) != AF_RESULT_SUCCESS) {
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
+    }
+    return AF_RESULT_SUCCESS;
 }
 
 AfResult af_project_set_name(AfProject *project, uint64_t id, const char *name) {

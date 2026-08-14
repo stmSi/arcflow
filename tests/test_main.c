@@ -60,6 +60,7 @@ typedef struct AfTestFixture {
 
 // clang-format off
 #include "test_core.inc"
+#include "test_file_io_atomic.inc"
 #include "test_systems.inc"
 #include "test_rigging.inc"
 #include "test_package.inc"
@@ -72,6 +73,7 @@ int main(void) {
     static const AfTestCase tests[] = {
         {"core", af_test_core},
         {"file limits", af_test_file_limit},
+        {"atomic project files", af_test_atomic_file_io},
         {"PNG image export", af_test_png_writer},
         {"math and transforms", af_test_math},
         {"scene hierarchy", af_test_scene},

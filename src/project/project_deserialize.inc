@@ -29,6 +29,8 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
     uint64_t parsed_next_animation_id = 0U;
     uint64_t parsed_next_asset_id = 0U;
     uint64_t format_version = 0U;
+    uint64_t binding_property_id = 0U;
+    uint32_t binding_targets_remaining = 0U;
     AfResult result = AF_RESULT_INVALID_PACKAGE;
     if (data == NULL || size == 0U || size > AF_PROJECT_MAX_FILE_SIZE || allocator == NULL ||
         out_project == NULL || memchr(data, '\0', size) != NULL) {
@@ -70,6 +72,26 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
             }
             header_seen = true;
             continue;
+        }
+        if (binding_targets_remaining != 0U) {
+            if (!af_project_parse_binding_target_line(line, &project, binding_property_id)) {
+                goto cleanup;
+            }
+            --binding_targets_remaining;
+            continue;
+        }
+        if (strncmp(line, "binding_property ", 17U) == 0) {
+            if (in_node || in_clip || in_track || in_keyframe || in_path ||
+                !af_project_parse_binding_property_line(line, &project,
+                                                        &binding_targets_remaining)) {
+                goto cleanup;
+            }
+            binding_property_id =
+                project.binding_data.properties[project.binding_data.property_count - 1U].id;
+            continue;
+        }
+        if (strncmp(line, "binding_target ", 15U) == 0) {
+            goto cleanup;
         }
         if (strncmp(line, "particle ", 9U) == 0) {
             AfParticleEmitter emitter = af_particle_emitter_default(1U, 1U);
@@ -347,7 +369,8 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
             next_asset_id_seen = true;
         }
     }
-    if (in_node || in_clip || in_track || in_keyframe || in_path || !header_seen || !canvas_seen) {
+    if (in_node || in_clip || in_track || in_keyframe || in_path ||
+        binding_targets_remaining != 0U || !header_seen || !canvas_seen) {
         goto cleanup;
     }
     if (next_id_seen && parsed_next_id > project.next_id) {

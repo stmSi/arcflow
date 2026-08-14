@@ -37,7 +37,7 @@ static AfResult af_read_sections(const uint8_t *bytes, size_t size, AfSectionVie
                                           .alignment = af_read_u32(entry + 24U),
                                           .count = af_read_u32(entry + 28U)};
         if (af_read_u32(entry + 4U) != 0U || sections[index].type < AF_SECTION_NODES ||
-            sections[index].type > AF_SECTION_IMAGES ||
+            sections[index].type > AF_SECTION_BINDINGS ||
             !af_is_power_of_two(sections[index].alignment) || sections[index].alignment > 4096U ||
             (sections[index].offset & (uint64_t)(sections[index].alignment - 1U)) != 0U ||
             af_u64_add_overflow(sections[index].offset, sections[index].size, &end) || end > size ||

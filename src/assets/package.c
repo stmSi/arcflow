@@ -24,7 +24,8 @@ enum {
     AF_SECTION_STATE_MACHINES = 11U,
     AF_SECTION_PARTICLES = 12U,
     AF_SECTION_IMAGES = 13U,
-    AF_SECTION_COUNT = 13U,
+    AF_SECTION_BINDINGS = 14U,
+    AF_SECTION_COUNT = 14U,
     AF_NODE_RECORD_SIZE = 80U,
     AF_CLIP_RECORD_SIZE = 24U,
     AF_TRACK_RECORD_SIZE = 32U,
@@ -52,7 +53,10 @@ enum {
     AF_IMAGE_ASSET_RECORD_SIZE = 96U,
     AF_IMAGE_BINDING_RECORD_SIZE = 64U,
     AF_IMAGE_SEQUENCE_RECORD_SIZE = 96U,
-    AF_IMAGE_ATLAS_RECORD_SIZE = 96U
+    AF_IMAGE_ATLAS_RECORD_SIZE = 96U,
+    AF_BINDING_HEADER_SIZE = 32U,
+    AF_BINDING_PROPERTY_RECORD_SIZE = 480U,
+    AF_BINDING_TARGET_RECORD_SIZE = 32U
 };
 
 typedef struct AfSectionView {
@@ -65,6 +69,7 @@ typedef struct AfSectionView {
 
 // clang-format off
 #include "assets/package_wire.inc"
+#include "assets/package_bindings.inc"
 #include "assets/package_validate_records.inc"
 #include "assets/package_images.inc"
 #include "assets/package_validate_graphs.inc"

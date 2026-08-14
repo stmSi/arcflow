@@ -29,10 +29,39 @@ typedef enum AfEditorMenuAction {
     AF_EDITOR_MENU_ACTION_PACK_ATLASES,
     AF_EDITOR_MENU_ACTION_CREATE_FLIPBOOK,
     AF_EDITOR_MENU_ACTION_REIMPORT_ASSETS,
+    AF_EDITOR_MENU_ACTION_NEW_FROM_TEMPLATE,
+    AF_EDITOR_MENU_ACTION_OPEN_RECENT,
+    AF_EDITOR_MENU_ACTION_COPY_OBJECTS,
+    AF_EDITOR_MENU_ACTION_PASTE_OBJECTS,
+    AF_EDITOR_MENU_ACTION_FIND_HIERARCHY,
+    AF_EDITOR_MENU_ACTION_COMMAND_PALETTE,
+    AF_EDITOR_MENU_ACTION_ALIGN_LEFT,
+    AF_EDITOR_MENU_ACTION_ALIGN_CENTER_X,
+    AF_EDITOR_MENU_ACTION_ALIGN_RIGHT,
+    AF_EDITOR_MENU_ACTION_ALIGN_TOP,
+    AF_EDITOR_MENU_ACTION_ALIGN_CENTER_Y,
+    AF_EDITOR_MENU_ACTION_ALIGN_BOTTOM,
+    AF_EDITOR_MENU_ACTION_DISTRIBUTE_HORIZONTAL,
+    AF_EDITOR_MENU_ACTION_DISTRIBUTE_VERTICAL,
+    AF_EDITOR_MENU_ACTION_ADD_VERTICAL_GUIDE,
+    AF_EDITOR_MENU_ACTION_ADD_HORIZONTAL_GUIDE,
+    AF_EDITOR_MENU_ACTION_CLEAR_GUIDES,
+    AF_EDITOR_MENU_ACTION_TOGGLE_RULERS,
+    AF_EDITOR_MENU_ACTION_TOGGLE_MEASUREMENTS,
+    AF_EDITOR_MENU_ACTION_TOGGLE_SMART_GUIDES,
+    AF_EDITOR_MENU_ACTION_PROFILER,
+    AF_EDITOR_MENU_ACTION_VALIDATION,
+    AF_EDITOR_MENU_ACTION_AUTOSAVE,
+    AF_EDITOR_MENU_ACTION_RECOVERY,
+    AF_EDITOR_MENU_ACTION_RESET_WORKSPACE,
+    AF_EDITOR_MENU_ACTION_PRESET_LIBRARY,
     AF_EDITOR_MENU_ACTION_BUTTON_GUIDE,
     AF_EDITOR_MENU_ACTION_SHORTCUTS,
     AF_EDITOR_MENU_ACTION_ABOUT
 } AfEditorMenuAction;
+
+static void af_editor_execute_workflow_action(AfEditorState *editor, AfEditorMenuAction action,
+                                              int width, int height);
 
 typedef struct AfEditorMenuItem {
     const char *label;
@@ -53,21 +82,25 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
         {.label = "FILE",
          .width = 54.0F,
          .items = {{"NEW PROJECT", "CTRL+N", AF_EDITOR_MENU_ACTION_NEW_PROJECT},
+                   {"NEW FROM TEMPLATE", "", AF_EDITOR_MENU_ACTION_NEW_FROM_TEMPLATE},
                    {"OPEN PROJECT...", "CTRL+O", AF_EDITOR_MENU_ACTION_OPEN_PROJECT},
+                   {"OPEN RECENT", "", AF_EDITOR_MENU_ACTION_OPEN_RECENT},
                    {"SAVE PROJECT", "CTRL+S", AF_EDITOR_MENU_ACTION_SAVE_PROJECT},
                    {"SAVE PROJECT AS...", "CTRL+SHIFT+S", AF_EDITOR_MENU_ACTION_SAVE_PROJECT_AS},
                    {"COMPILE RUNTIME", "F5", AF_EDITOR_MENU_ACTION_COMPILE},
                    {"EXIT", "ALT+F4", AF_EDITOR_MENU_ACTION_EXIT}},
-         .item_count = 6U},
+         .item_count = 8U},
         {.label = "EDIT",
          .width = 52.0F,
          .items = {{"UNDO", "CTRL+Z", AF_EDITOR_MENU_ACTION_UNDO},
                    {"REDO", "CTRL+Y", AF_EDITOR_MENU_ACTION_REDO},
+                   {"COPY OBJECTS", "CTRL+C", AF_EDITOR_MENU_ACTION_COPY_OBJECTS},
+                   {"PASTE OBJECTS", "CTRL+V", AF_EDITOR_MENU_ACTION_PASTE_OBJECTS},
                    {"DUPLICATE", "CTRL+D", AF_EDITOR_MENU_ACTION_DUPLICATE},
                    {"RENAME", "F2", AF_EDITOR_MENU_ACTION_RENAME},
                    {"DELETE", "DEL", AF_EDITOR_MENU_ACTION_DELETE},
                    {"SELECT ALL", "CTRL+A", AF_EDITOR_MENU_ACTION_SELECT_ALL}},
-         .item_count = 6U},
+         .item_count = 8U},
         {.label = "VIEW",
          .width = 56.0F,
          .items = {{"TOGGLE GRID", "G", AF_EDITOR_MENU_ACTION_GRID},
@@ -94,6 +127,28 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
                    {"CREATE FLIPBOOK", "", AF_EDITOR_MENU_ACTION_CREATE_FLIPBOOK},
                    {"REIMPORT ASSETS", "", AF_EDITOR_MENU_ACTION_REIMPORT_ASSETS}},
          .item_count = 5U},
+        {.label = "WORKSPACE",
+         .width = 96.0F,
+         .items = {{"COMMAND PALETTE", "CTRL+SHIFT+P", AF_EDITOR_MENU_ACTION_COMMAND_PALETTE},
+                   {"FIND IN HIERARCHY", "CTRL+F", AF_EDITOR_MENU_ACTION_FIND_HIERARCHY},
+                   {"PROFILE PANEL", "F10", AF_EDITOR_MENU_ACTION_PROFILER},
+                   {"VALIDATION PANEL", "F11", AF_EDITOR_MENU_ACTION_VALIDATION},
+                   {"RULERS", "", AF_EDITOR_MENU_ACTION_TOGGLE_RULERS},
+                   {"MEASUREMENTS", "", AF_EDITOR_MENU_ACTION_TOGGLE_MEASUREMENTS},
+                   {"SMART GUIDES", "", AF_EDITOR_MENU_ACTION_TOGGLE_SMART_GUIDES},
+                   {"RESET WORKSPACE", "", AF_EDITOR_MENU_ACTION_RESET_WORKSPACE}},
+         .item_count = 8U},
+        {.label = "TOOLS",
+         .width = 62.0F,
+         .items = {{"ALIGN LEFT", "", AF_EDITOR_MENU_ACTION_ALIGN_LEFT},
+                   {"ALIGN CENTER X", "", AF_EDITOR_MENU_ACTION_ALIGN_CENTER_X},
+                   {"ALIGN TOP", "", AF_EDITOR_MENU_ACTION_ALIGN_TOP},
+                   {"ALIGN CENTER Y", "", AF_EDITOR_MENU_ACTION_ALIGN_CENTER_Y},
+                   {"DISTRIBUTE H", "", AF_EDITOR_MENU_ACTION_DISTRIBUTE_HORIZONTAL},
+                   {"DISTRIBUTE V", "", AF_EDITOR_MENU_ACTION_DISTRIBUTE_VERTICAL},
+                   {"CANVAS GUIDES", "", AF_EDITOR_MENU_ACTION_ADD_VERTICAL_GUIDE},
+                   {"AUTOSAVE / RECOVERY", "", AF_EDITOR_MENU_ACTION_AUTOSAVE}},
+         .item_count = 8U},
         {.label = "HELP",
          .width = 56.0F,
          .items = {{"BUTTON GUIDE", "", AF_EDITOR_MENU_ACTION_BUTTON_GUIDE},
@@ -170,6 +225,7 @@ static AfResult af_editor_adopt_project(AfEditorState *editor, AfProject *projec
         af_editor_derive_package_path(editor);
     }
     editor->dirty = dirty;
+    af_editor_project_changed(editor);
     return AF_RESULT_SUCCESS;
 }
 
@@ -323,6 +379,16 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
         } else {
             af_editor_status(editor, "Project path is too long");
         }
+    } else if (action == AF_EDITOR_DIALOG_REPAIR_IMAGE) {
+        const AfResult result = af_project_repair_image_source(
+            &editor->project, editor->project_path, editor->selected_asset_id, path);
+        if (result == AF_RESULT_SUCCESS) {
+            (void)af_image_build_atlases(&editor->project.image_data);
+            af_editor_mark_dirty(editor);
+            af_editor_status(editor, "Missing image source repaired");
+        } else {
+            af_editor_status(editor, "Replacement image is invalid or could not be copied");
+        }
     } else if (action == AF_EDITOR_DIALOG_IMPORT_IMAGE) {
         uint64_t asset_id = 0U;
         uint64_t node_id = 0U;
@@ -332,7 +398,7 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
             editor->selected_asset_id = asset_id;
             editor->asset_browser_visible = true;
             af_editor_select_only(editor, node_id);
-            editor->dirty = true;
+            af_editor_mark_dirty(editor);
             (void)af_image_build_atlases(&editor->project.image_data);
             (void)af_scene_evaluate_world(&editor->project.scene);
             af_editor_status(editor, "Image imported into the project");
@@ -406,14 +472,14 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         break;
     case AF_EDITOR_MENU_ACTION_UNDO:
         if (af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS) {
-            editor->dirty = true;
+            af_editor_mark_dirty(editor);
             af_editor_reconcile_selection(editor);
             af_editor_status(editor, "Undo");
         }
         break;
     case AF_EDITOR_MENU_ACTION_REDO:
         if (af_editor_history_redo(&editor->history, &editor->project) == AF_RESULT_SUCCESS) {
-            editor->dirty = true;
+            af_editor_mark_dirty(editor);
             af_editor_reconcile_selection(editor);
             af_editor_status(editor, "Redo");
         }
@@ -494,10 +560,41 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
     case AF_EDITOR_MENU_ACTION_REIMPORT_ASSETS:
         (void)af_editor_reimport_images(editor);
         break;
+    case AF_EDITOR_MENU_ACTION_NEW_FROM_TEMPLATE:
+    case AF_EDITOR_MENU_ACTION_OPEN_RECENT:
+    case AF_EDITOR_MENU_ACTION_COPY_OBJECTS:
+    case AF_EDITOR_MENU_ACTION_PASTE_OBJECTS:
+    case AF_EDITOR_MENU_ACTION_FIND_HIERARCHY:
+    case AF_EDITOR_MENU_ACTION_COMMAND_PALETTE:
+    case AF_EDITOR_MENU_ACTION_ALIGN_LEFT:
+    case AF_EDITOR_MENU_ACTION_ALIGN_CENTER_X:
+    case AF_EDITOR_MENU_ACTION_ALIGN_RIGHT:
+    case AF_EDITOR_MENU_ACTION_ALIGN_TOP:
+    case AF_EDITOR_MENU_ACTION_ALIGN_CENTER_Y:
+    case AF_EDITOR_MENU_ACTION_ALIGN_BOTTOM:
+    case AF_EDITOR_MENU_ACTION_DISTRIBUTE_HORIZONTAL:
+    case AF_EDITOR_MENU_ACTION_DISTRIBUTE_VERTICAL:
+    case AF_EDITOR_MENU_ACTION_ADD_VERTICAL_GUIDE:
+    case AF_EDITOR_MENU_ACTION_ADD_HORIZONTAL_GUIDE:
+    case AF_EDITOR_MENU_ACTION_CLEAR_GUIDES:
+    case AF_EDITOR_MENU_ACTION_TOGGLE_RULERS:
+    case AF_EDITOR_MENU_ACTION_TOGGLE_MEASUREMENTS:
+    case AF_EDITOR_MENU_ACTION_TOGGLE_SMART_GUIDES:
+    case AF_EDITOR_MENU_ACTION_PROFILER:
+    case AF_EDITOR_MENU_ACTION_VALIDATION:
+    case AF_EDITOR_MENU_ACTION_AUTOSAVE:
+    case AF_EDITOR_MENU_ACTION_RECOVERY:
+    case AF_EDITOR_MENU_ACTION_RESET_WORKSPACE:
+    case AF_EDITOR_MENU_ACTION_PRESET_LIBRARY:
+        af_editor_execute_workflow_action(editor, action, width, height);
+        break;
     case AF_EDITOR_MENU_ACTION_BUTTON_GUIDE:
-    case AF_EDITOR_MENU_ACTION_SHORTCUTS:
     case AF_EDITOR_MENU_ACTION_ABOUT:
         editor->help_overlay = true;
+        break;
+    case AF_EDITOR_MENU_ACTION_SHORTCUTS:
+        editor->shortcuts_overlay = true;
+        editor->shortcut_capture = false;
         break;
     case AF_EDITOR_MENU_ACTION_NONE:
         break;
@@ -505,8 +602,10 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
 }
 
 static void af_editor_render_help_overlay(AfEditorState *editor, int width, int height) {
-    const float box_width = 520.0F;
-    const float box_height = 270.0F;
+    static const char *const link_labels[] = {"OPEN SHORTCUTS", "OPEN COMMAND PALETTE",
+                                              "OPEN RECOVERY", "OPEN VALIDATION"};
+    const float box_width = 620.0F;
+    const float box_height = 390.0F;
     const float x = ((float)width - box_width) * 0.5F;
     const float y = ((float)height - box_height) * 0.5F;
     if (!editor->help_overlay) {
@@ -534,7 +633,22 @@ static void af_editor_render_help_overlay(AfEditorState *editor, int width, int 
     af_editor_add_text(editor, x + 22.0F, y + 174.0F,
                        "ASSETS: import images, inspect metadata and build atlases", 1.0F,
                        box_width - 44.0F, (AfColor){0.83F, 0.85F, 0.9F, 1.0F}, 220010);
-    af_editor_add_text(editor, x + 22.0F, y + 218.0F,
+    af_editor_add_text(editor, x + 22.0F, y + 203.0F,
+                       "WORKSPACE + TOOLS: panels, guides, alignment and validation", 0.92F,
+                       box_width - 44.0F, (AfColor){0.83F, 0.85F, 0.9F, 1.0F}, 220010);
+    af_editor_add_text(editor, x + 22.0F, y + 237.0F, "QUICK LINKS", 0.78F, box_width - 44.0F,
+                       (AfColor){0.5F, 0.68F, 0.9F, 1.0F}, 220010);
+    for (uint32_t index = 0U; index < 4U; ++index) {
+        const float button_x = x + 22.0F + (float)(index % 2U) * 288.0F;
+        const float button_y = y + 258.0F + (float)(index / 2U) * 38.0F;
+        af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
+                            (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = button_x, .ty = button_y},
+                            (AfVec2){272.0F, 31.0F}, (AfColor){0.15F, 0.29F, 0.48F, 1.0F}, 4.0F,
+                            220010);
+        af_editor_add_text(editor, button_x + 14.0F, button_y + 10.0F, link_labels[index], 0.7F,
+                           244.0F, (AfColor){0.86F, 0.91F, 0.98F, 1.0F}, 220020);
+    }
+    af_editor_add_text(editor, x + 22.0F, y + 352.0F,
                        "Hover controls for help. Hold ALT for detailed help. ESC closes this.",
                        0.9F, box_width - 44.0F, (AfColor){0.58F, 0.63F, 0.72F, 1.0F}, 220010);
 }
@@ -622,6 +736,27 @@ static bool af_editor_top_menu_mouse_down(AfEditorState *editor, int width, int 
         editor->top_menu = AF_EDITOR_MENU_NONE;
     }
     if (editor->help_overlay) {
+        const float box_x = ((float)width - 620.0F) * 0.5F;
+        const float box_y = ((float)height - 390.0F) * 0.5F;
+        if (x >= box_x + 22.0F && x < box_x + 598.0F && y >= box_y + 258.0F && y < box_y + 327.0F) {
+            const uint32_t column = (uint32_t)((x - box_x - 22.0F) / 288.0F);
+            const uint32_t row = (uint32_t)((y - box_y - 258.0F) / 38.0F);
+            const uint32_t link = row * 2U + column;
+            editor->help_overlay = false;
+            if (link == 0U) {
+                editor->shortcuts_overlay = true;
+                editor->shortcut_capture = false;
+            } else if (link == 1U) {
+                (void)af_editor_command_palette_open(&editor->command_palette,
+                                                     AF_EDITOR_ACTION_CONTEXT_GLOBAL);
+                SDL_StartTextInput(editor->window.window);
+            } else if (link == 2U) {
+                af_editor_refresh_recovery(editor, true);
+            } else if (link == 3U) {
+                editor->validation_visible = true;
+            }
+            return true;
+        }
         editor->help_overlay = false;
         return true;
     }

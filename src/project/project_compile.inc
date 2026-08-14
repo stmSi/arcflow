@@ -6,7 +6,7 @@ AfResult af_project_save_file(const AfProject *project, const char *path, AfAllo
     }
     result = af_project_serialize(project, allocator, &text);
     if (result == AF_RESULT_SUCCESS) {
-        result = af_file_write(path, text.data, text.size);
+        result = af_file_write_atomic(path, text.data, text.size, 3U);
     }
     af_package_blob_destroy(allocator, &text);
     return result;
@@ -41,8 +41,8 @@ static int af_project_keyframe_compare(const void *left_value, const void *right
     return left->id < right->id ? -1 : 1;
 }
 
-AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
-                            AfPackageBlob *out_package) {
+static AfResult af_project_compile_internal(const AfProject *project, AfAllocator *allocator,
+                                            AfPackageBlob *out_package, bool strip_debug_names) {
     AfSceneNode *ir_nodes = NULL;
     AfAnimationClip *ir_clips = NULL;
     AfAnimationTrack *ir_tracks = NULL;
@@ -149,7 +149,10 @@ AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
         result = af_animation_validate(&ir_animation, &ir_scene);
     }
     if (result == AF_RESULT_SUCCESS) {
-        source = (AfPackageSource){.scene = &ir_scene, .animation = &ir_animation};
+        source = (AfPackageSource){.scene = &ir_scene,
+                                   .animation = &ir_animation,
+                                   .bindings = &project->binding_data,
+                                   .strip_debug_names = strip_debug_names};
         result = af_package_write(&source, allocator, out_package);
     }
     af_deallocate(allocator, ordered_keys);
@@ -159,4 +162,14 @@ AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
     af_deallocate(allocator, ir_nodes);
     af_image_data_destroy(&ir_images);
     return result;
+}
+
+AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
+                            AfPackageBlob *out_package) {
+    return af_project_compile_internal(project, allocator, out_package, false);
+}
+
+AfResult af_project_compile_release(const AfProject *project, AfAllocator *allocator,
+                                    AfPackageBlob *out_package) {
+    return af_project_compile_internal(project, allocator, out_package, true);
 }

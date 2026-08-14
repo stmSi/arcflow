@@ -4,7 +4,12 @@
 #include "core/file_io.h"
 #include "core/hash.h"
 #include "core/log.h"
+#include "editor/editor_actions.h"
 #include "editor/editor_commands.h"
+#include "editor/editor_preferences.h"
+#include "editor/editor_recovery.h"
+#include "editor/editor_workflow.h"
+#include "performance/metrics.h"
 #include "platform/platform_sdl.h"
 #include "project/image_import.h"
 #include "project/project.h"
@@ -13,6 +18,7 @@
 #include "text/text.h"
 
 #include <SDL3/SDL.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -116,6 +122,8 @@ typedef enum AfEditorTopMenu {
     AF_EDITOR_MENU_VIEW,
     AF_EDITOR_MENU_ANIMATION,
     AF_EDITOR_MENU_ASSETS,
+    AF_EDITOR_MENU_WORKSPACE,
+    AF_EDITOR_MENU_TOOLS,
     AF_EDITOR_MENU_HELP
 } AfEditorTopMenu;
 
@@ -123,7 +131,8 @@ typedef enum AfEditorDialogAction {
     AF_EDITOR_DIALOG_NONE = 0,
     AF_EDITOR_DIALOG_OPEN_PROJECT,
     AF_EDITOR_DIALOG_SAVE_PROJECT_AS,
-    AF_EDITOR_DIALOG_IMPORT_IMAGE
+    AF_EDITOR_DIALOG_IMPORT_IMAGE,
+    AF_EDITOR_DIALOG_REPAIR_IMAGE
 } AfEditorDialogAction;
 
 typedef struct AfEditorContextMenuInfo {
@@ -237,11 +246,45 @@ typedef struct AfEditorState {
     bool vector_animation_smoke;
     bool image_smoke;
     bool menu_smoke;
+    bool workflow_smoke;
     bool vector_animation_smoke_prepared;
     bool dialog_active;
     bool help_overlay;
+    bool shortcuts_overlay;
     bool asset_browser_visible;
+    bool hierarchy_search_active;
+    bool profiler_visible;
+    bool validation_visible;
+    bool recovery_overlay;
+    bool preset_panel_visible;
+    bool template_panel_visible;
+    bool recent_panel_visible;
+    bool smart_guides_visible;
+    bool rulers_visible;
+    bool measurement_visible;
+    bool workflow_initialized;
+    bool preferences_read_only;
     uint64_t selected_asset_id;
+    char hierarchy_search[AF_EDITOR_COMMAND_QUERY_CAPACITY];
+    char preferences_path[AF_EDITOR_PATH_CAPACITY * 2U];
+    char workspace_path[AF_EDITOR_PATH_CAPACITY * 2U];
+    AfEditorAction action_storage[AF_EDITOR_MAX_ACTIONS];
+    AfEditorActionRegistry actions;
+    AfEditorCommandPalette command_palette;
+    AfEditorPreferences preferences;
+    AfEditorWorkspace workspace;
+    AfEditorCommand object_clipboard;
+    char object_clipboard_image_sources[AF_EDITOR_COMMAND_MAX_SNAPSHOTS][AF_IMAGE_PATH_CAPACITY];
+    AfEditorRecoveryState recovery;
+    AfEditorRecoveryCandidate recovery_candidate;
+    AfPerformanceMetrics performance;
+    float last_frame_ms;
+    int window_width;
+    int window_height;
+    uint32_t shortcut_selected_index;
+    uint32_t template_selected_index;
+    uint32_t recent_selected_index;
+    bool shortcut_capture;
     bool running;
     bool dirty;
 } AfEditorState;
@@ -251,6 +294,23 @@ static void af_editor_render_top_menu(AfEditorState *editor, int width, int heig
 static bool af_editor_top_menu_mouse_down(AfEditorState *editor, int width, int height, float x,
                                           float y);
 static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserEvent *event);
+static void af_editor_show_project_dialog(AfEditorState *editor, AfEditorDialogAction action);
+static void af_editor_mark_dirty(AfEditorState *editor);
+static void af_editor_after_project_saved(AfEditorState *editor);
+static void af_editor_project_changed(AfEditorState *editor);
+static void af_editor_refresh_recovery(AfEditorState *editor, bool show_available);
+static AfResult af_editor_workflow_init(AfEditorState *editor, int width, int height);
+static void af_editor_workflow_shutdown(AfEditorState *editor);
+static void af_editor_workflow_update(AfEditorState *editor, uint64_t now_ns);
+static void af_editor_render_workflow(AfEditorState *editor, int width, int height);
+static void af_editor_render_canvas_workflow(AfEditorState *editor, int width, int height,
+                                             AfAffine2 camera);
+static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int height, float x,
+                                          float y);
+static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEvent *event);
+static bool af_editor_workflow_text(AfEditorState *editor, const char *text);
+static void af_editor_workflow_drop_file(AfEditorState *editor, const char *path);
+static bool af_editor_hierarchy_name_matches(const AfEditorState *editor, uint32_t node_index);
 
 // clang-format off
 #include "editor/editor_app_core.inc"
@@ -265,6 +325,9 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
 #include "editor/editor_app_paths.inc"
 #include "editor/editor_app_properties.inc"
 #include "editor/editor_app_menus.inc"
+#include "editor/editor_app_workflow_core.inc"
+#include "editor/editor_app_workflow_render.inc"
+#include "editor/editor_app_workflow_input.inc"
 #include "editor/editor_app_input.inc"
 // clang-format on
 
@@ -404,6 +467,15 @@ int af_editor_run(int argument_count, char **arguments) {
         result = AF_RESULT_IO_ERROR;
         goto cleanup;
     }
+    {
+        int initial_width = 1440;
+        int initial_height = 840;
+        (void)SDL_GetWindowSizeInPixels(editor.window.window, &initial_width, &initial_height);
+        result = af_editor_workflow_init(&editor, initial_width, initial_height);
+        if (result != AF_RESULT_SUCCESS) {
+            goto cleanup;
+        }
+    }
     if (missing_image_count != 0U) {
         char status[96];
         (void)snprintf(status, sizeof(status), "%u image source%s missing", missing_image_count,
@@ -423,12 +495,16 @@ int af_editor_run(int argument_count, char **arguments) {
             height <= 0) {
             continue;
         }
+        editor.window_width = width;
+        editor.window_height = height;
         while (SDL_PollEvent(&event)) {
             af_editor_handle_event(&editor, &event, width, height);
         }
         current_ticks = SDL_GetTicksNS();
         delta_time = (float)((double)(current_ticks - editor.previous_ticks) / 1000000000.0);
+        editor.last_frame_ms = delta_time * 1000.0F;
         editor.previous_ticks = current_ticks;
+        af_editor_workflow_update(&editor, current_ticks);
         if (editor.preview_playing) {
             const AfProjectClip *clip =
                 af_project_find_clip_const(&editor.project, editor.selected_clip_id);
@@ -527,8 +603,43 @@ int af_editor_run(int argument_count, char **arguments) {
                 (AfVec2){editor.context_position.x + 52.0F,
                          editor.context_position.y + AF_EDITOR_CONTEXT_HEADER_HEIGHT +
                              AF_EDITOR_CONTEXT_ITEM_HEIGHT + 12.0F};
+        } else if (editor.workflow_smoke) {
+            const uint32_t stage = (editor.rendered_frames / 2U) % 9U;
+            editor.command_palette.open = false;
+            editor.profiler_visible = false;
+            editor.validation_visible = false;
+            editor.recovery_overlay = false;
+            editor.template_panel_visible = false;
+            editor.recent_panel_visible = false;
+            editor.preset_panel_visible = false;
+            editor.shortcuts_overlay = false;
+            editor.help_overlay = false;
+            if (stage == 0U) {
+                (void)af_editor_command_palette_open(&editor.command_palette,
+                                                     AF_EDITOR_ACTION_CONTEXT_ALL);
+                (void)af_editor_command_palette_set_query(&editor.command_palette, "ALIGN");
+            } else if (stage == 1U) {
+                editor.profiler_visible = true;
+            } else if (stage == 2U) {
+                editor.validation_visible = true;
+            } else if (stage == 3U) {
+                editor.recovery_overlay = true;
+            } else if (stage == 4U) {
+                editor.template_panel_visible = true;
+                editor.template_selected_index = 1U;
+            } else if (stage == 5U) {
+                editor.recent_panel_visible = true;
+                editor.recent_selected_index = 0U;
+            } else if (stage == 6U) {
+                editor.preset_panel_visible = true;
+            } else if (stage == 7U) {
+                editor.shortcuts_overlay = true;
+            } else {
+                editor.help_overlay = true;
+            }
+            af_editor_status(&editor, "Programmatic Milestone 24 workflow capture");
         } else if (editor.menu_smoke) {
-            const uint32_t menu = (editor.rendered_frames / 2U) % 6U;
+            const uint32_t menu = (editor.rendered_frames / 2U) % (uint32_t)AF_EDITOR_MENU_HELP;
             editor.top_menu = (AfEditorTopMenu)(AF_EDITOR_MENU_FILE + menu);
             editor.mouse_position =
                 (AfVec2){af_editor_top_menu_x(&editor, editor.top_menu) + 22.0F,
@@ -592,6 +703,7 @@ cleanup:
     if (result != AF_RESULT_SUCCESS) {
         af_log(AF_LOG_ERROR, "Arcflow Editor: %s", af_result_string(result));
     }
+    af_editor_workflow_shutdown(&editor);
     af_vk_renderer_destroy(editor.renderer);
     af_platform_window_destroy(&editor.window);
     af_text_engine_destroy(editor.text_engine);

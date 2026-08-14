@@ -253,11 +253,12 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
         af_find_section(sections, section_count, AF_SECTION_STATE_MACHINES);
     const AfSectionView *particles = af_find_section(sections, section_count, AF_SECTION_PARTICLES);
     const AfSectionView *images = af_find_section(sections, section_count, AF_SECTION_IMAGES);
+    const AfSectionView *bindings = af_find_section(sections, section_count, AF_SECTION_BINDINGS);
     uint32_t index = 0U;
     if (section_count != AF_SECTION_COUNT || nodes == NULL || clips == NULL || tracks == NULL ||
         keys == NULL || strings == NULL || paths == NULL || path_commands == NULL ||
         styles == NULL || layouts == NULL || components == NULL || state_machines == NULL ||
-        particles == NULL || images == NULL || nodes->count > AF_MAX_NODES ||
+        particles == NULL || images == NULL || bindings == NULL || nodes->count > AF_MAX_NODES ||
         clips->count > AF_MAX_CLIPS || tracks->count > AF_MAX_TRACKS ||
         keys->count > AF_MAX_KEYFRAMES || paths->count > AF_MAX_PATHS ||
         path_commands->count > AF_MAX_PATH_COMMANDS || styles->count > AF_MAX_STYLES ||
@@ -275,6 +276,9 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
         strings->size == 0U || strings->size > 1048576U ||
         strings->count != (uint32_t)strings->size ||
         bytes[strings->offset + strings->size - 1U] != 0U) {
+        return AF_RESULT_INVALID_PACKAGE;
+    }
+    if (af_validate_bindings(bytes + bindings->offset, bindings) != AF_RESULT_SUCCESS) {
         return AF_RESULT_INVALID_PACKAGE;
     }
     {

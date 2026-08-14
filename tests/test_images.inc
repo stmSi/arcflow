@@ -285,6 +285,12 @@ static bool af_test_images(void) {
         CHECK(loaded.image_data.sequence_count == 0U &&
               loaded.image_data.sequence_frame_count == 0U);
     }
+    loaded.image_data.assets[0].missing = true;
+    CHECK(af_project_repair_image_source(&loaded, project_path, first_asset, source_path) ==
+          AF_RESULT_SUCCESS);
+    CHECK(!loaded.image_data.assets[0].missing && loaded.image_data.assets[0].pixels != NULL);
+    CHECK(af_project_repair_image_source(&loaded, project_path, UINT64_MAX, source_path) ==
+          AF_RESULT_NOT_FOUND);
     (void)snprintf(copied_path, sizeof(copied_path), "%s", loaded.image_data.assets[0].source_path);
     af_loaded_package_destroy(&allocator, &runtime);
     af_package_blob_destroy(&allocator, &ktx2_package);
