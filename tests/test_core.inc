@@ -220,6 +220,9 @@ static bool af_test_math(void) {
     AfVec2 transformed = af_affine_transform_point(world, (AfVec2){1.0F, 2.0F});
     AfVec2 restored;
     const AfVec2 projected = af_canvas_project((AfVec2){100.0F, 50.0F}, (AfVec2){200.0F, 100.0F});
+    const AfAffine2 skewed =
+        af_affine_from_transform((AfTransform2D){.scale = {1.0F, 1.0F}, .skew = {0.25F, 0.0F}});
+    const AfVec2 skewed_point = af_affine_transform_point(skewed, (AfVec2){0.0F, 2.0F});
     CHECK_NEAR(transformed.x, 22.0F, 0.0001F);
     CHECK_NEAR(transformed.y, 30.0F, 0.0001F);
     CHECK(af_affine_inverse(world, &inverse));
@@ -228,6 +231,8 @@ static bool af_test_math(void) {
     CHECK_NEAR(restored.y, 2.0F, 0.0001F);
     CHECK_NEAR(projected.x, 0.0F, 0.0001F);
     CHECK_NEAR(projected.y, 0.0F, 0.0001F);
+    CHECK_NEAR(skewed_point.x, tanf(0.25F) * 2.0F, 0.0001F);
+    CHECK_NEAR(skewed_point.y, 2.0F, 0.0001F);
     CHECK(!af_affine_inverse((AfAffine2){0}, &inverse));
     return true;
 }
@@ -318,6 +323,26 @@ static bool af_test_animation(void) {
     CHECK(!playback.playing && playback.time == 0.0F);
     af_playback_seek(&playback, &fixture.clips[0], 9.0F);
     CHECK(playback.time == fixture.clips[0].duration);
+    {
+        AfKeyframe skew_keys[2] = {
+            {.time = 0.0F, .value = {0.0F, -0.2F}, .interpolation = AF_INTERPOLATION_LINEAR},
+            {.time = 1.0F, .value = {0.4F, 0.2F}, .interpolation = AF_INTERPOLATION_LINEAR}};
+        AfAnimationTrack skew_track = {
+            .id = 50U, .node_id = 2U, .property = AF_PROPERTY_SKEW, .keyframe_count = 2U};
+        AfAnimationClip skew_clip = {.id = 51U, .duration = 1.0F, .track_count = 1U};
+        const AfAnimationData skew_animation = {.clips = &skew_clip,
+                                                .clip_count = 1U,
+                                                .tracks = &skew_track,
+                                                .track_count = 1U,
+                                                .keyframes = skew_keys,
+                                                .keyframe_count = 2U};
+        af_test_fixture_init(&fixture);
+        CHECK(af_animation_validate(&skew_animation, &fixture.scene) == AF_RESULT_SUCCESS);
+        CHECK(af_animation_apply(&skew_animation, &skew_clip, 0.5F, &fixture.scene) ==
+              AF_RESULT_SUCCESS);
+        CHECK_NEAR(af_scene_find(&fixture.scene, 2U)->local_transform.skew.x, 0.2F, 0.0001F);
+        CHECK_NEAR(af_scene_find(&fixture.scene, 2U)->local_transform.skew.y, 0.0F, 0.0001F);
+    }
     return true;
 }
 

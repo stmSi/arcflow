@@ -418,7 +418,7 @@ static void af_editor_particle_labels(const AfEditorState *editor, const AfParti
 
 static void af_editor_render_inspector(AfEditorState *editor, int width) {
     const float x = (float)width - editor->right_width + 18.0F;
-    const AfSceneNode *selected = af_scene_find_const(&editor->project.scene, editor->selected_id);
+    const AfSceneNode *selected = af_scene_find_const(&editor->preview_scene, editor->selected_id);
     const char *selected_name = af_project_name(&editor->project, editor->selected_id);
     char selection_name[64];
     uint32_t index = 0U;

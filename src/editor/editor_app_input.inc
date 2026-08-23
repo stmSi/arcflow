@@ -90,7 +90,7 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
             editor->playhead = 0.0F;
         } else if (local_x >= 73.0F && local_x < 107.0F) {
             editor->curve_visible = !editor->curve_visible;
-        } else if (local_x >= 116.0F && local_x < 296.0F) {
+        } else if (local_x >= 116.0F && local_x < 316.0F) {
             const uint32_t property = (uint32_t)((local_x - 116.0F) / 20.0F);
             const AfPath *path =
                 af_path_find_node_const(&editor->project.path_data, editor->selected_id);
@@ -100,7 +100,7 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
                            .commands[path->command_start + editor->selected_path_command]
                     : NULL;
             if (property <= AF_PROPERTY_PATH_CONTROL_OUT &&
-                (property <= AF_PROPERTY_CORNER_RADIUS ||
+                (property <= AF_PROPERTY_SKEW ||
                  (command != NULL && command->type != AF_PATH_CLOSE &&
                   (property == AF_PROPERTY_PATH_POINT || command->type == AF_PATH_CUBIC)))) {
                 editor->selected_property = (AfPropertyType)property;
@@ -220,13 +220,12 @@ static void af_editor_timeline_box_select(AfEditorState *editor, int height) {
 
 static bool af_editor_begin_path_drag(AfEditorState *editor, AfPath *path, AfEditorDragMode mode) {
     const AfProjectTrack *track = af_editor_selected_track(editor);
-    float key_time = editor->playhead;
+    const AfProjectClip *clip =
+        af_project_find_clip_const(&editor->project, editor->selected_clip_id);
+    float key_time = af_editor_key_time(editor, clip, editor->playhead);
     AfProjectKeyframe *key = NULL;
     editor->path_key_drag = false;
     editor->path_drag_key_id = 0U;
-    if (editor->snapping) {
-        key_time = roundf(key_time * 10.0F) * 0.1F;
-    }
     if (track != NULL && track->property >= AF_PROPERTY_PATH_POINT) {
         key = af_editor_track_key_at(editor, track->id, key_time);
         if (key == NULL && af_editor_add_keyframe(editor) == AF_RESULT_SUCCESS) {
@@ -346,6 +345,7 @@ static void af_editor_drag_path_handle(AfEditorState *editor, int width, int hei
         if (key != NULL) {
             key->keyframe.value[0] = point.x;
             key->keyframe.value[1] = point.y;
+            af_editor_update_preview(editor);
         }
         return;
     }
@@ -520,6 +520,133 @@ static void af_editor_prepare_selection_smoke(AfEditorState *editor, int width, 
     }
 }
 
+static AfVec2 af_editor_gizmo_parent_point(const AfEditorState *editor, const AfSceneNode *node,
+                                           int width, int height, AfVec2 screen) {
+    AfVec2 point = af_editor_screen_to_project(editor, width, height, screen);
+    if (node != NULL && node->parent_id != AF_INVALID_NODE_ID) {
+        const AfSceneNode *parent = af_scene_find_const(&editor->preview_scene, node->parent_id);
+        AfAffine2 inverse = af_affine_identity();
+        if (parent != NULL && af_affine_inverse(parent->world_transform, &inverse)) {
+            point = af_affine_transform_point(inverse, point);
+        }
+    }
+    return point;
+}
+
+static float af_editor_gizmo_angle(AfVec2 point, AfVec2 origin) {
+    return atan2f(point.y - origin.y, point.x - origin.x);
+}
+
+static float af_editor_gizmo_normalize_angle(float angle) {
+    const float turn = 6.28318530718F;
+    while (angle > 3.14159265359F) {
+        angle -= turn;
+    }
+    while (angle < -3.14159265359F) {
+        angle += turn;
+    }
+    return angle;
+}
+
+static void af_editor_update_gizmo_drag(AfEditorState *editor, int width, int height,
+                                        AfVec2 screen) {
+    AfSceneNode *node = af_scene_find(&editor->project.scene, editor->selected_id);
+    const AfSceneNode *preview_node =
+        af_scene_find_const(&editor->preview_scene, editor->selected_id);
+    const int32_t key_index = af_editor_transform_drag_key_index(editor, editor->selected_id);
+    AfProjectKeyframe *key =
+        key_index < 0 ? NULL
+                      : af_project_find_keyframe(
+                            &editor->project, editor->transform_drag_key_ids[(uint32_t)key_index]);
+    AfTransform2D transform = editor->gizmo_start_transform;
+    AfVec2 current = {0};
+    AfVec2 start = {0};
+    if (node == NULL || preview_node == NULL) {
+        return;
+    }
+    current = af_editor_gizmo_parent_point(editor, preview_node, width, height, screen);
+    start =
+        af_editor_gizmo_parent_point(editor, preview_node, width, height, editor->drag_start_mouse);
+    if (editor->gizmo_handle == AF_EDITOR_GIZMO_ROTATE) {
+        float rotation =
+            transform.rotation +
+            af_editor_gizmo_normalize_angle(af_editor_gizmo_angle(current, transform.position) -
+                                            editor->gizmo_start_angle);
+        if (editor->snapping || (SDL_GetModState() & SDL_KMOD_SHIFT) != 0U) {
+            const float step = 0.2617993878F;
+            rotation = roundf(rotation / step) * step;
+        }
+        transform.rotation = af_editor_gizmo_normalize_angle(rotation);
+    } else if (editor->gizmo_handle == AF_EDITOR_GIZMO_SCALE_X ||
+               editor->gizmo_handle == AF_EDITOR_GIZMO_SCALE_Y ||
+               editor->gizmo_handle == AF_EDITOR_GIZMO_SCALE_XY) {
+        AfTransform2D orientation = transform;
+        AfAffine2 inverse = {0};
+        AfVec2 local = {0};
+        orientation.position = (AfVec2){0};
+        orientation.scale = (AfVec2){1.0F, 1.0F};
+        if (!af_affine_inverse(af_affine_from_transform(orientation), &inverse)) {
+            return;
+        }
+        local = af_affine_transform_point(
+            inverse, (AfVec2){current.x - transform.position.x, current.y - transform.position.y});
+        if (editor->gizmo_handle != AF_EDITOR_GIZMO_SCALE_Y && node->bounds.x > 0.0F) {
+            transform.scale.x = fmaxf(0.05F, local.x / node->bounds.x);
+        }
+        if (editor->gizmo_handle != AF_EDITOR_GIZMO_SCALE_X && node->bounds.y > 0.0F) {
+            transform.scale.y = fmaxf(0.05F, local.y / node->bounds.y);
+        }
+        if (editor->gizmo_handle == AF_EDITOR_GIZMO_SCALE_XY &&
+            (SDL_GetModState() & SDL_KMOD_SHIFT) != 0U) {
+            const float x_ratio = transform.scale.x / editor->gizmo_start_transform.scale.x;
+            const float y_ratio = transform.scale.y / editor->gizmo_start_transform.scale.y;
+            const float ratio = fabsf(x_ratio - 1.0F) >= fabsf(y_ratio - 1.0F) ? x_ratio : y_ratio;
+            transform.scale.x = fmaxf(0.05F, editor->gizmo_start_transform.scale.x * ratio);
+            transform.scale.y = fmaxf(0.05F, editor->gizmo_start_transform.scale.y * ratio);
+        }
+    } else if (editor->gizmo_handle == AF_EDITOR_GIZMO_SKEW_X ||
+               editor->gizmo_handle == AF_EDITOR_GIZMO_SKEW_Y) {
+        AfTransform2D rotation = {.rotation = transform.rotation, .scale = {1.0F, 1.0F}};
+        AfAffine2 inverse = {0};
+        AfVec2 delta = {current.x - start.x, current.y - start.y};
+        if (af_affine_inverse(af_affine_from_transform(rotation), &inverse)) {
+            delta = af_affine_transform_point(inverse, delta);
+        }
+        if (editor->gizmo_handle == AF_EDITOR_GIZMO_SKEW_X) {
+            const float denominator = fmaxf(1.0F, fabsf(node->bounds.y * transform.scale.y));
+            transform.skew.x =
+                atanf(tanf(editor->gizmo_start_transform.skew.x) + delta.x / denominator);
+        } else {
+            const float denominator = fmaxf(1.0F, fabsf(node->bounds.x * transform.scale.x));
+            transform.skew.y =
+                atanf(tanf(editor->gizmo_start_transform.skew.y) + delta.y / denominator);
+        }
+        transform.skew.x = af_editor_clamp(transform.skew.x, -AF_TRANSFORM_MAX_SKEW_RADIANS,
+                                           AF_TRANSFORM_MAX_SKEW_RADIANS);
+        transform.skew.y = af_editor_clamp(transform.skew.y, -AF_TRANSFORM_MAX_SKEW_RADIANS,
+                                           AF_TRANSFORM_MAX_SKEW_RADIANS);
+    }
+    if (key != NULL) {
+        if (editor->transform_drag_property == AF_PROPERTY_ROTATION) {
+            key->keyframe.value[0] = transform.rotation;
+        } else if (editor->transform_drag_property == AF_PROPERTY_SCALE) {
+            key->keyframe.value[0] = transform.scale.x;
+            key->keyframe.value[1] = transform.scale.y;
+        } else if (editor->transform_drag_property == AF_PROPERTY_SKEW) {
+            key->keyframe.value[0] = transform.skew.x;
+            key->keyframe.value[1] = transform.skew.y;
+        }
+    } else if (editor->transform_drag_property == AF_PROPERTY_ROTATION) {
+        node->local_transform.rotation = transform.rotation;
+    } else if (editor->transform_drag_property == AF_PROPERTY_SCALE) {
+        node->local_transform.scale = transform.scale;
+    } else if (editor->transform_drag_property == AF_PROPERTY_SKEW) {
+        node->local_transform.skew = transform.skew;
+    }
+    (void)af_scene_evaluate_world(&editor->project.scene);
+    af_editor_update_preview(editor);
+}
+
 static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
                                  const SDL_MouseButtonEvent *event, SDL_Keymod modifiers) {
     const float x = event->x;
@@ -645,19 +772,21 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         y < canvas_y + canvas_height) {
         AfAffine2 camera = af_editor_camera(editor, width, height);
         const AfSceneNode *selected =
-            af_scene_find_const(&editor->project.scene, editor->selected_id);
-        AfVec2 origin = {0};
+            af_scene_find_const(&editor->preview_scene, editor->selected_id);
+        AfEditorGizmoGeometry geometry = {0};
         if (editor->selected_count <= 1U &&
             af_editor_path_mouse_down(editor, width, height, (AfVec2){x, y})) {
             return;
         }
-        if (selected != NULL) {
-            origin = af_affine_transform_point(
-                af_affine_multiply(camera, selected->world_transform), (AfVec2){0});
-            if (fabsf(x - (origin.x + 56.0F)) <= 10.0F && fabsf(y - origin.y) <= 10.0F) {
+        if (selected != NULL && editor->selected_count == 1U &&
+            af_editor_gizmo_geometry(selected, camera, &geometry)) {
+            editor->gizmo_handle = af_editor_gizmo_pick(&geometry, (AfVec2){x, y}, 10.0F);
+            if (editor->gizmo_handle == AF_EDITOR_GIZMO_MOVE_X) {
                 editor->drag_mode = AF_EDITOR_DRAG_X;
-            } else if (fabsf(x - origin.x) <= 10.0F && fabsf(y - (origin.y + 56.0F)) <= 10.0F) {
+            } else if (editor->gizmo_handle == AF_EDITOR_GIZMO_MOVE_Y) {
                 editor->drag_mode = AF_EDITOR_DRAG_Y;
+            } else if (editor->gizmo_handle != AF_EDITOR_GIZMO_NONE) {
+                editor->drag_mode = AF_EDITOR_DRAG_GIZMO;
             }
         }
         if (editor->drag_mode == AF_EDITOR_DRAG_NONE) {
@@ -697,7 +826,19 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
             editor->drag_mode == AF_EDITOR_DRAG_Y) {
             editor->drag_start_mouse =
                 af_editor_screen_to_project(editor, width, height, (AfVec2){x, y});
+            editor->selected_property = AF_PROPERTY_POSITION;
             af_editor_begin_selection_modify(editor, true);
+            af_editor_begin_transform_key_drag(editor, AF_PROPERTY_POSITION);
+        } else if (editor->drag_mode == AF_EDITOR_DRAG_GIZMO && selected != NULL) {
+            const AfVec2 parent_mouse =
+                af_editor_gizmo_parent_point(editor, selected, width, height, (AfVec2){x, y});
+            editor->drag_start_mouse = (AfVec2){x, y};
+            editor->gizmo_start_transform = selected->local_transform;
+            editor->gizmo_start_angle =
+                af_editor_gizmo_angle(parent_mouse, selected->local_transform.position);
+            editor->selected_property = af_editor_gizmo_property(editor->gizmo_handle);
+            af_editor_begin_selection_modify(editor, true);
+            af_editor_begin_transform_key_drag(editor, editor->selected_property);
         }
     }
 }
@@ -737,10 +878,7 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
          editor->drag_mode == AF_EDITOR_DRAG_LOOP_END) &&
         clip != NULL) {
         AfProjectClip *mutable_clip = af_project_find_clip(&editor->project, clip->id);
-        float time = af_editor_clamp(af_editor_x_to_time(editor, event->x), 0.0F, clip->duration);
-        if (editor->snapping) {
-            time = roundf(time * 10.0F) * 0.1F;
-        }
+        const float time = af_editor_key_time(editor, clip, af_editor_x_to_time(editor, event->x));
         if (editor->drag_mode == AF_EDITOR_DRAG_LOOP_START) {
             mutable_clip->loop_start = fminf(time, mutable_clip->loop_end);
         } else {
@@ -758,10 +896,7 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
             if (key == NULL) {
                 continue;
             }
-            time = af_editor_clamp(time, 0.0F, clip->duration);
-            if (editor->snapping) {
-                time = roundf(time * 10.0F) * 0.1F;
-            }
+            time = af_editor_key_time(editor, clip, time);
             key->keyframe.time = time;
         }
         return;
@@ -818,6 +953,10 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
                             (float)width - editor->left_width - AF_EDITOR_MIN_VIEW_WIDTH);
         return;
     }
+    if (editor->drag_mode == AF_EDITOR_DRAG_GIZMO) {
+        af_editor_update_gizmo_drag(editor, width, height, (AfVec2){event->x, event->y});
+        return;
+    }
     if (editor->drag_mode == AF_EDITOR_DRAG_MOVE || editor->drag_mode == AF_EDITOR_DRAG_X ||
         editor->drag_mode == AF_EDITOR_DRAG_Y) {
         const AfVec2 project_current =
@@ -825,50 +964,77 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
         for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
             const AfProjectNodeSnapshot *before = &editor->selection_drag_before[index];
             AfSceneNode *node = af_scene_find(&editor->project.scene, before->node.id);
+            const int32_t key_drag_index =
+                af_editor_transform_drag_key_index(editor, before->node.id);
+            AfProjectKeyframe *position_key =
+                key_drag_index < 0 ? NULL
+                                   : af_project_find_keyframe(
+                                         &editor->project,
+                                         editor->transform_drag_key_ids[(uint32_t)key_drag_index]);
             AfVec2 current = project_current;
             AfVec2 start = editor->drag_start_mouse;
+            AfVec2 position = key_drag_index < 0
+                                  ? before->node.local_transform.position
+                                  : editor->transform_drag_key_starts[(uint32_t)key_drag_index];
             if (node == NULL) {
                 continue;
             }
             if (before->node.parent_id != AF_INVALID_NODE_ID) {
-                const AfSceneNode *parent =
-                    af_scene_find_const(&editor->project.scene, before->node.parent_id);
+                const AfSceneNode *parent = af_scene_find_const(
+                    key_drag_index < 0 ? &editor->project.scene : &editor->preview_scene,
+                    before->node.parent_id);
                 AfAffine2 parent_inverse = af_affine_identity();
                 if (parent != NULL && af_affine_inverse(parent->world_transform, &parent_inverse)) {
                     current = af_affine_transform_point(parent_inverse, current);
                     start = af_affine_transform_point(parent_inverse, start);
                 }
             }
-            node->local_transform.position = before->node.local_transform.position;
-            if (editor->drag_mode != AF_EDITOR_DRAG_Y) {
-                node->local_transform.position.x += current.x - start.x;
-            }
-            if (editor->drag_mode != AF_EDITOR_DRAG_X) {
-                node->local_transform.position.y += current.y - start.y;
+            if (editor->drag_mode == AF_EDITOR_DRAG_X || editor->drag_mode == AF_EDITOR_DRAG_Y) {
+                AfTransform2D orientation = before->node.local_transform;
+                const AfAffine2 affine = af_affine_from_transform(orientation);
+                AfVec2 axis = editor->drag_mode == AF_EDITOR_DRAG_X
+                                  ? (AfVec2){affine.m00, affine.m10}
+                                  : (AfVec2){affine.m01, affine.m11};
+                const float length = sqrtf(axis.x * axis.x + axis.y * axis.y);
+                if (length > 0.0001F) {
+                    const AfVec2 delta = {current.x - start.x, current.y - start.y};
+                    float distance = 0.0F;
+                    axis.x /= length;
+                    axis.y /= length;
+                    distance = delta.x * axis.x + delta.y * axis.y;
+                    position.x += axis.x * distance;
+                    position.y += axis.y * distance;
+                }
+            } else {
+                position.x += current.x - start.x;
+                position.y += current.y - start.y;
             }
             if (editor->snapping) {
-                node->local_transform.position.x =
-                    roundf(node->local_transform.position.x / editor->grid_step) *
-                    editor->grid_step;
-                node->local_transform.position.y =
-                    roundf(node->local_transform.position.y / editor->grid_step) *
-                    editor->grid_step;
+                position.x = roundf(position.x / editor->grid_step) * editor->grid_step;
+                position.y = roundf(position.y / editor->grid_step) * editor->grid_step;
             }
             if (editor->smart_guides_visible && node->parent_id == AF_INVALID_NODE_ID) {
                 const float threshold = 8.0F / editor->zoom;
-                const float center_x = node->local_transform.position.x + node->bounds.x * 0.5F;
-                const float center_y = node->local_transform.position.y + node->bounds.y * 0.5F;
+                const float center_x = position.x + node->bounds.x * 0.5F;
+                const float center_y = position.y + node->bounds.y * 0.5F;
                 if (fabsf(center_x - editor->project.canvas_size.x * 0.5F) <= threshold) {
-                    node->local_transform.position.x =
-                        editor->project.canvas_size.x * 0.5F - node->bounds.x * 0.5F;
+                    position.x = editor->project.canvas_size.x * 0.5F - node->bounds.x * 0.5F;
                 }
                 if (fabsf(center_y - editor->project.canvas_size.y * 0.5F) <= threshold) {
-                    node->local_transform.position.y =
-                        editor->project.canvas_size.y * 0.5F - node->bounds.y * 0.5F;
+                    position.y = editor->project.canvas_size.y * 0.5F - node->bounds.y * 0.5F;
                 }
+            }
+            if (position_key != NULL) {
+                position_key->keyframe.value[0] = position.x;
+                position_key->keyframe.value[1] = position.y;
+            } else {
+                node->local_transform.position = position;
             }
         }
         (void)af_scene_evaluate_world(&editor->project.scene);
+        if (editor->transform_drag_key_count != 0U) {
+            af_editor_update_preview(editor);
+        }
     }
 }
 
@@ -879,7 +1045,15 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
         (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_FILL, false);
     } else if (editor->drag_mode == AF_EDITOR_DRAG_MOVE || editor->drag_mode == AF_EDITOR_DRAG_X ||
                editor->drag_mode == AF_EDITOR_DRAG_Y) {
-        (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_TRANSFORM, false);
+        if (!af_editor_transform_key_drag_covers_selection(editor)) {
+            (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_TRANSFORM, false);
+        }
+        (void)af_editor_commit_transform_key_drag(editor, false);
+    } else if (editor->drag_mode == AF_EDITOR_DRAG_GIZMO) {
+        if (!af_editor_transform_key_drag_covers_selection(editor)) {
+            (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_TRANSFORM, false);
+        }
+        (void)af_editor_commit_transform_key_drag(editor, false);
     } else if (editor->drag_mode == AF_EDITOR_DRAG_CANVAS_BOX) {
         af_editor_canvas_box_select(editor, width, height);
     } else if (editor->drag_mode == AF_EDITOR_DRAG_KEYFRAMES) {
@@ -898,6 +1072,7 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
         af_editor_commit_path_drag(editor);
     }
     editor->drag_mode = AF_EDITOR_DRAG_NONE;
+    editor->gizmo_handle = AF_EDITOR_GIZMO_NONE;
 }
 
 static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
@@ -990,8 +1165,8 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     }
     if (alt && (event->key == SDLK_RETURN || event->key == SDLK_KP_ENTER)) {
         af_editor_execute_menu_action(editor, AF_EDITOR_MENU_ACTION_FULLSCREEN, width, height);
-    } else if (control &&
-        (event->key == SDLK_Y || ((event->mod & SDL_KMOD_SHIFT) != 0U && event->key == SDLK_Z))) {
+    } else if (control && (event->key == SDLK_Y ||
+                           ((event->mod & SDL_KMOD_SHIFT) != 0U && event->key == SDLK_Z))) {
         if (af_editor_history_redo(&editor->history, &editor->project) == AF_RESULT_SUCCESS) {
             af_editor_mark_dirty(editor);
             af_editor_reconcile_selection(editor);
@@ -1192,10 +1367,8 @@ static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int 
         af_editor_mouse_scale(editor, &wheel.mouse_x, &wheel.mouse_y);
         af_editor_mouse_wheel(editor, width, height, &wheel);
     } else if (event->type == SDL_EVENT_PEN_DOWN) {
-        SDL_MouseButtonEvent button = {.button = SDL_BUTTON_LEFT,
-                                       .down = true,
-                                       .x = event->ptouch.x,
-                                       .y = event->ptouch.y};
+        SDL_MouseButtonEvent button = {
+            .button = SDL_BUTTON_LEFT, .down = true, .x = event->ptouch.x, .y = event->ptouch.y};
         af_editor_mouse_scale(editor, &button.x, &button.y);
         af_editor_mouse_down(editor, width, height, &button, SDL_GetModState());
     } else if (event->type == SDL_EVENT_PEN_UP) {

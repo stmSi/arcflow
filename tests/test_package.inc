@@ -29,6 +29,7 @@ static bool af_test_package(void) {
     af_test_fixture_init(&fixture);
     af_allocator_init_default(&allocator);
     memcpy(package_nodes, fixture.nodes, sizeof(fixture.nodes));
+    package_nodes[1].local_transform.skew = (AfVec2){0.2F, -0.1F};
     package_nodes[3] = (AfSceneNode){.id = 4U,
                                      .parent_id = AF_INVALID_NODE_ID,
                                      .type = AF_NODE_PATH,
@@ -49,6 +50,8 @@ static bool af_test_package(void) {
     CHECK(decoded.animation.keyframe_count == fixture.animation.keyframe_count);
     CHECK(decoded.path_data.path_count == 1U && decoded.path_data.command_count == 4U);
     CHECK(af_scene_find(&decoded.scene, 2U) != NULL);
+    CHECK_NEAR(af_scene_find(&decoded.scene, 2U)->local_transform.skew.x, 0.2F, 0.0001F);
+    CHECK_NEAR(af_scene_find(&decoded.scene, 2U)->local_transform.skew.y, -0.1F, 0.0001F);
     af_loaded_package_destroy(&allocator, &decoded);
     memcpy(saved, first.data, sizeof(saved));
     first.data[0] = 'X';

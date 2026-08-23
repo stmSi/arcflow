@@ -65,6 +65,14 @@ static bool af_project_parse_node_field(const char *line, AfProjectNodeSnapshot 
         snapshot->node.local_transform.scale = (AfVec2){values[0], values[1]};
         return true;
     }
+    if ((value = af_project_value(line, "skew")) != NULL) {
+        if (!af_project_set_field(fields, AF_PROJECT_FIELD_SKEW) ||
+            !af_project_parse_floats(value, values, 2U)) {
+            return false;
+        }
+        snapshot->node.local_transform.skew = (AfVec2){values[0], values[1]};
+        return true;
+    }
     if ((value = af_project_value(line, "bounds")) != NULL) {
         if (!af_project_set_field(fields, AF_PROJECT_FIELD_BOUNDS) ||
             !af_project_parse_floats(value, values, 2U)) {
@@ -175,6 +183,8 @@ static bool af_project_parse_track_field(const char *line, AfProjectTrackSnapsho
             snapshot->track.property = AF_PROPERTY_FILL_COLOR;
         } else if (strcmp(value, "corner_radius") == 0) {
             snapshot->track.property = AF_PROPERTY_CORNER_RADIUS;
+        } else if (strcmp(value, "skew") == 0) {
+            snapshot->track.property = AF_PROPERTY_SKEW;
         } else if (strcmp(value, "path_point") == 0) {
             snapshot->track.property = AF_PROPERTY_PATH_POINT;
         } else if (strcmp(value, "path_control_in") == 0) {

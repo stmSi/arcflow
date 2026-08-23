@@ -55,6 +55,10 @@ static bool af_editor_property_value(const AfEditorState *editor, const AfSceneN
         value[0] = node->local_transform.scale.x;
         value[1] = node->local_transform.scale.y;
         break;
+    case AF_PROPERTY_SKEW:
+        value[0] = node->local_transform.skew.x;
+        value[1] = node->local_transform.skew.y;
+        break;
     case AF_PROPERTY_OPACITY:
         value[0] = node->opacity;
         break;
@@ -97,7 +101,7 @@ static bool af_editor_property_value(const AfEditorState *editor, const AfSceneN
 }
 
 static AfResult af_editor_add_keyframe(AfEditorState *editor) {
-    const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
+    const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
     const AfProjectTrack *existing = af_editor_selected_track(editor);
@@ -106,6 +110,9 @@ static AfResult af_editor_add_keyframe(AfEditorState *editor) {
     AfEditorCommand command = {0};
     uint64_t track_id = 0U;
     AfResult result = AF_RESULT_INVALID_ARGUMENT;
+    if (node == NULL) {
+        node = af_scene_find_const(&editor->project.scene, editor->selected_id);
+    }
     if (node == NULL || clip == NULL) {
         return result;
     }
@@ -137,10 +144,7 @@ static AfResult af_editor_add_keyframe(AfEditorState *editor) {
         return result;
     }
     new_key.track_id = track_id;
-    new_key.keyframe.time = af_editor_clamp(editor->playhead, 0.0F, clip->duration);
-    if (editor->snapping) {
-        new_key.keyframe.time = roundf(new_key.keyframe.time * 10.0F) * 0.1F;
-    }
+    new_key.keyframe.time = af_editor_key_time(editor, clip, editor->playhead);
     new_key.keyframe.interpolation = AF_INTERPOLATION_LINEAR;
     new_key.keyframe.easing[0] = 0.42F;
     new_key.keyframe.easing[2] = 0.58F;
@@ -187,6 +191,129 @@ static AfResult af_editor_add_keyframe(AfEditorState *editor) {
         af_editor_mark_dirty(editor);
         af_editor_status(editor, "Keyframe added");
     }
+    return result;
+}
+
+static int32_t af_editor_transform_drag_key_index(const AfEditorState *editor, uint64_t node_id) {
+    for (uint32_t index = 0U; index < editor->transform_drag_key_count; ++index) {
+        if (editor->transform_drag_node_ids[index] == node_id) {
+            return (int32_t)index;
+        }
+    }
+    return -1;
+}
+
+static void af_editor_begin_transform_key_drag(AfEditorState *editor, AfPropertyType property) {
+    const AfProjectClip *clip =
+        af_project_find_clip_const(&editor->project, editor->selected_clip_id);
+    float key_time = editor->playhead;
+    editor->transform_drag_key_count = 0U;
+    editor->transform_drag_property = property;
+    if (clip == NULL) {
+        return;
+    }
+    key_time = af_editor_key_time(editor, clip, key_time);
+    for (uint32_t selection = 0U; selection < editor->selection_drag_count; ++selection) {
+        const uint64_t node_id = editor->selection_drag_before[selection].node.id;
+        const AfProjectTrack *track = af_editor_find_track(editor, node_id, property, 0U);
+        const AfSceneNode *preview_node = af_scene_find_const(&editor->preview_scene, node_id);
+        AfProjectKeyframe *key = NULL;
+        float value[4] = {0};
+        bool created = false;
+        uint32_t drag_index = editor->transform_drag_key_count;
+        if (track == NULL || preview_node == NULL ||
+            drag_index >= AF_EDITOR_COMMAND_MAX_SNAPSHOTS) {
+            continue;
+        }
+        if (!af_editor_property_value(editor, preview_node, property, value)) {
+            continue;
+        }
+        key = af_editor_track_key_at(editor, track->id, key_time);
+        if (key == NULL) {
+            AfProjectKeyframe new_key = {
+                .track_id = track->id,
+                .keyframe = {.time = key_time,
+                             .value = {value[0], value[1], value[2], value[3]},
+                             .interpolation = AF_INTERPOLATION_LINEAR,
+                             .easing = {0.42F, 0.0F, 0.58F, 1.0F}}};
+            if (af_project_allocate_animation_id(&editor->project, &new_key.id) !=
+                    AF_RESULT_SUCCESS ||
+                af_project_add_keyframe(&editor->project, &new_key) != AF_RESULT_SUCCESS) {
+                continue;
+            }
+            key = af_project_find_keyframe(&editor->project, new_key.id);
+            created = true;
+        }
+        if (key == NULL || (!created && af_project_keyframe_snapshot(
+                                            &editor->project, key->id,
+                                            &editor->transform_drag_key_before[drag_index]) !=
+                                            AF_RESULT_SUCCESS)) {
+            if (created && key != NULL) {
+                (void)af_project_remove_keyframe_exact(&editor->project, key->id);
+            }
+            continue;
+        }
+        editor->transform_drag_node_ids[drag_index] = node_id;
+        editor->transform_drag_key_ids[drag_index] = key->id;
+        editor->transform_drag_key_starts[drag_index] = (AfVec2){value[0], value[1]};
+        editor->transform_drag_key_created[drag_index] = created;
+        ++editor->transform_drag_key_count;
+    }
+    if (editor->transform_drag_key_count != 0U) {
+        editor->preview_playing = false;
+        af_editor_status(editor, "Transform auto-key active at playhead");
+    }
+}
+
+static bool af_editor_transform_key_drag_covers_selection(const AfEditorState *editor) {
+    return editor->selection_drag_count != 0U &&
+           editor->transform_drag_key_count == editor->selection_drag_count;
+}
+
+static AfResult af_editor_commit_transform_key_drag(AfEditorState *editor, bool allow_merge) {
+    AfEditorCommand command = {0};
+    AfResult result = AF_RESULT_NOT_FOUND;
+    if (editor->transform_drag_key_count == 0U) {
+        return result;
+    }
+    result = af_editor_command_animation(AF_EDITOR_MERGE_KEYFRAME_VALUE,
+                                         editor->transform_drag_key_ids[0], &command);
+    for (uint32_t index = 0U;
+         result == AF_RESULT_SUCCESS && index < editor->transform_drag_key_count; ++index) {
+        if (!editor->transform_drag_key_created[index]) {
+            command.keyframe_before[command.keyframe_before_count++] =
+                editor->transform_drag_key_before[index];
+        }
+        result =
+            af_project_keyframe_snapshot(&editor->project, editor->transform_drag_key_ids[index],
+                                         &command.keyframe_after[command.keyframe_after_count]);
+        if (result == AF_RESULT_SUCCESS) {
+            ++command.keyframe_after_count;
+        }
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_editor_history_execute(&editor->history, &editor->project, &command, true,
+                                           allow_merge && editor->transform_drag_key_count == 1U);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        af_editor_mark_dirty(editor);
+        af_editor_status(editor, "Transform keyframe edited");
+    } else {
+        for (uint32_t index = editor->transform_drag_key_count; index > 0U; --index) {
+            const uint32_t rollback = index - 1U;
+            if (editor->transform_drag_key_created[rollback]) {
+                (void)af_project_remove_keyframe_exact(&editor->project,
+                                                       editor->transform_drag_key_ids[rollback]);
+            } else {
+                AfProjectKeyframe *key = af_project_find_keyframe(
+                    &editor->project, editor->transform_drag_key_ids[rollback]);
+                if (key != NULL) {
+                    *key = editor->transform_drag_key_before[rollback].keyframe;
+                }
+            }
+        }
+    }
+    editor->transform_drag_key_count = 0U;
     return result;
 }
 

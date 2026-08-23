@@ -22,9 +22,9 @@ static const char *af_project_type_name(AfNodeType type) {
 }
 
 static const char *af_project_property_name(AfPropertyType property) {
-    static const char *const names[] = {"position",   "rotation",        "scale",
-                                        "opacity",    "fill_color",      "corner_radius",
-                                        "path_point", "path_control_in", "path_control_out"};
+    static const char *const names[] = {"position",        "rotation",        "scale", "opacity",
+                                        "fill_color",      "corner_radius",   "skew",  "path_point",
+                                        "path_control_in", "path_control_out"};
     return property <= AF_PROPERTY_PATH_CONTROL_OUT ? names[property] : "invalid";
 }
 
@@ -118,12 +118,14 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
         result = af_project_writer_append(
             &writer,
             "node\nid %llu\nparent %s\ntype %s\nname %s\nposition %.9g %.9g\nrotation "
-            "%.9g\nscale %.9g %.9g\nbounds %.9g %.9g\nfill %.9g %.9g %.9g %.9g\nopacity "
+            "%.9g\nscale %.9g %.9g\nskew %.9g %.9g\nbounds %.9g %.9g\nfill %.9g %.9g %.9g "
+            "%.9g\nopacity "
             "%.9g\ncorner_radius %.9g\nlayer %d\nvisible %u\nend\n",
             (unsigned long long)node->id, parent, af_project_type_name(node->type),
             project->names[index], node->local_transform.position.x,
             node->local_transform.position.y, node->local_transform.rotation,
-            node->local_transform.scale.x, node->local_transform.scale.y, node->bounds.x,
+            node->local_transform.scale.x, node->local_transform.scale.y,
+            node->local_transform.skew.x, node->local_transform.skew.y, node->bounds.x,
             node->bounds.y, node->fill.r, node->fill.g, node->fill.b, node->fill.a, node->opacity,
             node->corner_radius, node->layer_order, node->visible ? 1U : 0U);
     }

@@ -197,6 +197,9 @@ AfResult af_animation_apply(const AfAnimationData *animation, const AfAnimationC
         case AF_PROPERTY_SCALE:
             node->local_transform.scale = (AfVec2){value[0], value[1]};
             break;
+        case AF_PROPERTY_SKEW:
+            node->local_transform.skew = (AfVec2){value[0], value[1]};
+            break;
         case AF_PROPERTY_OPACITY:
             node->opacity = af_clamp01(value[0]);
             break;

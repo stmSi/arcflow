@@ -8,6 +8,7 @@
 #include "core/log.h"
 #include "editor/editor_actions.h"
 #include "editor/editor_commands.h"
+#include "editor/editor_gizmo.h"
 #include "editor/editor_preferences.h"
 #include "editor/editor_recovery.h"
 #include "editor/editor_workflow.h"
@@ -82,6 +83,7 @@ typedef enum AfEditorDragMode {
     AF_EDITOR_DRAG_MOVE,
     AF_EDITOR_DRAG_X,
     AF_EDITOR_DRAG_Y,
+    AF_EDITOR_DRAG_GIZMO,
     AF_EDITOR_DRAG_PAN,
     AF_EDITOR_DRAG_LEFT_DOCK,
     AF_EDITOR_DRAG_RIGHT_DOCK,
@@ -228,6 +230,16 @@ typedef struct AfEditorState {
     AfProjectNodeSnapshot drag_before;
     AfProjectNodeSnapshot selection_drag_before[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     uint32_t selection_drag_count;
+    uint64_t transform_drag_node_ids[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    uint64_t transform_drag_key_ids[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    AfVec2 transform_drag_key_starts[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    AfProjectKeyframeSnapshot transform_drag_key_before[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    bool transform_drag_key_created[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    uint32_t transform_drag_key_count;
+    AfPropertyType transform_drag_property;
+    AfEditorGizmoHandle gizmo_handle;
+    AfTransform2D gizmo_start_transform;
+    float gizmo_start_angle;
     AfVec2 canvas_box_start;
     AfVec2 canvas_box_current;
     bool canvas_box_additive;

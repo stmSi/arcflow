@@ -458,6 +458,9 @@ AfResult af_project_animation_apply(const AfProject *project, uint64_t clip_id, 
         case AF_PROPERTY_SCALE:
             node->local_transform.scale = (AfVec2){value[0], value[1]};
             break;
+        case AF_PROPERTY_SKEW:
+            node->local_transform.skew = (AfVec2){value[0], value[1]};
+            break;
         case AF_PROPERTY_OPACITY:
             node->opacity = value[0];
             break;

@@ -24,18 +24,35 @@ static float af_editor_x_to_time(const AfEditorState *editor, float x) {
     return editor->timeline_pan + (x - af_editor_timeline_ruler_x(editor)) / editor->timeline_zoom;
 }
 
-static const AfProjectTrack *af_editor_selected_track(const AfEditorState *editor) {
+static float af_editor_key_time(const AfEditorState *editor, const AfProjectClip *clip,
+                                float time) {
+    if (clip == NULL) {
+        return 0.0F;
+    }
+    time = af_editor_clamp(time, 0.0F, clip->duration);
+    if (editor->snapping) {
+        time = roundf(time * 10.0F) * 0.1F;
+    }
+    return af_editor_clamp(time, 0.0F, clip->duration);
+}
+
+static const AfProjectTrack *af_editor_find_track(const AfEditorState *editor, uint64_t node_id,
+                                                  AfPropertyType property, uint32_t element_index) {
     uint32_t index = 0U;
     for (index = 0U; index < editor->project.track_count; ++index) {
         const AfProjectTrack *track = &editor->project.tracks[index];
-        if (track->clip_id == editor->selected_clip_id && track->node_id == editor->selected_id &&
-            track->property == editor->selected_property &&
-            (track->property < AF_PROPERTY_PATH_POINT ||
-             track->element_index == editor->selected_path_command)) {
+        if (track->clip_id == editor->selected_clip_id && track->node_id == node_id &&
+            track->property == property &&
+            (track->property < AF_PROPERTY_PATH_POINT || track->element_index == element_index)) {
             return track;
         }
     }
     return NULL;
+}
+
+static const AfProjectTrack *af_editor_selected_track(const AfEditorState *editor) {
+    return af_editor_find_track(editor, editor->selected_id, editor->selected_property,
+                                editor->selected_path_command);
 }
 
 static AfProjectKeyframe *af_editor_track_key_at(AfEditorState *editor, uint64_t track_id,
@@ -60,17 +77,19 @@ static bool af_editor_keyframe_selected(const AfEditorState *editor, uint64_t id
 }
 
 static AfColor af_editor_property_color(AfPropertyType property) {
-    static const AfColor colors[] = {
-        {0.3F, 0.72F, 1.0F, 1.0F},  {1.0F, 0.56F, 0.3F, 1.0F},  {0.45F, 0.9F, 0.46F, 1.0F},
-        {0.78F, 0.58F, 1.0F, 1.0F}, {1.0F, 0.35F, 0.55F, 1.0F}, {0.96F, 0.8F, 0.28F, 1.0F},
-        {0.3F, 0.9F, 0.88F, 1.0F},  {0.55F, 0.7F, 1.0F, 1.0F},  {0.75F, 0.48F, 1.0F, 1.0F}};
+    static const AfColor colors[] = {{0.3F, 0.72F, 1.0F, 1.0F},   {1.0F, 0.56F, 0.3F, 1.0F},
+                                     {0.45F, 0.9F, 0.46F, 1.0F},  {0.78F, 0.58F, 1.0F, 1.0F},
+                                     {1.0F, 0.35F, 0.55F, 1.0F},  {0.96F, 0.8F, 0.28F, 1.0F},
+                                     {0.96F, 0.46F, 0.88F, 1.0F}, {0.3F, 0.9F, 0.88F, 1.0F},
+                                     {0.55F, 0.7F, 1.0F, 1.0F},   {0.75F, 0.48F, 1.0F, 1.0F}};
     return property <= AF_PROPERTY_PATH_CONTROL_OUT ? colors[property]
                                                     : (AfColor){1.0F, 1.0F, 1.0F, 1.0F};
 }
 
 static const char *af_editor_property_name(AfPropertyType property) {
-    static const char *const names[] = {"POSITION", "ROTATION", "SCALE",     "OPACITY",   "FILL",
-                                        "RADIUS",   "ANCHOR",   "HANDLE IN", "HANDLE OUT"};
+    static const char *const names[] = {"POSITION",  "ROTATION",  "SCALE", "OPACITY",
+                                        "FILL",      "RADIUS",    "SKEW",  "ANCHOR",
+                                        "HANDLE IN", "HANDLE OUT"};
     return property <= AF_PROPERTY_PATH_CONTROL_OUT ? names[property] : "UNKNOWN";
 }
 
@@ -100,6 +119,9 @@ static float af_editor_curve_value(const AfProjectTrack *track, const AfProjectK
         break;
     case AF_PROPERTY_SCALE:
         value *= 0.5F;
+        break;
+    case AF_PROPERTY_SKEW:
+        value = 0.5F + value / (2.0F * AF_TRANSFORM_MAX_SKEW_RADIANS);
         break;
     case AF_PROPERTY_CORNER_RADIUS:
         value *= 0.01F;
@@ -287,9 +309,10 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                        (AfColor){0.9F, 0.92F, 0.96F, 1.0F}, 100135);
     af_editor_add_text(editor, center_left + 76.0F, top + 19.0F, "CURVE", 0.45F, 31.0F,
                        (AfColor){0.9F, 0.92F, 0.96F, 1.0F}, 100135);
-    for (index = 0U; index < 9U; ++index) {
+    for (index = 0U; index < 10U; ++index) {
         const float x = center_left + 116.0F + (float)index * 20.0F;
-        static const char *const property_icons[] = {"P", "R", "S", "O", "F", "C", "A", "I", "H"};
+        static const char *const property_icons[] = {"P", "R", "S", "O", "F",
+                                                     "C", "K", "A", "I", "H"};
         af_editor_add_rect(editor, x, top + 12.0F, 15.0F, 18.0F,
                            index == (uint32_t)editor->selected_property
                                ? af_editor_property_color((AfPropertyType)index)
@@ -298,7 +321,7 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
         af_editor_add_text(editor, x + 5.0F, top + 18.0F, property_icons[index], 0.85F, 6.0F,
                            (AfColor){0.94F, 0.95F, 0.98F, 1.0F}, 100135);
     }
-    af_editor_add_text(editor, center_left + 302.0F, top + 18.0F, "TIMELINE", 0.9F, 58.0F,
+    af_editor_add_text(editor, center_left + 322.0F, top + 18.0F, "TIMELINE", 0.9F, 58.0F,
                        (AfColor){0.62F, 0.65F, 0.72F, 1.0F}, 100130);
     for (index = 0U; index < editor->project.clip_count && index < 8U; ++index) {
         const float x = center_right - 74.0F * (float)(index + 1U);

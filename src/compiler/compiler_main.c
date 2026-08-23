@@ -5,10 +5,12 @@
 #include "core/file_io.h"
 #include "core/hash.h"
 #include "onboarding/onboarding.h"
+#include "project/image_import.h"
 #include "project/project.h"
 #include "project/project_collaboration.h"
 #include "project/project_templates.h"
 #include "scene/scene.h"
+#include "stability/diagnostics.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -215,11 +217,13 @@ static AfResult af_report_project_conflicts(const char *path, AfAllocator *alloc
     return result;
 }
 
-static AfResult af_load_project_checked(const char *path, AfAllocator *allocator,
-                                        AfProject *out_project) {
+static AfResult af_load_project_checked_versioned(const char *path, AfAllocator *allocator,
+                                                  uint32_t *out_source_format_version,
+                                                  AfProject *out_project) {
     AfResult result = af_report_project_conflicts(path, allocator);
     if (result == AF_RESULT_SUCCESS) {
-        result = af_project_load_file(path, allocator, out_project);
+        result =
+            af_project_load_file_versioned(path, allocator, out_source_format_version, out_project);
     }
     if (result == AF_RESULT_SUCCESS) {
         for (uint32_t index = 0U; index < out_project->image_data.asset_count; ++index) {
@@ -232,6 +236,11 @@ static AfResult af_load_project_checked(const char *path, AfAllocator *allocator
         }
     }
     return result;
+}
+
+static AfResult af_load_project_checked(const char *path, AfAllocator *allocator,
+                                        AfProject *out_project) {
+    return af_load_project_checked_versioned(path, allocator, NULL, out_project);
 }
 
 static AfResult af_validate_project_file(const char *path) {
@@ -311,6 +320,212 @@ static AfResult af_check_project_determinism(const char *input_path) {
     return result;
 }
 
+static bool af_package_blobs_equal(const AfPackageBlob *left, const AfPackageBlob *right) {
+    return left->size == right->size &&
+           (left->size == 0U || memcmp(left->data, right->data, left->size) == 0);
+}
+
+static AfResult af_migrate_project(const char *input_path, const char *output_path) {
+    AfAllocator allocator = {0};
+    AfProject source = {0};
+    AfProject migrated = {0};
+    AfPackageBlob serialized = {0};
+    AfPackageBlob normalized = {0};
+    AfPackageBlob source_package = {0};
+    AfPackageBlob migrated_package = {0};
+    uint32_t source_format_version = 0U;
+    uint32_t migrated_format_version = 0U;
+    AfResult result = AF_RESULT_SUCCESS;
+    af_allocator_init_default(&allocator);
+    result =
+        af_load_project_checked_versioned(input_path, &allocator, &source_format_version, &source);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_serialize(&source, &allocator, &serialized);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_deserialize_versioned(serialized.data, serialized.size, &allocator,
+                                                  &migrated_format_version, &migrated);
+    }
+    if (result == AF_RESULT_SUCCESS && migrated_format_version != AF_PROJECT_FORMAT_VERSION) {
+        result = AF_RESULT_INVALID_PACKAGE;
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_reimport_images(&migrated, output_path, NULL);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_serialize(&migrated, &allocator, &normalized);
+    }
+    if (result == AF_RESULT_SUCCESS && !af_package_blobs_equal(&serialized, &normalized)) {
+        (void)fprintf(stderr,
+                      "%s: migration changed normalized editable-project data; output was not "
+                      "written\n",
+                      input_path);
+        result = AF_RESULT_INVALID_PACKAGE;
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_compile_release(&source, &allocator, &source_package);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_compile_release(&migrated, &allocator, &migrated_package);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_package_validate(source_package.data, source_package.size);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_package_validate(migrated_package.data, migrated_package.size);
+    }
+    if (result == AF_RESULT_SUCCESS &&
+        !af_package_blobs_equal(&source_package, &migrated_package)) {
+        (void)fprintf(stderr,
+                      "%s: migration changed deterministic runtime package bytes; output was "
+                      "not written\n",
+                      input_path);
+        result = AF_RESULT_INVALID_PACKAGE;
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_file_write_atomic(output_path, serialized.data, serialized.size, 3U);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        (void)fprintf(stdout,
+                      "%s: migrated project format %u -> %u to %s (%zu bytes, "
+                      "runtime-equivalent)\n",
+                      input_path, source_format_version, migrated_format_version, output_path,
+                      serialized.size);
+    }
+    af_package_blob_destroy(&allocator, &migrated_package);
+    af_package_blob_destroy(&allocator, &source_package);
+    af_package_blob_destroy(&allocator, &normalized);
+    af_package_blob_destroy(&allocator, &serialized);
+    af_project_destroy(&migrated);
+    af_project_destroy(&source);
+    return result;
+}
+
+static void af_beta_audit_report(AfStabilityDiagnostics *diagnostics, uint64_t id,
+                                 AfStabilitySeverity severity, AfStabilityCategory category,
+                                 AfResult result, const char *message) {
+    (void)af_stability_diagnostics_report(diagnostics, id, severity, category, result, "compiler",
+                                          message);
+}
+
+static AfResult af_beta_audit_project(const char *input_path) {
+    AfAllocator allocator = {0};
+    AfProject source = {0};
+    AfProject roundtrip = {0};
+    AfPackageBlob serialized = {0};
+    AfPackageBlob roundtrip_serialized = {0};
+    AfPackageBlob source_package = {0};
+    AfPackageBlob roundtrip_package = {0};
+    AfStabilityDiagnostic diagnostic_storage[8];
+    AfStabilityDiagnostics diagnostics = {0};
+    AfStabilitySummary summary = {0};
+    uint32_t source_format_version = 0U;
+    uint32_t roundtrip_format_version = 0U;
+    AfResult result = AF_RESULT_SUCCESS;
+    af_allocator_init_default(&allocator);
+    result = af_stability_diagnostics_init(&diagnostics, diagnostic_storage, 8U);
+    if (result != AF_RESULT_SUCCESS) {
+        return result;
+    }
+    result =
+        af_load_project_checked_versioned(input_path, &allocator, &source_format_version, &source);
+    if (result != AF_RESULT_SUCCESS) {
+        af_beta_audit_report(&diagnostics, 1U, AF_STABILITY_CRITICAL, AF_STABILITY_SAVE_LOAD,
+                             result, "Project failed strict load and asset validation");
+        goto report;
+    }
+    result = af_project_serialize(&source, &allocator, &serialized);
+    if (result != AF_RESULT_SUCCESS) {
+        af_beta_audit_report(&diagnostics, 2U, AF_STABILITY_CRITICAL, AF_STABILITY_SAVE_LOAD,
+                             result, "Project could not be serialized for round-trip testing");
+        goto report;
+    }
+    result = af_project_deserialize_versioned(serialized.data, serialized.size, &allocator,
+                                              &roundtrip_format_version, &roundtrip);
+    if (result != AF_RESULT_SUCCESS) {
+        af_beta_audit_report(&diagnostics, 3U, AF_STABILITY_CRITICAL, AF_STABILITY_MIGRATION,
+                             result, "Serialized beta project could not be migrated and reopened");
+        goto report;
+    }
+    if (roundtrip_format_version != AF_PROJECT_FORMAT_VERSION) {
+        result = AF_RESULT_INVALID_PACKAGE;
+        af_beta_audit_report(&diagnostics, 7U, AF_STABILITY_HIGH, AF_STABILITY_MIGRATION, result,
+                             "Migration did not emit the current editable-project format");
+        goto report;
+    }
+    result = af_project_reimport_images(&roundtrip, input_path, NULL);
+    if (result != AF_RESULT_SUCCESS) {
+        af_beta_audit_report(&diagnostics, 8U, AF_STABILITY_CRITICAL, AF_STABILITY_SAVE_LOAD,
+                             result, "Migrated project assets could not be reopened");
+        goto report;
+    }
+    result = af_project_serialize(&roundtrip, &allocator, &roundtrip_serialized);
+    if (result != AF_RESULT_SUCCESS ||
+        !af_package_blobs_equal(&serialized, &roundtrip_serialized)) {
+        result = result == AF_RESULT_SUCCESS ? AF_RESULT_INVALID_PACKAGE : result;
+        af_beta_audit_report(&diagnostics, 9U, AF_STABILITY_CRITICAL, AF_STABILITY_SAVE_LOAD,
+                             result, "Save/load round trip changed editable-project data");
+        goto report;
+    }
+    result = af_project_compile_release(&source, &allocator, &source_package);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_project_compile_release(&roundtrip, &allocator, &roundtrip_package);
+    }
+    if (result != AF_RESULT_SUCCESS) {
+        af_beta_audit_report(&diagnostics, 4U, AF_STABILITY_HIGH,
+                             AF_STABILITY_PACKAGE_COMPATIBILITY, result,
+                             "Project or round-trip project did not compile as a release package");
+        goto report;
+    }
+    result = af_package_validate(source_package.data, source_package.size);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_package_validate(roundtrip_package.data, roundtrip_package.size);
+    }
+    if (result != AF_RESULT_SUCCESS) {
+        af_beta_audit_report(&diagnostics, 5U, AF_STABILITY_HIGH,
+                             AF_STABILITY_PACKAGE_COMPATIBILITY, result,
+                             "Compiled package failed strict package validation");
+        goto report;
+    }
+    if (!af_package_blobs_equal(&source_package, &roundtrip_package)) {
+        result = AF_RESULT_INVALID_PACKAGE;
+        af_beta_audit_report(&diagnostics, 6U, AF_STABILITY_HIGH,
+                             AF_STABILITY_PACKAGE_COMPATIBILITY, result,
+                             "Save/load round trip changed deterministic runtime package bytes");
+    }
+
+report:
+    summary = af_stability_diagnostics_summarize(&diagnostics);
+    for (uint32_t index = 0U; index < diagnostics.count; ++index) {
+        const AfStabilityDiagnostic *diagnostic = &diagnostics.items[index];
+        if (!diagnostic->resolved) {
+            (void)fprintf(stderr, "[%s] [%s] %s: %s (%s)\n",
+                          af_stability_severity_name(diagnostic->severity),
+                          af_stability_category_name(diagnostic->category), diagnostic->component,
+                          diagnostic->message, af_result_string(diagnostic->result));
+        }
+    }
+    (void)fprintf(
+        stdout,
+        "%s: beta audit %s (project format %u -> %u, %u release blocker%s, %llu diagnostic "
+        "occurrence%s)\n",
+        input_path, summary.release_ready && result == AF_RESULT_SUCCESS ? "READY" : "BLOCKED",
+        source_format_version, AF_PROJECT_FORMAT_VERSION, summary.release_blocker_count,
+        summary.release_blocker_count == 1U ? "" : "s",
+        (unsigned long long)summary.total_occurrence_count,
+        summary.total_occurrence_count == 1U ? "" : "s");
+    af_package_blob_destroy(&allocator, &roundtrip_package);
+    af_package_blob_destroy(&allocator, &source_package);
+    af_package_blob_destroy(&allocator, &roundtrip_serialized);
+    af_package_blob_destroy(&allocator, &serialized);
+    af_project_destroy(&roundtrip);
+    af_project_destroy(&source);
+    if (summary.release_ready && result == AF_RESULT_SUCCESS) {
+        return AF_RESULT_SUCCESS;
+    }
+    return result == AF_RESULT_SUCCESS ? AF_RESULT_INVALID_PACKAGE : result;
+}
+
 static bool af_update_manifest_token_valid(const char *token, size_t capacity) {
     size_t length = 0U;
     if (token == NULL || token[0] == '\0') {
@@ -366,6 +581,8 @@ static void af_print_usage(FILE *stream) {
                   "  arcflow_compiler --compile-release INPUT.afproj OUTPUT.afp\n"
                   "  arcflow_compiler --validate-project INPUT.afproj\n"
                   "  arcflow_compiler --check-determinism INPUT.afproj\n"
+                  "  arcflow_compiler --beta-audit INPUT.afproj\n"
+                  "  arcflow_compiler --migrate-project INPUT.afproj OUTPUT.afproj\n"
                   "  arcflow_compiler --validate INPUT.afp\n"
                   "  arcflow_compiler --new-project OUTPUT.afproj\n"
                   "  arcflow_compiler --new-project-template TEMPLATE OUTPUT.afproj\n"
@@ -422,6 +639,10 @@ int main(int argument_count, char **arguments) {
         result = af_validate_project_file(arguments[2]);
     } else if (argument_count == 3 && strcmp(arguments[1], "--check-determinism") == 0) {
         result = af_check_project_determinism(arguments[2]);
+    } else if (argument_count == 3 && strcmp(arguments[1], "--beta-audit") == 0) {
+        result = af_beta_audit_project(arguments[2]);
+    } else if (argument_count == 4 && strcmp(arguments[1], "--migrate-project") == 0) {
+        result = af_migrate_project(arguments[2], arguments[3]);
     } else if (argument_count == 4 && (strcmp(arguments[1], "--release") == 0 ||
                                        strcmp(arguments[1], "--compile-release") == 0)) {
         result = af_compile_project(arguments[2], arguments[3], true);

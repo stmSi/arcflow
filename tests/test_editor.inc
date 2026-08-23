@@ -196,6 +196,41 @@ static bool af_test_timeline_authoring(void) {
     return true;
 }
 
+static bool af_test_editor_gizmo(void) {
+    AfSceneNode node = {.id = 1U,
+                        .parent_id = AF_INVALID_NODE_ID,
+                        .type = AF_NODE_RECTANGLE,
+                        .local_transform = {.position = {10.0F, 20.0F}, .scale = {1.0F, 1.0F}},
+                        .bounds = {100.0F, 50.0F},
+                        .opacity = 1.0F,
+                        .visible = true,
+                        .world_visible = true};
+    AfEditorGizmoGeometry geometry = {0};
+    node.world_transform = af_affine_from_transform(node.local_transform);
+    CHECK(af_editor_gizmo_geometry(&node, af_affine_identity(), &geometry));
+    CHECK_NEAR(geometry.corners[0].x, 10.0F, 0.0001F);
+    CHECK_NEAR(geometry.corners[2].y, 70.0F, 0.0001F);
+    CHECK_NEAR(geometry.scale_x.x, 110.0F, 0.0001F);
+    CHECK_NEAR(geometry.scale_y.y, 70.0F, 0.0001F);
+    CHECK_NEAR(geometry.skew_x.y, 88.0F, 0.0001F);
+    CHECK_NEAR(geometry.skew_y.x, 128.0F, 0.0001F);
+    CHECK_NEAR(geometry.rotate.x, 60.0F, 0.0001F);
+    CHECK_NEAR(geometry.rotate.y, -12.0F, 0.0001F);
+    CHECK(af_editor_gizmo_pick(&geometry, geometry.scale_xy, 8.0F) == AF_EDITOR_GIZMO_SCALE_XY);
+    CHECK(af_editor_gizmo_pick(&geometry, geometry.skew_x, 8.0F) == AF_EDITOR_GIZMO_SKEW_X);
+    CHECK(af_editor_gizmo_pick(&geometry, geometry.rotate, 8.0F) == AF_EDITOR_GIZMO_ROTATE);
+    CHECK(af_editor_gizmo_pick(&geometry, (AfVec2){500.0F, 500.0F}, 8.0F) == AF_EDITOR_GIZMO_NONE);
+    CHECK(af_editor_gizmo_property(AF_EDITOR_GIZMO_SCALE_X) == AF_PROPERTY_SCALE);
+    CHECK(af_editor_gizmo_property(AF_EDITOR_GIZMO_SKEW_Y) == AF_PROPERTY_SKEW);
+    CHECK(af_editor_gizmo_property(AF_EDITOR_GIZMO_ROTATE) == AF_PROPERTY_ROTATION);
+    node.local_transform.skew = (AfVec2){AF_TRANSFORM_MAX_SKEW_RADIANS + 0.01F, 0.0F};
+    {
+        AfScene scene = {.nodes = &node, .count = 1U, .capacity = 1U};
+        CHECK(af_scene_validate(&scene) == AF_RESULT_INVALID_ARGUMENT);
+    }
+    return true;
+}
+
 static bool af_test_editor_commands(void) {
     AfAllocator allocator;
     AfProject project = {0};

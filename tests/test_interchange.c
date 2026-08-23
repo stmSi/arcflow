@@ -189,7 +189,7 @@ static bool af_test_interchange_static_svg(void) {
     CHECK(output_size == strlen(output));
     CHECK(strstr(output, "<rect") != NULL && strstr(output, "<ellipse") != NULL &&
           strstr(output, "<path") != NULL && strstr(output, "fill-rule=\"evenodd\"") != NULL &&
-          strstr(output, "matrix(1 0 -0 1 10 20)") != NULL);
+          strstr(output, "matrix(1 0 0 1 10 20)") != NULL);
     CHECK(strstr(output, "<ellipse") < strstr(output, "<path") &&
           strstr(output, "<path") < strstr(output, "<rect"));
     CHECK(af_interchange_export_static_svg(&scene, (AfVec2){320.0F, 180.0F}, small, sizeof(small),

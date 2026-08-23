@@ -12,11 +12,17 @@ AfResult af_project_save_file(const AfProject *project, const char *path, AfAllo
     return result;
 }
 
-AfResult af_project_load_file(const char *path, AfAllocator *allocator, AfProject *out_project) {
+AfResult af_project_load_file_versioned(const char *path, AfAllocator *allocator,
+                                        uint32_t *out_source_format_version,
+                                        AfProject *out_project) {
     AfFileData file = {0};
     AfResult result = af_file_read_limited(path, AF_PROJECT_MAX_FILE_SIZE, allocator, &file);
+    if (out_source_format_version != NULL) {
+        *out_source_format_version = 0U;
+    }
     if (result == AF_RESULT_SUCCESS) {
-        result = af_project_deserialize(file.data, file.size, allocator, out_project);
+        result = af_project_deserialize_versioned(file.data, file.size, allocator,
+                                                  out_source_format_version, out_project);
     }
     af_file_data_destroy(allocator, &file);
     if (result == AF_RESULT_SUCCESS) {
@@ -24,6 +30,10 @@ AfResult af_project_load_file(const char *path, AfAllocator *allocator, AfProjec
         (void)af_project_reimport_images(out_project, path, &missing_count);
     }
     return result;
+}
+
+AfResult af_project_load_file(const char *path, AfAllocator *allocator, AfProject *out_project) {
+    return af_project_load_file_versioned(path, allocator, NULL, out_project);
 }
 
 static int af_project_keyframe_compare(const void *left_value, const void *right_value) {

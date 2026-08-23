@@ -390,6 +390,13 @@ static AfResult af_adv_apply_value(AfScene *scene, AfSceneNode *node, const AfAn
         node->local_transform.scale.y =
             additive ? node->local_transform.scale.y + (value[1] - 1.0F) * weight
                      : node->local_transform.scale.y * (1.0F - weight) + value[1] * weight;
+    } else if (property == AF_PROPERTY_SKEW) {
+        node->local_transform.skew.x =
+            additive ? node->local_transform.skew.x + value[0] * weight
+                     : node->local_transform.skew.x * (1.0F - weight) + value[0] * weight;
+        node->local_transform.skew.y =
+            additive ? node->local_transform.skew.y + value[1] * weight
+                     : node->local_transform.skew.y * (1.0F - weight) + value[1] * weight;
     } else if (property == AF_PROPERTY_OPACITY) {
         node->opacity = af_adv_clamp(additive ? node->opacity + value[0] * weight
                                               : node->opacity * (1.0F - weight) + value[0] * weight,

@@ -148,15 +148,17 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
         af_write_f32(record + 32U, node->local_transform.rotation);
         af_write_f32(record + 36U, node->local_transform.scale.x);
         af_write_f32(record + 40U, node->local_transform.scale.y);
-        af_write_f32(record + 44U, node->bounds.x);
-        af_write_f32(record + 48U, node->bounds.y);
-        af_write_f32(record + 52U, node->fill.r);
-        af_write_f32(record + 56U, node->fill.g);
-        af_write_f32(record + 60U, node->fill.b);
-        af_write_f32(record + 64U, node->fill.a);
-        af_write_f32(record + 68U, node->opacity);
-        af_write_f32(record + 72U, node->corner_radius);
-        af_write_u32(record + 76U, (uint32_t)node->layer_order);
+        af_write_f32(record + 44U, node->local_transform.skew.x);
+        af_write_f32(record + 48U, node->local_transform.skew.y);
+        af_write_f32(record + 52U, node->bounds.x);
+        af_write_f32(record + 56U, node->bounds.y);
+        af_write_f32(record + 60U, node->fill.r);
+        af_write_f32(record + 64U, node->fill.g);
+        af_write_f32(record + 68U, node->fill.b);
+        af_write_f32(record + 72U, node->fill.a);
+        af_write_f32(record + 76U, node->opacity);
+        af_write_f32(record + 80U, node->corner_radius);
+        af_write_u32(record + 84U, (uint32_t)node->layer_order);
     }
     for (index = 0U; index < source->animation->clip_count; ++index) {
         const AfAnimationClip *clip = &source->animation->clips[index];

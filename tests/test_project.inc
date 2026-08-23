@@ -13,17 +13,19 @@ static bool af_test_project(void) {
                         .local_transform = {.scale = {1.0F, 1.0F}},
                         .opacity = 1.0F,
                         .visible = true};
-    AfSceneNode shape = {
-        .id = 2U,
-        .parent_id = 1U,
-        .type = AF_NODE_ROUNDED_RECTANGLE,
-        .local_transform = {.position = {12.0F, 34.0F}, .rotation = 0.25F, .scale = {1.5F, 0.75F}},
-        .bounds = {140.0F, 90.0F},
-        .fill = {0.2F, 0.5F, 0.8F, 1.0F},
-        .opacity = 0.7F,
-        .corner_radius = 18.0F,
-        .layer_order = 4,
-        .visible = true};
+    AfSceneNode shape = {.id = 2U,
+                         .parent_id = 1U,
+                         .type = AF_NODE_ROUNDED_RECTANGLE,
+                         .local_transform = {.position = {12.0F, 34.0F},
+                                             .rotation = 0.25F,
+                                             .scale = {1.5F, 0.75F},
+                                             .skew = {0.12F, -0.08F}},
+                         .bounds = {140.0F, 90.0F},
+                         .fill = {0.2F, 0.5F, 0.8F, 1.0F},
+                         .opacity = 0.7F,
+                         .corner_radius = 18.0F,
+                         .layer_order = 4,
+                         .visible = true};
     AfSceneNode path_node = {
         .id = 3U,
         .parent_id = 1U,
@@ -186,7 +188,8 @@ static bool af_test_project(void) {
         style->stroke.dash_count = 2U;
     }
     CHECK(af_project_serialize(&project, &allocator, &text) == AF_RESULT_SUCCESS);
-    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 11"));
+    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 12"));
+    CHECK(af_test_project_contains(text.data, text.size, "skew 0.119999997 -0.0799999982"));
     CHECK(af_test_project_contains(text.data, text.size, "property path_control_in"));
     CHECK(af_test_project_contains(text.data, text.size, "element 1"));
     CHECK(af_test_project_contains(text.data, text.size, "particle "));
@@ -210,6 +213,8 @@ static bool af_test_project(void) {
     CHECK(loaded.particle_data.emitters[0].sub_emit_death_count == 1U);
     CHECK_NEAR(af_layout_find_const(&loaded.layout_data, 3U)->width.value, 0.25F, 0.0001F);
     CHECK_NEAR(af_scene_find(&loaded.scene, 2U)->local_transform.rotation, 0.25F, 0.0001F);
+    CHECK_NEAR(af_scene_find(&loaded.scene, 2U)->local_transform.skew.x, 0.12F, 0.0001F);
+    CHECK_NEAR(af_scene_find(&loaded.scene, 2U)->local_transform.skew.y, -0.08F, 0.0001F);
     {
         AfSceneNode animated_nodes[3];
         AfPath animated_path;
@@ -343,9 +348,9 @@ static bool af_test_project(void) {
     CHECK(af_project_deserialize(with_unknown, (size_t)written, &allocator, &reopened) ==
           AF_RESULT_INVALID_PACKAGE);
     written =
-        snprintf(with_unknown, sizeof(with_unknown), "arcflow_project 3\nunknown_field 7\n%.*s",
-                 (int)(text.size - strlen("arcflow_project 3\n")),
-                 (const char *)text.data + strlen("arcflow_project 3\n"));
+        snprintf(with_unknown, sizeof(with_unknown), "arcflow_project 12\nunknown_field 7\n%.*s",
+                 (int)(text.size - strlen("arcflow_project 12\n")),
+                 (const char *)text.data + strlen("arcflow_project 12\n"));
     CHECK(written > 0 && (size_t)written < sizeof(with_unknown));
     CHECK(af_project_deserialize(with_unknown, (size_t)written, &allocator, &reopened) ==
           AF_RESULT_SUCCESS);

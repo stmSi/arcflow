@@ -146,13 +146,14 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
             .type = (AfNodeType)af_read_u32(record + 16U),
             .local_transform = {.position = {af_read_f32(record + 24U), af_read_f32(record + 28U)},
                                 .rotation = af_read_f32(record + 32U),
-                                .scale = {af_read_f32(record + 36U), af_read_f32(record + 40U)}},
-            .bounds = {af_read_f32(record + 44U), af_read_f32(record + 48U)},
-            .fill = {af_read_f32(record + 52U), af_read_f32(record + 56U),
-                     af_read_f32(record + 60U), af_read_f32(record + 64U)},
-            .opacity = af_read_f32(record + 68U),
-            .corner_radius = af_read_f32(record + 72U),
-            .layer_order = (int32_t)af_read_u32(record + 76U),
+                                .scale = {af_read_f32(record + 36U), af_read_f32(record + 40U)},
+                                .skew = {af_read_f32(record + 44U), af_read_f32(record + 48U)}},
+            .bounds = {af_read_f32(record + 52U), af_read_f32(record + 56U)},
+            .fill = {af_read_f32(record + 60U), af_read_f32(record + 64U),
+                     af_read_f32(record + 68U), af_read_f32(record + 72U)},
+            .opacity = af_read_f32(record + 76U),
+            .corner_radius = af_read_f32(record + 80U),
+            .layer_order = (int32_t)af_read_u32(record + 84U),
             .visible = af_read_u32(record + 20U) != 0U};
     }
     if (nodes->count != 0U) {

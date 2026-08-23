@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#define AF_TRANSFORM_MAX_SKEW_RADIANS 1.3962634F
+
 typedef struct AfVec2 {
     float x;
     float y;
@@ -19,6 +21,7 @@ typedef struct AfTransform2D {
     AfVec2 position;
     float rotation;
     AfVec2 scale;
+    AfVec2 skew;
 } AfTransform2D;
 
 typedef struct AfAffine2 {

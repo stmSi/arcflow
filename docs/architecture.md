@@ -31,8 +31,9 @@ Scene and animation code never sees internal Vulkan objects. Runtime package dat
 owned arrays, then each instance owns mutable scene nodes. An update copies immutable base nodes,
 applies typed tracks, and evaluates world transforms without allocation.
 
-Coordinates use a top-left origin, positive X right, positive Y down, and radians. A child local
-transform is composed after its parent (`world = parent * local`). Evaluation order is parent
+Coordinates use a top-left origin, positive X right, positive Y down, and radians. Local transforms
+apply scale, bounded X/Y skew, and rotation before translation. A child local transform is composed
+after its parent (`world = parent * local`). Evaluation order is parent
 layout, node layout, base transform, animation override, then final world transform.
 
 Milestones 1–13 cover vector authoring/playback through rigging and procedural motion. GPU particles

@@ -440,19 +440,22 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
         uint32_t depth = 0U;
         if (id == 0U || id == AF_INVALID_NODE_ID || type > AF_NODE_IMAGE ||
             (parent_id != AF_INVALID_NODE_ID && !af_node_id_exists(bytes, nodes, parent_id)) ||
-            af_read_u32(record + 20U) > 1U || af_read_f32(record + 44U) < 0.0F ||
-            af_read_f32(record + 48U) < 0.0F || af_read_f32(record + 52U) < 0.0F ||
-            af_read_f32(record + 52U) > 1.0F || af_read_f32(record + 56U) < 0.0F ||
-            af_read_f32(record + 56U) > 1.0F || af_read_f32(record + 60U) < 0.0F ||
-            af_read_f32(record + 60U) > 1.0F || af_read_f32(record + 64U) < 0.0F ||
-            af_read_f32(record + 64U) > 1.0F || af_read_f32(record + 68U) < 0.0F ||
-            af_read_f32(record + 68U) > 1.0F || af_read_f32(record + 72U) < 0.0F) {
+            af_read_u32(record + 20U) > 1U ||
+            fabsf(af_read_f32(record + 44U)) > AF_TRANSFORM_MAX_SKEW_RADIANS ||
+            fabsf(af_read_f32(record + 48U)) > AF_TRANSFORM_MAX_SKEW_RADIANS ||
+            af_read_f32(record + 52U) < 0.0F || af_read_f32(record + 56U) < 0.0F ||
+            af_read_f32(record + 60U) < 0.0F || af_read_f32(record + 60U) > 1.0F ||
+            af_read_f32(record + 64U) < 0.0F || af_read_f32(record + 64U) > 1.0F ||
+            af_read_f32(record + 68U) < 0.0F || af_read_f32(record + 68U) > 1.0F ||
+            af_read_f32(record + 72U) < 0.0F || af_read_f32(record + 72U) > 1.0F ||
+            af_read_f32(record + 76U) < 0.0F || af_read_f32(record + 76U) > 1.0F ||
+            af_read_f32(record + 80U) < 0.0F) {
             return AF_RESULT_INVALID_PACKAGE;
         }
         if (type == AF_NODE_PATH && !af_path_node_exists(bytes, paths, id)) {
             return AF_RESULT_INVALID_PACKAGE;
         }
-        for (float_offset = 24U; float_offset <= 72U; float_offset += 4U) {
+        for (float_offset = 24U; float_offset <= 80U; float_offset += 4U) {
             if (!isfinite(af_read_f32(record + float_offset))) {
                 return AF_RESULT_INVALID_PACKAGE;
             }

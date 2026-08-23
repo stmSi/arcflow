@@ -24,20 +24,14 @@ static bool af_editor_screen_bounds(const AfSceneNode *node, AfAffine2 camera, f
 
 static void af_editor_render_outline(AfEditorState *editor, const AfSceneNode *node,
                                      AfAffine2 camera, AfColor color, int32_t layer) {
-    float minimum_x = 0.0F;
-    float minimum_y = 0.0F;
-    float maximum_x = 0.0F;
-    float maximum_y = 0.0F;
-    if (!af_editor_screen_bounds(node, camera, &minimum_x, &minimum_y, &maximum_x, &maximum_y)) {
+    AfEditorGizmoGeometry geometry = {0};
+    if (!af_editor_gizmo_geometry(node, camera, &geometry)) {
         return;
     }
-    af_editor_add_rect(editor, minimum_x - 2.0F, minimum_y - 2.0F, maximum_x - minimum_x + 4.0F,
-                       2.0F, color, layer);
-    af_editor_add_rect(editor, minimum_x - 2.0F, maximum_y, maximum_x - minimum_x + 4.0F, 2.0F,
-                       color, layer);
-    af_editor_add_rect(editor, minimum_x - 2.0F, minimum_y, 2.0F, maximum_y - minimum_y, color,
-                       layer);
-    af_editor_add_rect(editor, maximum_x, minimum_y, 2.0F, maximum_y - minimum_y, color, layer);
+    for (uint32_t index = 0U; index < 4U; ++index) {
+        af_editor_add_line(editor, geometry.corners[index], geometry.corners[(index + 1U) % 4U],
+                           2.0F, color, layer);
+    }
 }
 
 static void af_editor_render_selection_outlines(AfEditorState *editor, AfAffine2 camera) {
@@ -52,21 +46,64 @@ static void af_editor_render_selection_outlines(AfEditorState *editor, AfAffine2
 
 static void af_editor_render_gizmo(AfEditorState *editor, AfAffine2 camera) {
     const AfSceneNode *selected = af_scene_find_const(&editor->preview_scene, editor->selected_id);
-    AfVec2 origin;
+    AfEditorGizmoGeometry geometry = {0};
+    const AfColor move_x = {0.96F, 0.25F, 0.28F, 1.0F};
+    const AfColor move_y = {0.28F, 0.86F, 0.38F, 1.0F};
+    const AfColor scale = {0.25F, 0.72F, 1.0F, 1.0F};
+    const AfColor skew = {0.96F, 0.46F, 0.88F, 1.0F};
+    const AfColor rotate = {1.0F, 0.72F, 0.22F, 1.0F};
     if (selected == NULL || selected->type == AF_NODE_GROUP) {
         return;
     }
     af_editor_render_outline(editor, selected, camera, (AfColor){0.98F, 0.8F, 0.22F, 1.0F}, 90000);
-    origin = af_affine_transform_point(af_affine_multiply(camera, selected->world_transform),
-                                       (AfVec2){0});
-    af_editor_add_rect(editor, origin.x, origin.y - 2.0F, 58.0F, 4.0F,
-                       (AfColor){0.96F, 0.25F, 0.28F, 1.0F}, 90010);
-    af_editor_add_rect(editor, origin.x - 2.0F, origin.y, 4.0F, 58.0F,
-                       (AfColor){0.28F, 0.86F, 0.38F, 1.0F}, 90010);
-    af_editor_add_rect(editor, origin.x + 50.0F, origin.y - 6.0F, 12.0F, 12.0F,
-                       (AfColor){0.96F, 0.25F, 0.28F, 1.0F}, 90020);
-    af_editor_add_rect(editor, origin.x - 6.0F, origin.y + 50.0F, 12.0F, 12.0F,
-                       (AfColor){0.28F, 0.86F, 0.38F, 1.0F}, 90020);
+    if (editor->selected_count != 1U || !af_editor_gizmo_geometry(selected, camera, &geometry)) {
+        return;
+    }
+    af_editor_add_line(editor, geometry.origin, geometry.move_x, 3.0F, move_x, 90010);
+    af_editor_add_line(editor, geometry.origin, geometry.move_y, 3.0F, move_y, 90010);
+    af_editor_add_rect(editor, geometry.move_x.x - 5.0F, geometry.move_x.y - 5.0F, 10.0F, 10.0F,
+                       move_x, 90020);
+    af_editor_add_rect(editor, geometry.move_y.x - 5.0F, geometry.move_y.y - 5.0F, 10.0F, 10.0F,
+                       move_y, 90020);
+    af_editor_add_rect(editor, geometry.scale_x.x - 5.0F, geometry.scale_x.y - 5.0F, 10.0F, 10.0F,
+                       scale, 90020);
+    af_editor_add_rect(editor, geometry.scale_y.x - 5.0F, geometry.scale_y.y - 5.0F, 10.0F, 10.0F,
+                       scale, 90020);
+    af_editor_add_rect(editor, geometry.scale_xy.x - 6.0F, geometry.scale_xy.y - 6.0F, 12.0F, 12.0F,
+                       scale, 90020);
+    {
+        const AfVec2 skew_x_points[4] = {{geometry.skew_x.x, geometry.skew_x.y - 6.0F},
+                                         {geometry.skew_x.x + 6.0F, geometry.skew_x.y},
+                                         {geometry.skew_x.x, geometry.skew_x.y + 6.0F},
+                                         {geometry.skew_x.x - 6.0F, geometry.skew_x.y}};
+        const AfVec2 skew_y_points[4] = {{geometry.skew_y.x, geometry.skew_y.y - 6.0F},
+                                         {geometry.skew_y.x + 6.0F, geometry.skew_y.y},
+                                         {geometry.skew_y.x, geometry.skew_y.y + 6.0F},
+                                         {geometry.skew_y.x - 6.0F, geometry.skew_y.y}};
+        for (uint32_t index = 0U; index < 4U; ++index) {
+            af_editor_add_line(editor, skew_x_points[index], skew_x_points[(index + 1U) % 4U], 2.0F,
+                               skew, 90020);
+            af_editor_add_line(editor, skew_y_points[index], skew_y_points[(index + 1U) % 4U], 2.0F,
+                               skew, 90020);
+        }
+    }
+    {
+        const AfVec2 top = {(geometry.corners[0].x + geometry.corners[1].x) * 0.5F,
+                            (geometry.corners[0].y + geometry.corners[1].y) * 0.5F};
+        af_editor_add_line(editor, top, geometry.rotate, 2.0F, rotate, 90010);
+        af_editor_add_shape(editor, AF_NODE_ELLIPSE,
+                            (AfAffine2){.m00 = 1.0F,
+                                        .m11 = 1.0F,
+                                        .tx = geometry.rotate.x - 6.0F,
+                                        .ty = geometry.rotate.y - 6.0F},
+                            (AfVec2){12.0F, 12.0F}, rotate, 0.0F, 90020);
+    }
+    af_editor_add_text(editor, geometry.scale_xy.x + 9.0F, geometry.scale_xy.y + 7.0F, "SCALE",
+                       0.55F, 34.0F, scale, 90025);
+    af_editor_add_text(editor, geometry.skew_x.x + 9.0F, geometry.skew_x.y - 4.0F, "SKEW", 0.55F,
+                       30.0F, skew, 90025);
+    af_editor_add_text(editor, geometry.rotate.x + 9.0F, geometry.rotate.y - 4.0F, "ROTATE", 0.55F,
+                       40.0F, rotate, 90025);
 }
 
 static void af_editor_render_canvas_box(AfEditorState *editor) {
@@ -254,13 +291,13 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
 
 static void af_editor_update_title(AfEditorState *editor) {
     char title[768] = {0};
-    const AfSceneNode *selected = af_scene_find_const(&editor->project.scene, editor->selected_id);
+    const AfSceneNode *selected = af_scene_find_const(&editor->preview_scene, editor->selected_id);
     const char *name = af_project_name(&editor->project, editor->selected_id);
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
-    static const char *const properties[] = {"position", "rotation",  "scale",
-                                             "opacity",  "fill",      "radius",
-                                             "anchor",   "handle in", "handle out"};
+    static const char *const properties[] = {"position",  "rotation",  "scale", "opacity",
+                                             "fill",      "radius",    "skew",  "anchor",
+                                             "handle in", "handle out"};
     if (editor->rename_active) {
         (void)snprintf(title, sizeof(title),
                        "Arcflow Editor | Rename: %s | Enter commit, Esc cancel",
@@ -273,14 +310,16 @@ static void af_editor_update_title(AfEditorState *editor) {
     } else if (selected != NULL && name != NULL) {
         (void)snprintf(
             title, sizeof(title),
-            "Arcflow Editor%s | %s | pos %.1f,%.1f scale %.2f,%.2f rot %.2f opacity %.2f "
+            "Arcflow Editor%s | %s | pos %.1f,%.1f scale %.2f,%.2f rot %.2f skew %.2f,%.2f "
+            "opacity %.2f "
             "radius %.1f layer %d | %s %.2fs %s (%u keys) | %s",
             editor->dirty ? " *" : "", name, selected->local_transform.position.x,
             selected->local_transform.position.y, selected->local_transform.scale.x,
             selected->local_transform.scale.y, selected->local_transform.rotation,
-            selected->opacity, selected->corner_radius, selected->layer_order,
-            clip != NULL ? clip->name : "No clip", editor->playhead,
-            properties[editor->selected_property], editor->selected_keyframe_count, editor->status);
+            selected->local_transform.skew.x, selected->local_transform.skew.y, selected->opacity,
+            selected->corner_radius, selected->layer_order, clip != NULL ? clip->name : "No clip",
+            editor->playhead, properties[editor->selected_property],
+            editor->selected_keyframe_count, editor->status);
     } else {
         (void)snprintf(
             title, sizeof(title),

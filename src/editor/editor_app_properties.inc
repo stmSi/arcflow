@@ -194,24 +194,45 @@ static void af_editor_nudge(AfEditorState *editor, float x, float y) {
     if (editor->selected_id == 0U) {
         return;
     }
+    editor->selected_property = AF_PROPERTY_POSITION;
     af_editor_begin_selection_modify(editor, true);
+    af_editor_begin_transform_key_drag(editor, AF_PROPERTY_POSITION);
     for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
-        AfSceneNode *node =
-            af_scene_find(&editor->project.scene, editor->selection_drag_before[index].node.id);
+        const uint64_t node_id = editor->selection_drag_before[index].node.id;
+        AfSceneNode *node = af_scene_find(&editor->project.scene, node_id);
+        const int32_t key_drag_index = af_editor_transform_drag_key_index(editor, node_id);
+        AfProjectKeyframe *position_key =
+            key_drag_index < 0
+                ? NULL
+                : af_project_find_keyframe(
+                      &editor->project, editor->transform_drag_key_ids[(uint32_t)key_drag_index]);
+        AfVec2 position = {0};
         if (node == NULL) {
             continue;
         }
-        node->local_transform.position.x += x;
-        node->local_transform.position.y += y;
+        position = key_drag_index < 0 ? node->local_transform.position
+                                      : editor->transform_drag_key_starts[(uint32_t)key_drag_index];
+        position.x += x;
+        position.y += y;
         if (editor->snapping) {
-            node->local_transform.position.x =
-                roundf(node->local_transform.position.x / editor->grid_step) * editor->grid_step;
-            node->local_transform.position.y =
-                roundf(node->local_transform.position.y / editor->grid_step) * editor->grid_step;
+            position.x = roundf(position.x / editor->grid_step) * editor->grid_step;
+            position.y = roundf(position.y / editor->grid_step) * editor->grid_step;
+        }
+        if (position_key != NULL) {
+            position_key->keyframe.value[0] = position.x;
+            position_key->keyframe.value[1] = position.y;
+        } else {
+            node->local_transform.position = position;
         }
     }
     (void)af_scene_evaluate_world(&editor->project.scene);
-    (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_TRANSFORM, true);
+    if (editor->transform_drag_key_count != 0U) {
+        af_editor_update_preview(editor);
+    }
+    if (!af_editor_transform_key_drag_covers_selection(editor)) {
+        (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_TRANSFORM, true);
+    }
+    (void)af_editor_commit_transform_key_drag(editor, true);
 }
 
 static void af_editor_reparent(AfEditorState *editor, uint64_t parent_id) {

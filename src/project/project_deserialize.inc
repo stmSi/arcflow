@@ -1,5 +1,6 @@
-AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allocator,
-                                AfProject *out_project) {
+AfResult af_project_deserialize_versioned(const void *data, size_t size, AfAllocator *allocator,
+                                          uint32_t *out_source_format_version,
+                                          AfProject *out_project) {
     char *text = NULL;
     char *cursor = NULL;
     char *line = NULL;
@@ -33,6 +34,9 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
     uint64_t binding_property_id = 0U;
     uint32_t binding_targets_remaining = 0U;
     AfResult result = AF_RESULT_INVALID_PACKAGE;
+    if (out_source_format_version != NULL) {
+        *out_source_format_version = 0U;
+    }
     if (data == NULL || size == 0U || size > AF_PROJECT_MAX_FILE_SIZE || allocator == NULL ||
         out_project == NULL || memchr(data, '\0', size) != NULL) {
         return AF_RESULT_INVALID_ARGUMENT;
@@ -66,6 +70,9 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
             value = af_project_value(line, "arcflow_project");
             if (value == NULL || !af_project_parse_u64(value, &format_version)) {
                 goto cleanup;
+            }
+            if (out_source_format_version != NULL && format_version <= UINT32_MAX) {
+                *out_source_format_version = (uint32_t)format_version;
             }
             if (format_version == 0U || format_version > AF_PROJECT_FORMAT_VERSION) {
                 result = AF_RESULT_UNSUPPORTED_VERSION;
@@ -233,7 +240,10 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
             continue;
         }
         if (strcmp(line, "end") == 0) {
-            if (!in_node || fields != AF_PROJECT_REQUIRED_FIELDS ||
+            const uint32_t required_fields = format_version >= 12U
+                                                 ? AF_PROJECT_REQUIRED_FIELDS
+                                                 : AF_PROJECT_LEGACY_REQUIRED_FIELDS;
+            if (!in_node || fields != required_fields ||
                 af_project_insert_snapshot(&project, &node) != AF_RESULT_SUCCESS) {
                 goto cleanup;
             }
@@ -356,9 +366,8 @@ AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allo
         } else if ((value = af_project_value(line, "metadata")) != NULL) {
             unsigned long long revision = 0ULL;
             char trailing = '\0';
-            if (metadata_seen ||
-                sscanf(value, "%63s %llu %c", project.metadata.project_id, &revision,
-                       &trailing) != 2) {
+            if (metadata_seen || sscanf(value, "%63s %llu %c", project.metadata.project_id,
+                                        &revision, &trailing) != 2) {
                 goto cleanup;
             }
             project.metadata.revision = (uint64_t)revision;
@@ -434,4 +443,9 @@ cleanup:
     af_project_destroy(&project);
     af_deallocate(allocator, text);
     return result;
+}
+
+AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allocator,
+                                AfProject *out_project) {
+    return af_project_deserialize_versioned(data, size, allocator, NULL, out_project);
 }

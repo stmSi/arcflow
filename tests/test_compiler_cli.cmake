@@ -1,5 +1,6 @@
-if(NOT DEFINED ARCFLOW_COMPILER OR NOT DEFINED ARCFLOW_TEST_DIRECTORY)
-    message(FATAL_ERROR "compiler and test directory are required")
+if(NOT DEFINED ARCFLOW_COMPILER OR NOT DEFINED ARCFLOW_TEST_DIRECTORY OR
+   NOT DEFINED ARCFLOW_SOURCE_DIRECTORY OR NOT DEFINED ARCFLOW_PROJECT_FORMAT_VERSION)
+    message(FATAL_ERROR "compiler, source, format version, and test directory are required")
 endif()
 
 file(REMOVE_RECURSE "${ARCFLOW_TEST_DIRECTORY}")
@@ -22,6 +23,54 @@ execute_process(COMMAND "${ARCFLOW_COMPILER}" --check-determinism "${project}"
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "determinism check failed")
 endif()
+execute_process(COMMAND "${ARCFLOW_COMPILER}" --beta-audit "${project}"
+                RESULT_VARIABLE result OUTPUT_VARIABLE beta_audit)
+if(NOT result EQUAL 0 OR NOT beta_audit MATCHES "beta audit READY")
+    message(FATAL_ERROR "beta project audit failed")
+endif()
+set(legacy_project "${ARCFLOW_SOURCE_DIRECTORY}/assets/editor_demo.afproj")
+set(migrated_project "${ARCFLOW_TEST_DIRECTORY}/migrated-project.afproj")
+execute_process(COMMAND "${ARCFLOW_COMPILER}" --migrate-project "${legacy_project}"
+                        "${migrated_project}"
+                RESULT_VARIABLE result OUTPUT_VARIABLE migration)
+if(NOT result EQUAL 0 OR
+   NOT migration MATCHES "project format 3 -> ${ARCFLOW_PROJECT_FORMAT_VERSION}" OR
+   NOT EXISTS "${migrated_project}")
+    message(FATAL_ERROR "historical project migration failed")
+endif()
+file(STRINGS "${migrated_project}" migrated_header LIMIT_COUNT 1)
+if(NOT migrated_header STREQUAL "arcflow_project ${ARCFLOW_PROJECT_FORMAT_VERSION}")
+    message(FATAL_ERROR "migration did not write the current project format")
+endif()
+execute_process(COMMAND "${ARCFLOW_COMPILER}" --beta-audit "${migrated_project}"
+                RESULT_VARIABLE result OUTPUT_VARIABLE migrated_audit)
+if(NOT result EQUAL 0 OR NOT migrated_audit MATCHES "beta audit READY")
+    message(FATAL_ERROR "migrated project failed the beta audit")
+endif()
+file(SHA256 "${migrated_project}" migrated_hash_before)
+execute_process(COMMAND "${ARCFLOW_COMPILER}" --migrate-project "${migrated_project}"
+                        "${migrated_project}"
+                RESULT_VARIABLE result OUTPUT_VARIABLE normalized_migration)
+file(SHA256 "${migrated_project}" migrated_hash_after)
+file(SHA256 "${migrated_project}.bak1" migrated_backup_hash)
+if(NOT result EQUAL 0 OR
+   NOT normalized_migration MATCHES
+       "project format ${ARCFLOW_PROJECT_FORMAT_VERSION} -> ${ARCFLOW_PROJECT_FORMAT_VERSION}" OR
+   NOT migrated_hash_before STREQUAL migrated_hash_after OR
+   NOT migrated_hash_before STREQUAL migrated_backup_hash)
+    message(FATAL_ERROR "in-place project migration was not atomic and deterministic")
+endif()
+math(EXPR future_format_version "${ARCFLOW_PROJECT_FORMAT_VERSION} + 1")
+set(future_project "${ARCFLOW_TEST_DIRECTORY}/future-project.afproj")
+set(future_output "${ARCFLOW_TEST_DIRECTORY}/future-project-migrated.afproj")
+file(WRITE "${future_project}"
+     "arcflow_project ${future_format_version}\ncanvas 1280 720\n")
+execute_process(COMMAND "${ARCFLOW_COMPILER}" --migrate-project "${future_project}"
+                        "${future_output}"
+                RESULT_VARIABLE result ERROR_QUIET)
+if(result EQUAL 0 OR EXISTS "${future_output}")
+    message(FATAL_ERROR "unsupported future project produced migration output")
+endif()
 execute_process(COMMAND "${ARCFLOW_COMPILER}" --compile-release "${project}" "${package}"
                 RESULT_VARIABLE result)
 if(NOT result EQUAL 0)
@@ -43,7 +92,8 @@ file(WRITE "${ARCFLOW_TEST_DIRECTORY}/package.sha256" "${package_hash}\n")
 
 execute_process(COMMAND "${ARCFLOW_COMPILER}" --help
                 RESULT_VARIABLE result OUTPUT_VARIABLE help)
-if(NOT result EQUAL 0 OR NOT help MATCHES "--generate-examples")
+if(NOT result EQUAL 0 OR NOT help MATCHES "--generate-examples" OR
+   NOT help MATCHES "--migrate-project")
     message(FATAL_ERROR "compiler help is incomplete")
 endif()
 execute_process(COMMAND "${ARCFLOW_COMPILER}" --list-templates

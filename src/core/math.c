@@ -8,10 +8,13 @@ AfAffine2 af_affine_identity(void) { return (AfAffine2){.m00 = 1.0F, .m11 = 1.0F
 AfAffine2 af_affine_from_transform(AfTransform2D transform) {
     const float cosine = cosf(transform.rotation);
     const float sine = sinf(transform.rotation);
-    return (AfAffine2){.m00 = cosine * transform.scale.x,
-                       .m01 = -sine * transform.scale.y,
-                       .m10 = sine * transform.scale.x,
-                       .m11 = cosine * transform.scale.y,
+    const float skew_x = tanf(transform.skew.x);
+    const float skew_y = tanf(transform.skew.y);
+    const float skew_xy = skew_x * skew_y;
+    return (AfAffine2){.m00 = (cosine * (1.0F + skew_xy) - sine * skew_y) * transform.scale.x,
+                       .m01 = (cosine * skew_x - sine) * transform.scale.y,
+                       .m10 = (sine * (1.0F + skew_xy) + cosine * skew_y) * transform.scale.x,
+                       .m11 = (sine * skew_x + cosine) * transform.scale.y,
                        .tx = transform.position.x,
                        .ty = transform.position.y};
 }

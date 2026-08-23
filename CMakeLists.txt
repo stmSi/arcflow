@@ -13,6 +13,17 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/project/project.h")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/src/project/project.h"
+    ARCFLOW_PROJECT_FORMAT_DEFINITION
+    REGEX "^#define AF_PROJECT_FORMAT_VERSION [0-9]+U$")
+if(NOT ARCFLOW_PROJECT_FORMAT_DEFINITION)
+    message(FATAL_ERROR "AF_PROJECT_FORMAT_VERSION is missing from project.h")
+endif()
+string(REGEX REPLACE ".* ([0-9]+)U$" "\\1" ARCFLOW_PROJECT_FORMAT_VERSION
+    "${ARCFLOW_PROJECT_FORMAT_DEFINITION}")
+
 option(ARCFLOW_ENABLE_VALIDATION "Enable Vulkan validation in debug builds" ON)
 option(ARCFLOW_BUILD_GPU_TESTS "Build Vulkan smoke tests" ON)
 set(ARCFLOW_RELEASE_CHANNEL "Development" CACHE STRING
@@ -148,6 +159,7 @@ set(ARCFLOW_PROJECT_SOURCES
     src/binding/binding.c
     src/localization/localization.c
     src/performance/metrics.c
+    src/stability/diagnostics.c
     src/component/component.c
     src/interaction/interaction.c
     src/state_machine/state_machine.c
@@ -202,6 +214,7 @@ target_link_libraries(arcflow_project PUBLIC arcflow_core PRIVATE SDL3::SDL3-sta
 add_library(arcflow_editor_core STATIC
     src/editor/editor_commands.c
     src/editor/editor_actions.c
+    src/editor/editor_gizmo.c
     src/editor/editor_preferences.c
     src/editor/editor_recovery.c
     src/editor/editor_workflow.c
@@ -332,6 +345,37 @@ target_include_directories(arcflow_performance_tests PRIVATE src include)
 target_link_libraries(arcflow_performance_tests PRIVATE arcflow_core)
 add_test(NAME arcflow_performance_tests COMMAND arcflow_performance_tests)
 
+add_executable(arcflow_stability_tests tests/test_stability.c)
+target_include_directories(arcflow_stability_tests PRIVATE src include)
+target_link_libraries(arcflow_stability_tests PRIVATE arcflow_core)
+add_test(NAME arcflow_stability_tests COMMAND arcflow_stability_tests)
+
+add_executable(arcflow_beta_performance_tests tests/test_beta_performance.c)
+target_include_directories(arcflow_beta_performance_tests PRIVATE src include)
+target_link_libraries(arcflow_beta_performance_tests PRIVATE arcflow_runtime arcflow_project
+    SDL3::SDL3-static)
+add_test(NAME arcflow_beta_performance_tests COMMAND arcflow_beta_performance_tests)
+set_tests_properties(arcflow_beta_performance_tests PROPERTIES LABELS "beta;performance"
+    TIMEOUT 120)
+
+add_executable(arcflow_parser_fuzz_tests tests/test_parser_fuzz.c)
+target_include_directories(arcflow_parser_fuzz_tests PRIVATE src include)
+target_link_libraries(arcflow_parser_fuzz_tests PRIVATE arcflow_project)
+add_test(NAME arcflow_parser_fuzz_tests COMMAND arcflow_parser_fuzz_tests)
+set_tests_properties(arcflow_parser_fuzz_tests PROPERTIES LABELS "beta;fuzz;security"
+    TIMEOUT 120)
+
+add_executable(arcflow_import_fuzz_tests tests/test_import_fuzz.c)
+target_include_directories(arcflow_import_fuzz_tests PRIVATE src include)
+target_compile_definitions(arcflow_import_fuzz_tests PRIVATE
+    ARCFLOW_FUZZ_PNG="${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/test/gamepad_axis_arrow.png"
+    ARCFLOW_FUZZ_FONT="${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/test/shape/data/text-rendering-tests/fonts/TestSFNTOne.otf"
+)
+target_link_libraries(arcflow_import_fuzz_tests PRIVATE arcflow_project)
+add_test(NAME arcflow_import_fuzz_tests COMMAND arcflow_import_fuzz_tests)
+set_tests_properties(arcflow_import_fuzz_tests PROPERTIES LABELS "beta;fuzz;security;import"
+    TIMEOUT 120)
+
 add_executable(arcflow_localization_tests tests/test_localization.c)
 target_include_directories(arcflow_localization_tests PRIVATE src include)
 target_link_libraries(arcflow_localization_tests PRIVATE arcflow_core)
@@ -361,6 +405,8 @@ add_test(NAME arcflow_compiler_cli_tests
     COMMAND "${CMAKE_COMMAND}"
         "-DARCFLOW_COMPILER=$<TARGET_FILE:arcflow_compiler>"
         "-DARCFLOW_TEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/compiler-cli-test"
+        "-DARCFLOW_SOURCE_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DARCFLOW_PROJECT_FORMAT_VERSION=${ARCFLOW_PROJECT_FORMAT_VERSION}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compiler_cli.cmake"
 )
 
@@ -405,6 +451,8 @@ add_test(NAME arcflow_runtime_sample_tests
 add_custom_target(arcflow_ci
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS arcflow_tests arcflow_performance_tests arcflow_localization_tests
+            arcflow_stability_tests arcflow_beta_performance_tests arcflow_parser_fuzz_tests
+            arcflow_import_fuzz_tests
             arcflow_interchange_tests arcflow_editor_workflow_tests
             arcflow_editor_recovery_tests arcflow_collaboration_tests arcflow_compiler
             arcflow_platform_tests arcflow_update_tests arcflow_onboarding_tests
@@ -432,6 +480,8 @@ set(ARCFLOW_OWN_TARGETS
     arcflow_update arcflow_renderer
     arcflow_compiler arcflow_player_app arcflow_player arcflow_editor arcflow_tests
     arcflow_performance_tests
+    arcflow_stability_tests arcflow_beta_performance_tests arcflow_parser_fuzz_tests
+    arcflow_import_fuzz_tests
     arcflow_localization_tests
     arcflow_interchange_tests
     arcflow_editor_workflow_tests

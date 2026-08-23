@@ -137,14 +137,17 @@ AfResult af_scene_validate(const AfScene *scene) {
             !isfinite(node->local_transform.position.x) ||
             !isfinite(node->local_transform.position.y) ||
             !isfinite(node->local_transform.rotation) || !isfinite(node->local_transform.scale.x) ||
-            !isfinite(node->local_transform.scale.y) || !isfinite(node->bounds.x) ||
-            !isfinite(node->bounds.y) || !isfinite(node->fill.r) || !isfinite(node->fill.g) ||
-            !isfinite(node->fill.b) || !isfinite(node->fill.a) || !isfinite(node->opacity) ||
-            !isfinite(node->corner_radius) || node->opacity < 0.0F || node->opacity > 1.0F ||
-            node->fill.r < 0.0F || node->fill.r > 1.0F || node->fill.g < 0.0F ||
-            node->fill.g > 1.0F || node->fill.b < 0.0F || node->fill.b > 1.0F ||
-            node->fill.a < 0.0F || node->fill.a > 1.0F || node->bounds.x < 0.0F ||
-            node->bounds.y < 0.0F || node->corner_radius < 0.0F) {
+            !isfinite(node->local_transform.scale.y) || !isfinite(node->local_transform.skew.x) ||
+            !isfinite(node->local_transform.skew.y) ||
+            fabsf(node->local_transform.skew.x) > AF_TRANSFORM_MAX_SKEW_RADIANS ||
+            fabsf(node->local_transform.skew.y) > AF_TRANSFORM_MAX_SKEW_RADIANS ||
+            !isfinite(node->bounds.x) || !isfinite(node->bounds.y) || !isfinite(node->fill.r) ||
+            !isfinite(node->fill.g) || !isfinite(node->fill.b) || !isfinite(node->fill.a) ||
+            !isfinite(node->opacity) || !isfinite(node->corner_radius) || node->opacity < 0.0F ||
+            node->opacity > 1.0F || node->fill.r < 0.0F || node->fill.r > 1.0F ||
+            node->fill.g < 0.0F || node->fill.g > 1.0F || node->fill.b < 0.0F ||
+            node->fill.b > 1.0F || node->fill.a < 0.0F || node->fill.a > 1.0F ||
+            node->bounds.x < 0.0F || node->bounds.y < 0.0F || node->corner_radius < 0.0F) {
             return AF_RESULT_INVALID_ARGUMENT;
         }
         for (other = index + 1U; other < scene->count; ++other) {

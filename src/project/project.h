@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AF_PROJECT_FORMAT_VERSION 11U
+#define AF_PROJECT_FORMAT_VERSION 12U
 #define AF_PROJECT_MAX_FILE_SIZE (32U * 1024U * 1024U)
 #define AF_PROJECT_NAME_CAPACITY 64U
 #define AF_PROJECT_MAX_CLIPS 64U
@@ -170,9 +170,15 @@ AfResult af_project_path_snapshot(const AfProject *project, uint64_t path_id,
 
 AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
                               AfPackageBlob *out_text);
+AfResult af_project_deserialize_versioned(const void *data, size_t size, AfAllocator *allocator,
+                                          uint32_t *out_source_format_version,
+                                          AfProject *out_project);
 AfResult af_project_deserialize(const void *data, size_t size, AfAllocator *allocator,
                                 AfProject *out_project);
 AfResult af_project_save_file(const AfProject *project, const char *path, AfAllocator *allocator);
+AfResult af_project_load_file_versioned(const char *path, AfAllocator *allocator,
+                                        uint32_t *out_source_format_version,
+                                        AfProject *out_project);
 AfResult af_project_load_file(const char *path, AfAllocator *allocator, AfProject *out_project);
 AfResult af_project_compile(const AfProject *project, AfAllocator *allocator,
                             AfPackageBlob *out_package);

@@ -1,8 +1,8 @@
 # Security
 
-Projects and packages are untrusted. The editor and compiler limit editable projects to 8 MiB,
+Projects and packages are untrusted. The editor and compiler limit editable projects to 32 MiB,
 validate finite/ranged values, required fields, stable identifiers, parent references, hierarchy
-cycles/depth, names, canvas bounds, versions, and node limits before use. Unknown optional project
+cycles/depth, names, canvas bounds, bounded skew angles, versions, and node limits before use. Unknown optional project
 fields are ignored for schema migration; malformed known data is rejected. Project data never
 supplies scripts, shaders, or external paths. The player validates package bytes before loading.
 
