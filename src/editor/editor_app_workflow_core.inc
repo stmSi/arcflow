@@ -80,6 +80,9 @@ static AfEditorShortcut af_editor_menu_default_shortcut(AfEditorMenuAction actio
                                            AF_EDITOR_SHORTCUT_MODIFIER_SHIFT};
     case AF_EDITOR_MENU_ACTION_COMPILE:
         return (AfEditorShortcut){AF_EDITOR_KEY_F5, 0U};
+    case AF_EDITOR_MENU_ACTION_EXPORT:
+        return (AfEditorShortcut){'E', AF_EDITOR_SHORTCUT_MODIFIER_CTRL |
+                                           AF_EDITOR_SHORTCUT_MODIFIER_SHIFT};
     case AF_EDITOR_MENU_ACTION_UNDO:
         return (AfEditorShortcut){'Z', AF_EDITOR_SHORTCUT_MODIFIER_CTRL};
     case AF_EDITOR_MENU_ACTION_REDO:
@@ -122,7 +125,7 @@ static uint32_t af_editor_menu_action_context(AfEditorMenuAction action) {
 
 static AfResult af_editor_action_callback(void *user, AfEditorActionId action_id) {
     AfEditorState *editor = user;
-    if (editor == NULL || action_id > (AfEditorActionId)AF_EDITOR_MENU_ACTION_ABOUT) {
+    if (editor == NULL || action_id > (AfEditorActionId)AF_EDITOR_MENU_ACTION_EXPORT) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
     af_editor_execute_menu_action(editor, (AfEditorMenuAction)action_id, editor->window_width,

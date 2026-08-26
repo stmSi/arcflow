@@ -100,6 +100,14 @@ static AfResult af_vk_create_image_pipeline(AfVkRenderer *renderer) {
     VkShaderModule vertex_shader = VK_NULL_HANDLE;
     VkShaderModule fragment_shader = VK_NULL_HANDLE;
     VkPipelineShaderStageCreateInfo stages[2];
+    const uint32_t output_is_srgb = af_vk_format_is_srgb(renderer->swapchain_format) ? 1U : 0U;
+    const VkSpecializationMapEntry fragment_specialization_entry = {
+        .constantID = 0U, .offset = 0U, .size = sizeof(output_is_srgb)};
+    const VkSpecializationInfo fragment_specialization = {
+        .mapEntryCount = 1U,
+        .pMapEntries = &fragment_specialization_entry,
+        .dataSize = sizeof(output_is_srgb),
+        .pData = &output_is_srgb};
     const VkVertexInputBindingDescription binding = {.binding = 0U,
                                                      .stride = sizeof(AfGpuImageVertex),
                                                      .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
@@ -205,7 +213,8 @@ static AfResult af_vk_create_image_pipeline(AfVkRenderer *renderer) {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
         .module = fragment_shader,
-        .pName = "main"};
+        .pName = "main",
+        .pSpecializationInfo = &fragment_specialization};
     if (vkCreatePipelineLayout(renderer->device, &layout_info, NULL,
                                &renderer->image_pipeline_layout) != VK_SUCCESS) {
         result = AF_RESULT_VULKAN_ERROR;

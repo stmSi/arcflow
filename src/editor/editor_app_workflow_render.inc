@@ -118,6 +118,14 @@ static void af_editor_render_validation(AfEditorState *editor) {
                        editor->external_change_visible ? (AfColor){1.0F, 0.58F, 0.32F, 1.0F}
                                                        : (AfColor){0.54F, 0.65F, 0.76F, 1.0F},
                        202010);
+    if (missing != 0U && affected_id != 0U) {
+        af_editor_add_button_rect(editor, x + 12.0F, y + 156.0F,
+                                  AF_EDITOR_WORKFLOW_PANEL_WIDTH - 24.0F, 38.0F,
+                                  (AfColor){0.14F, 0.24F, 0.38F, 1.0F}, 202009);
+    } else {
+        af_editor_add_rect(editor, x + 12.0F, y + 156.0F, AF_EDITOR_WORKFLOW_PANEL_WIDTH - 24.0F,
+                           38.0F, (AfColor){0.1F, 0.11F, 0.14F, 1.0F}, 202009);
+    }
     af_editor_add_text(editor, x + 16.0F, y + 168.0F,
                        missing != 0U && affected_id != 0U ? "CLICK: SELECT AFFECTED OBJECT"
                                                           : "NO OBJECT ERRORS TO NAVIGATE",
@@ -265,10 +273,11 @@ static void af_editor_render_palette(AfEditorState *editor, int width) {
         if (action == NULL) {
             continue;
         }
-        if (result_index == editor->command_palette.selected_index) {
-            af_editor_add_rect(editor, x + 12.0F, row_y, box_width - 24.0F, 34.0F,
-                               (AfColor){0.17F, 0.33F, 0.55F, 1.0F}, 230010);
-        }
+        af_editor_add_button_rect(editor, x + 12.0F, row_y, box_width - 24.0F, 34.0F,
+                                  result_index == editor->command_palette.selected_index
+                                      ? (AfColor){0.17F, 0.33F, 0.55F, 1.0F}
+                                      : (AfColor){0.1F, 0.12F, 0.16F, 1.0F},
+                                  230010);
         (void)af_editor_shortcut_format(action->shortcut, shortcut, sizeof(shortcut));
         af_editor_add_text(editor, x + 24.0F, row_y + 10.0F, action->label, 0.9F, 390.0F,
                            (AfColor){0.84F, 0.87F, 0.93F, 1.0F}, 230020);
@@ -315,12 +324,13 @@ static void af_editor_render_shortcuts(AfEditorState *editor, int width, int hei
         const AfEditorAction *action = &editor->actions.actions[index];
         char shortcut[AF_EDITOR_SHORTCUT_TEXT_CAPACITY];
         const float row_y = y + 70.0F + (float)row * 33.0F;
-        if (index == editor->shortcut_selected_index) {
-            af_editor_add_rect(editor, x + 12.0F, row_y, box_width - 24.0F, 30.0F,
-                               editor->shortcut_capture ? (AfColor){0.48F, 0.28F, 0.16F, 1.0F}
-                                                        : (AfColor){0.17F, 0.33F, 0.55F, 1.0F},
-                               232010);
-        }
+        af_editor_add_button_rect(editor, x + 12.0F, row_y, box_width - 24.0F, 30.0F,
+                                  index == editor->shortcut_selected_index
+                                      ? (editor->shortcut_capture
+                                             ? (AfColor){0.48F, 0.28F, 0.16F, 1.0F}
+                                             : (AfColor){0.17F, 0.33F, 0.55F, 1.0F})
+                                      : (AfColor){0.1F, 0.12F, 0.16F, 1.0F},
+                                  232010);
         (void)af_editor_shortcut_format(action->shortcut, shortcut, sizeof(shortcut));
         af_editor_add_text(editor, x + 24.0F, row_y + 9.0F, action->label, 0.78F, 440.0F,
                            (AfColor){0.84F, 0.87F, 0.93F, 1.0F}, 232020);
@@ -370,20 +380,16 @@ static void af_editor_render_recovery(AfEditorState *editor, int width, int heig
                            ? (AfColor){1.0F, 0.72F, 0.36F, 1.0F}
                            : (AfColor){0.58F, 0.84F, 0.66F, 1.0F},
                        234010);
-    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 22.0F, .ty = y + 90.0F},
-                        (AfVec2){496.0F, 38.0F}, (AfColor){0.16F, 0.28F, 0.46F, 1.0F}, 4.0F,
-                        234010);
+    af_editor_add_button_rounded(editor, x + 22.0F, y + 90.0F, 496.0F, 38.0F,
+                                 (AfColor){0.16F, 0.28F, 0.46F, 1.0F}, 4.0F, 234010);
     af_editor_add_text(editor, x + 38.0F, y + 102.0F, af_editor_autosave_label(editor), 0.82F,
                        460.0F, (AfColor){0.84F, 0.88F, 0.95F, 1.0F}, 234020);
-    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 22.0F, .ty = y + 148.0F},
-                        (AfVec2){236.0F, 42.0F}, (AfColor){0.18F, 0.42F, 0.3F, 1.0F}, 4.0F, 234010);
+    af_editor_add_button_rounded(editor, x + 22.0F, y + 148.0F, 236.0F, 42.0F,
+                                 (AfColor){0.18F, 0.42F, 0.3F, 1.0F}, 4.0F, 234010);
     af_editor_add_text(editor, x + 52.0F, y + 162.0F, "RESTORE AUTOSAVE", 0.78F, 180.0F,
                        (AfColor){0.9F, 0.95F, 0.92F, 1.0F}, 234020);
-    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 282.0F, .ty = y + 148.0F},
-                        (AfVec2){236.0F, 42.0F}, (AfColor){0.42F, 0.2F, 0.22F, 1.0F}, 4.0F, 234010);
+    af_editor_add_button_rounded(editor, x + 282.0F, y + 148.0F, 236.0F, 42.0F,
+                                 (AfColor){0.42F, 0.2F, 0.22F, 1.0F}, 4.0F, 234010);
     af_editor_add_text(editor, x + 312.0F, y + 162.0F, "DISCARD AUTOSAVE", 0.78F, 180.0F,
                        (AfColor){0.96F, 0.9F, 0.9F, 1.0F}, 234020);
     af_editor_add_text(editor, x + 22.0F, y + 221.0F,
@@ -407,10 +413,8 @@ static void af_editor_render_preset_library(AfEditorState *editor, int width, in
         (AfVec2){box_width, box_height}, (AfColor){0.075F, 0.085F, 0.11F, 1.0F}, 8.0F, 236000);
     af_editor_add_text(editor, x + 20.0F, y + 18.0F, "STYLE PRESET LIBRARY", 1.15F, 360.0F,
                        (AfColor){0.61F, 0.82F, 1.0F, 1.0F}, 236010);
-    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 18.0F, .ty = y + 55.0F},
-                        (AfVec2){394.0F, 38.0F}, (AfColor){0.17F, 0.34F, 0.55F, 1.0F}, 4.0F,
-                        236010);
+    af_editor_add_button_rounded(editor, x + 18.0F, y + 55.0F, 394.0F, 38.0F,
+                                 (AfColor){0.17F, 0.34F, 0.55F, 1.0F}, 4.0F, 236010);
     af_editor_add_text(editor, x + 38.0F, y + 68.0F, "SAVE SELECTED STYLE AS PRESET", 0.76F, 350.0F,
                        (AfColor){0.88F, 0.92F, 0.98F, 1.0F}, 236020);
     for (uint32_t index = 0U; index < editor->project.style_data.count && row < 6U; ++index) {
@@ -420,8 +424,8 @@ static void af_editor_render_preset_library(AfEditorState *editor, int width, in
             continue;
         }
         (void)snprintf(label, sizeof(label), "PRESET %u   CLICK TO APPLY", row + 1U);
-        af_editor_add_rect(editor, x + 18.0F, y + 106.0F + (float)row * 32.0F, 394.0F, 28.0F,
-                           (AfColor){0.12F, 0.14F, 0.18F, 1.0F}, 236010);
+        af_editor_add_button_rect(editor, x + 18.0F, y + 106.0F + (float)row * 32.0F, 394.0F, 28.0F,
+                                  (AfColor){0.12F, 0.14F, 0.18F, 1.0F}, 236010);
         af_editor_add_rect(editor, x + 28.0F, y + 113.0F + (float)row * 32.0F, 14.0F, 14.0F,
                            style->fill.solid, 236020);
         af_editor_add_text(editor, x + 54.0F, y + 115.0F + (float)row * 32.0F, label, 0.7F, 340.0F,
@@ -457,12 +461,10 @@ static void af_editor_render_templates(AfEditorState *editor, int width, int hei
         const float card_x = x + 18.0F + (float)(index % 3U) * 250.0F;
         const float card_y = y + 75.0F + (float)(index / 3U) * 145.0F;
         const bool selected = index == editor->template_selected_index;
-        af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                            (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = card_x, .ty = card_y},
-                            (AfVec2){238.0F, 132.0F},
-                            selected ? (AfColor){0.18F, 0.34F, 0.56F, 1.0F}
-                                     : (AfColor){0.12F, 0.14F, 0.18F, 1.0F},
-                            6.0F, 238010);
+        af_editor_add_button_rounded(editor, card_x, card_y, 238.0F, 132.0F,
+                                     selected ? (AfColor){0.18F, 0.34F, 0.56F, 1.0F}
+                                              : (AfColor){0.12F, 0.14F, 0.18F, 1.0F},
+                                     6.0F, 238010);
         af_editor_add_rect(
             editor, card_x + 14.0F, card_y + 14.0F, 210.0F, 38.0F,
             index == AF_PROJECT_TEMPLATE_BLANK             ? (AfColor){0.2F, 0.22F, 0.27F, 1.0F}
@@ -504,14 +506,89 @@ static void af_editor_render_recent_projects(AfEditorState *editor, int width, i
     }
     for (uint32_t row = 0U; row < editor->preferences.recent_project_count && row < 9U; ++row) {
         const float row_y = y + 76.0F + (float)row * 32.0F;
-        if (row == editor->recent_selected_index) {
-            af_editor_add_rect(editor, x + 14.0F, row_y, box_width - 28.0F, 29.0F,
-                               (AfColor){0.18F, 0.34F, 0.56F, 1.0F}, 240010);
-        }
+        af_editor_add_button_rect(editor, x + 14.0F, row_y, box_width - 28.0F, 29.0F,
+                                  row == editor->recent_selected_index
+                                      ? (AfColor){0.18F, 0.34F, 0.56F, 1.0F}
+                                      : (AfColor){0.1F, 0.12F, 0.16F, 1.0F},
+                                  240010);
         af_editor_add_text(editor, x + 24.0F, row_y + 9.0F,
                            editor->preferences.recent_projects[row].path, 0.73F, box_width - 48.0F,
                            (AfColor){0.8F, 0.84F, 0.92F, 1.0F}, 240020);
     }
+}
+
+static void af_editor_render_export(AfEditorState *editor, int width, int height) {
+    static const char *const titles[] = {"1  RUNTIME",       "2  LOTTIE JSON",  "3  DOTLOTTIE",
+                                         "4  STATIC VECTOR", "5  ANIMATED GIF", "6  MP4 VIDEO"};
+    static const char *const formats[] = {".AFP  NATIVE PACKAGE", ".JSON  VECTOR MOTION",
+                                          ".LOTTIE  PORTABLE",    ".SVG  CURRENT FRAME",
+                                          ".GIF  30 FPS",         ".MP4  H.264  30 FPS"};
+    static const char *const summaries[] = {
+        "Lossless Arcflow runtime data",  "Web and mobile vector playback",
+        "Compressed Lottie v2 container", "Editable vector snapshot",
+        "Universal looping animation",    "Production-ready video delivery"};
+    static const char *const actions[] = {"EXPORT PACKAGE", "EXPORT JSON", "EXPORT .LOTTIE",
+                                          "EXPORT SVG",     "EXPORT GIF",  "EXPORT MP4"};
+    static const AfColor colors[] = {{0.12F, 0.25F, 0.4F, 1.0F}, {0.27F, 0.18F, 0.42F, 1.0F},
+                                     {0.16F, 0.3F, 0.4F, 1.0F},  {0.14F, 0.34F, 0.27F, 1.0F},
+                                     {0.4F, 0.22F, 0.16F, 1.0F}, {0.35F, 0.17F, 0.2F, 1.0F}};
+    const float box_width = 780.0F;
+    const float box_height = 500.0F;
+    const float card_width = 232.0F;
+    const float card_height = 160.0F;
+    const float x = ((float)width - box_width) * 0.5F;
+    const float y = ((float)height - box_height) * 0.5F;
+    char frame_label[64];
+    if (!editor->export_panel_visible) {
+        return;
+    }
+    (void)snprintf(frame_label, sizeof(frame_label), "CURRENT FRAME AT %.2f SECONDS",
+                   (double)editor->playhead);
+    af_editor_add_rect(editor, 0.0F, 0.0F, (float)width, (float)height,
+                       (AfColor){0.0F, 0.0F, 0.0F, 0.58F}, 241900);
+    af_editor_add_shape(
+        editor, AF_NODE_ROUNDED_RECTANGLE, (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = y},
+        (AfVec2){box_width, box_height}, (AfColor){0.075F, 0.085F, 0.11F, 1.0F}, 9.0F, 242000);
+    af_editor_add_text(editor, x + 24.0F, y + 19.0F, "EXPORT", 1.3F, 180.0F,
+                       (AfColor){0.61F, 0.82F, 1.0F, 1.0F}, 242010);
+    af_editor_add_text(editor, x + 24.0F, y + 49.0F,
+                       "Choose a delivery format. Export never changes the editable project.",
+                       0.74F, box_width - 48.0F, (AfColor){0.57F, 0.64F, 0.75F, 1.0F}, 242010);
+    for (uint32_t index = 0U; index < 6U; ++index) {
+        const uint32_t column = index % 3U;
+        const uint32_t row = index / 3U;
+        const float card_x = x + 24.0F + (float)column * 250.0F;
+        const float card_y = y + 78.0F + (float)row * 178.0F;
+        const bool hovered =
+            editor->mouse_position.x >= card_x && editor->mouse_position.x < card_x + card_width &&
+            editor->mouse_position.y >= card_y && editor->mouse_position.y < card_y + card_height;
+        AfColor card_color = colors[index];
+        if (hovered) {
+            card_color.r = fminf(card_color.r + 0.08F, 1.0F);
+            card_color.g = fminf(card_color.g + 0.08F, 1.0F);
+            card_color.b = fminf(card_color.b + 0.08F, 1.0F);
+        }
+        af_editor_add_button_rounded(editor, card_x, card_y, card_width, card_height, card_color,
+                                     hovered ? 10.0F : 7.0F, 242010);
+        af_editor_add_text(editor, card_x + 16.0F, card_y + 17.0F, titles[index], 0.94F,
+                           card_width - 32.0F, (AfColor){0.82F, 0.91F, 1.0F, 1.0F}, 242020);
+        af_editor_add_text(editor, card_x + 16.0F, card_y + 47.0F, formats[index], 0.64F,
+                           card_width - 32.0F, (AfColor){0.54F, 0.8F, 0.94F, 1.0F}, 242020);
+        af_editor_add_text(editor, card_x + 16.0F, card_y + 78.0F,
+                           index == 3U ? frame_label : summaries[index], 0.62F, card_width - 32.0F,
+                           (AfColor){0.72F, 0.78F, 0.87F, 1.0F}, 242020);
+        if (index == 4U || index == 5U) {
+            af_editor_add_text(editor, card_x + 16.0F, card_y + 101.0F, "REQUIRES FFMPEG", 0.55F,
+                               card_width - 32.0F, (AfColor){0.83F, 0.66F, 0.46F, 1.0F}, 242020);
+        }
+        af_editor_add_text(
+            editor, card_x + 16.0F, card_y + 132.0F, actions[index], 0.72F, card_width - 32.0F,
+            hovered ? (AfColor){1.0F, 1.0F, 1.0F, 1.0F} : (AfColor){0.91F, 0.94F, 0.98F, 1.0F},
+            242020);
+    }
+    af_editor_add_text(editor, x + 24.0F, y + 462.0F,
+                       "CLICK A FORMAT OR PRESS 1-6  -  ESC OR CLICK OUTSIDE TO CLOSE", 0.68F,
+                       box_width - 48.0F, (AfColor){0.47F, 0.55F, 0.66F, 1.0F}, 242020);
 }
 
 static void af_editor_render_workflow(AfEditorState *editor, int width, int height) {
@@ -526,6 +603,7 @@ static void af_editor_render_workflow(AfEditorState *editor, int width, int heig
     af_editor_render_preset_library(editor, width, height);
     af_editor_render_templates(editor, width, height);
     af_editor_render_recent_projects(editor, width, height);
+    af_editor_render_export(editor, width, height);
     af_editor_render_onboarding(editor, width, height);
 }
 

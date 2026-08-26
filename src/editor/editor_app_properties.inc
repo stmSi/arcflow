@@ -1,21 +1,59 @@
 static void af_editor_modify_scalar(AfEditorState *editor, AfEditorMergeKey merge_key, float amount,
                                     int property) {
+    AfPropertyType animation_property = AF_PROPERTY_POSITION;
+    bool animatable = true;
     if (editor->selected_id == 0U) {
         return;
     }
+    if (property == 0) {
+        animation_property = AF_PROPERTY_OPACITY;
+    } else if (property == 1) {
+        animation_property = AF_PROPERTY_CORNER_RADIUS;
+    } else if (property == 2) {
+        animatable = false;
+    } else if (property == 3) {
+        animation_property = AF_PROPERTY_ROTATION;
+    } else if (property == 4) {
+        animation_property = AF_PROPERTY_SCALE;
+    } else {
+        return;
+    }
+    if (animatable) {
+        editor->selected_property = animation_property;
+    }
     af_editor_begin_selection_modify(editor, false);
+    if (animatable) {
+        af_editor_begin_transform_key_drag(editor, animation_property);
+    }
     for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
-        AfSceneNode *node =
-            af_scene_find(&editor->project.scene, editor->selection_drag_before[index].node.id);
+        const uint64_t node_id = editor->selection_drag_before[index].node.id;
+        const int32_t key_index =
+            animatable ? af_editor_transform_drag_key_index(editor, node_id) : -1;
+        AfProjectKeyframe *key =
+            key_index < 0
+                ? NULL
+                : af_project_find_keyframe(&editor->project,
+                                           editor->transform_drag_key_ids[(uint32_t)key_index]);
+        AfSceneNode *node = af_scene_find(&editor->project.scene, node_id);
         if (node == NULL) {
             continue;
         }
         switch (property) {
         case 0:
-            node->opacity = af_editor_clamp(node->opacity + amount, 0.0F, 1.0F);
+            if (key != NULL) {
+                key->keyframe.value[0] = af_editor_clamp(
+                    editor->transform_drag_key_starts[(uint32_t)key_index][0] + amount, 0.0F, 1.0F);
+            } else {
+                node->opacity = af_editor_clamp(node->opacity + amount, 0.0F, 1.0F);
+            }
             break;
         case 1:
-            node->corner_radius = fmaxf(0.0F, node->corner_radius + amount);
+            if (key != NULL) {
+                key->keyframe.value[0] =
+                    fmaxf(0.0F, editor->transform_drag_key_starts[(uint32_t)key_index][0] + amount);
+            } else {
+                node->corner_radius = fmaxf(0.0F, node->corner_radius + amount);
+            }
             break;
         case 2:
             if ((amount > 0.0F && node->layer_order < INT32_MAX) ||
@@ -24,38 +62,73 @@ static void af_editor_modify_scalar(AfEditorState *editor, AfEditorMergeKey merg
             }
             break;
         case 3:
-            node->local_transform.rotation += amount;
+            if (key != NULL) {
+                key->keyframe.value[0] =
+                    editor->transform_drag_key_starts[(uint32_t)key_index][0] + amount;
+            } else {
+                node->local_transform.rotation += amount;
+            }
             break;
         case 4:
-            node->local_transform.scale.x = fmaxf(0.05F, node->local_transform.scale.x + amount);
-            node->local_transform.scale.y = fmaxf(0.05F, node->local_transform.scale.y + amount);
+            if (key != NULL) {
+                key->keyframe.value[0] = fmaxf(
+                    0.05F, editor->transform_drag_key_starts[(uint32_t)key_index][0] + amount);
+                key->keyframe.value[1] = fmaxf(
+                    0.05F, editor->transform_drag_key_starts[(uint32_t)key_index][1] + amount);
+            } else {
+                node->local_transform.scale.x =
+                    fmaxf(0.05F, node->local_transform.scale.x + amount);
+                node->local_transform.scale.y =
+                    fmaxf(0.05F, node->local_transform.scale.y + amount);
+            }
             break;
-        default:
-            return;
         }
     }
     (void)af_scene_evaluate_world(&editor->project.scene);
-    (void)af_editor_commit_selection_modify(editor, merge_key, true);
+    if (editor->transform_drag_key_count != 0U) {
+        af_editor_update_preview(editor);
+    }
+    if (!af_editor_transform_key_drag_covers_selection(editor)) {
+        (void)af_editor_commit_selection_modify(editor, merge_key, true);
+    }
+    (void)af_editor_commit_transform_key_drag(editor, true);
 }
 
 static void af_editor_apply_fill(AfEditorState *editor, AfColor color) {
     for (uint32_t index = 0U; index < editor->selected_count; ++index) {
-        AfSceneNode *node = af_scene_find(&editor->project.scene, editor->selected_ids[index]);
+        const uint64_t node_id = editor->selected_ids[index];
+        const int32_t key_index = af_editor_transform_drag_key_index(editor, node_id);
+        AfProjectKeyframe *key =
+            key_index < 0
+                ? NULL
+                : af_project_find_keyframe(&editor->project,
+                                           editor->transform_drag_key_ids[(uint32_t)key_index]);
+        AfSceneNode *node = af_scene_find(&editor->project.scene, node_id);
         if (node == NULL) {
             continue;
         }
-        node->fill = color;
-        AfStyle *style = af_project_find_node_style(&editor->project, node->id);
-        if (style != NULL) {
-            style->fill = af_paint_solid(color);
-            (void)af_style_mark_paint_changed(style);
+        if (key != NULL) {
+            key->keyframe.value[0] = color.r;
+            key->keyframe.value[1] = color.g;
+            key->keyframe.value[2] = color.b;
+            key->keyframe.value[3] = color.a;
+        } else {
+            AfStyle *style = af_project_find_node_style(&editor->project, node->id);
+            node->fill = color;
+            if (style != NULL) {
+                style->fill = af_paint_solid(color);
+                (void)af_style_mark_paint_changed(style);
+            }
         }
+    }
+    if (editor->transform_drag_key_count != 0U) {
+        af_editor_update_preview(editor);
     }
     af_editor_mark_dirty(editor);
 }
 
 static void af_editor_update_color_picker(AfEditorState *editor, int width, float x, float y) {
-    AfSceneNode *node = af_scene_find(&editor->project.scene, editor->selected_id);
+    const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
     const float panel_x = (float)width - editor->right_width + 18.0F;
     float hue = editor->color_hue;
     float saturation = 0.0F;
@@ -210,8 +283,10 @@ static void af_editor_nudge(AfEditorState *editor, float x, float y) {
         if (node == NULL) {
             continue;
         }
-        position = key_drag_index < 0 ? node->local_transform.position
-                                      : editor->transform_drag_key_starts[(uint32_t)key_drag_index];
+        position = key_drag_index < 0
+                       ? node->local_transform.position
+                       : (AfVec2){editor->transform_drag_key_starts[(uint32_t)key_drag_index][0],
+                                  editor->transform_drag_key_starts[(uint32_t)key_drag_index][1]};
         position.x += x;
         position.y += y;
         if (editor->snapping) {
@@ -520,6 +595,9 @@ static bool af_editor_handle_image_inspector(AfEditorState *editor, int width, f
     }
     if (y >= 150.0F && y < 150.0F + 5.0F * 38.0F) {
         const uint32_t row = (uint32_t)((y - 150.0F) / 38.0F);
+        if (y - (150.0F + (float)row * 38.0F) > 32.0F) {
+            return true;
+        }
         if (row == 0U) {
             asset->trim_enabled = !asset->trim_enabled;
             if (asset->trim_enabled) {
@@ -552,14 +630,19 @@ static bool af_editor_handle_image_inspector(AfEditorState *editor, int width, f
     }
     if (y >= 375.0F && y < 375.0F + 4.0F * 36.0F) {
         const uint32_t row = (uint32_t)((y - 375.0F) / 36.0F);
+        const bool decrease = x >= panel_x && x <= panel_x + 34.0F;
+        const bool increase = x >= panel_x + 38.0F && x <= panel_x + 72.0F;
         uint16_t *value = row == 0U   ? &binding->borders.left
                           : row == 1U ? &binding->borders.top
                           : row == 2U ? &binding->borders.right
                                       : &binding->borders.bottom;
         const uint32_t maximum = row == 0U || row == 2U ? asset->width : asset->height;
-        if (x < panel_x + 35.0F) {
+        if (y - (375.0F + (float)row * 36.0F) > 28.0F || (!decrease && !increase)) {
+            return true;
+        }
+        if (decrease) {
             *value = *value == 0U ? 0U : (uint16_t)(*value - 1U);
-        } else if (x < panel_x + 75.0F && *value < UINT16_MAX && *value < maximum) {
+        } else if (*value < UINT16_MAX && *value < maximum) {
             *value = (uint16_t)(*value + 1U);
         }
         asset->sprite_borders = binding->borders;
@@ -570,7 +653,7 @@ static bool af_editor_handle_image_inspector(AfEditorState *editor, int width, f
         af_editor_status(editor, "Nine-slice border updated");
         return true;
     }
-    if (y >= 548.0F && y < 578.0F) {
+    if (y >= 548.0F && y < 580.0F) {
         if (sequence == NULL) {
             (void)af_editor_create_flipbook(editor);
         } else {
@@ -578,15 +661,20 @@ static bool af_editor_handle_image_inspector(AfEditorState *editor, int width, f
         }
         return true;
     }
-    if (sequence != NULL && y >= 586.0F && y < 612.0F) {
-        binding->frames_per_second = af_editor_clamp(
-            binding->frames_per_second + (x < panel_x + 35.0F ? -1.0F : 1.0F), 1.0F, 120.0F);
+    if (sequence != NULL && y >= 586.0F && y < 614.0F) {
+        const bool decrease = x >= panel_x && x <= panel_x + 34.0F;
+        const bool increase = x >= panel_x + 38.0F && x <= panel_x + 72.0F;
+        if (!decrease && !increase) {
+            return true;
+        }
+        binding->frames_per_second =
+            af_editor_clamp(binding->frames_per_second + (decrease ? -1.0F : 1.0F), 1.0F, 120.0F);
         ++editor->project.image_data.generation;
         af_editor_mark_dirty(editor);
         af_editor_status(editor, "Flipbook speed updated");
         return true;
     }
-    if (sequence != NULL && y >= 622.0F && y < 650.0F) {
+    if (sequence != NULL && y >= 622.0F && y < 652.0F) {
         binding->loop = !binding->loop;
         ++editor->project.image_data.generation;
         af_editor_mark_dirty(editor);
@@ -617,6 +705,8 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
         if (editor->selection_drag_count == 0U) {
             return;
         }
+        editor->selected_property = AF_PROPERTY_FILL_COLOR;
+        af_editor_begin_transform_key_drag(editor, AF_PROPERTY_FILL_COLOR);
         if (y >= AF_EDITOR_COLOR_ALPHA_Y) {
             editor->drag_mode = AF_EDITOR_DRAG_COLOR_ALPHA;
         } else if (x >= panel_x + AF_EDITOR_COLOR_HUE_X) {
@@ -628,7 +718,7 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
         return;
     }
     if (emitter != NULL && y >= AF_EDITOR_PARTICLE_PAGE_Y &&
-        y < AF_EDITOR_PARTICLE_PAGE_Y + 23.0F && x >= panel_x) {
+        y < AF_EDITOR_PARTICLE_PAGE_Y + 26.0F && x >= panel_x) {
         const uint32_t page = (uint32_t)((x - panel_x) / 32.0F);
         if (page < AF_EDITOR_PARTICLE_PAGE_COUNT) {
             editor->particle_page = page;
@@ -641,10 +731,12 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
         AfProjectNodeSnapshot before = {0};
         const uint32_t row =
             (uint32_t)((y - AF_EDITOR_PARTICLE_ROW_Y) / AF_EDITOR_PARTICLE_ROW_STEP);
-        if (x >= panel_x && x <= panel_x + 65.0F && row < AF_EDITOR_PARTICLE_ROW_COUNT &&
+        const bool decrease = x >= panel_x && x <= panel_x + 31.0F;
+        const bool increase = x >= panel_x + 34.0F && x <= panel_x + 65.0F;
+        if ((decrease || increase) && row < AF_EDITOR_PARTICLE_ROW_COUNT &&
             af_project_snapshot(&editor->project, editor->selected_id, &before) ==
                 AF_RESULT_SUCCESS) {
-            af_editor_adjust_particle(editor, emitter, row, x < panel_x + 31.0F);
+            af_editor_adjust_particle(editor, emitter, row, decrease);
             if (af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_PARTICLE, true) ==
                 AF_RESULT_SUCCESS) {
                 af_editor_mark_dirty(editor);
@@ -655,14 +747,16 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
     }
     if (y >= AF_EDITOR_STYLE_ROW_Y && y <= AF_EDITOR_STYLE_ROW_Y + 28.0F) {
         const int action = (int)((x - panel_x) / 38.0F);
-        if (action >= 0 && action < 6) {
+        const float action_x = panel_x + (float)action * 38.0F;
+        if (action >= 0 && action < 6 && x >= action_x && x <= action_x + 34.0F) {
             af_editor_modify_style(editor, (uint32_t)action);
         }
         return;
     }
     if (y >= AF_EDITOR_LAYOUT_ROW_Y && y <= AF_EDITOR_LAYOUT_ROW_Y + 28.0F) {
         const int action = (int)((x - panel_x) / 38.0F);
-        if (action >= 0 && action < 6) {
+        const float action_x = panel_x + (float)action * 38.0F;
+        if (action >= 0 && action < 6 && x >= action_x && x <= action_x + 34.0F) {
             af_editor_modify_layout(editor, (uint32_t)action);
         }
         return;
@@ -670,8 +764,13 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
     for (int row = 0; row < 4; ++row) {
         const float row_y =
             AF_EDITOR_INSPECTOR_SCALAR_Y + (float)row * AF_EDITOR_INSPECTOR_SCALAR_STEP;
-        if (y >= row_y && y <= row_y + 26.0F) {
-            const float amount = x < panel_x + 35.0F ? -1.0F : 1.0F;
+        if (y >= row_y && y <= row_y + 28.0F) {
+            const bool decrease = x >= panel_x && x <= panel_x + 34.0F;
+            const bool increase = x >= panel_x + 38.0F && x <= panel_x + 72.0F;
+            const float amount = decrease ? -1.0F : 1.0F;
+            if (!decrease && !increase) {
+                return;
+            }
             if (row == 0) {
                 af_editor_modify_scalar(editor, AF_EDITOR_MERGE_OPACITY, amount * 0.05F, 0);
             } else if (row == 1) {

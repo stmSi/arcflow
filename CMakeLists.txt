@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(arcflow VERSION 0.1.0 LANGUAGES C)
+project(arcflow VERSION 1.0.0 LANGUAGES C)
 
 include(GNUInstallDirs)
 
@@ -23,6 +23,35 @@ if(NOT ARCFLOW_PROJECT_FORMAT_DEFINITION)
 endif()
 string(REGEX REPLACE ".* ([0-9]+)U$" "\\1" ARCFLOW_PROJECT_FORMAT_VERSION
     "${ARCFLOW_PROJECT_FORMAT_DEFINITION}")
+
+function(arcflow_read_unsigned_define source_file definition_name output_variable)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source_file}")
+    file(STRINGS "${source_file}" definition
+        REGEX "^#define ${definition_name} [0-9]+U$")
+    if(NOT definition)
+        message(FATAL_ERROR "${definition_name} is missing from ${source_file}")
+    endif()
+    string(REGEX REPLACE ".* ([0-9]+)U$" "\\1" value "${definition}")
+    set(${output_variable} "${value}" PARENT_SCOPE)
+endfunction()
+
+arcflow_read_unsigned_define(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/arcflow/arcflow_version.h"
+    AF_RUNTIME_VERSION ARCFLOW_RUNTIME_VERSION)
+arcflow_read_unsigned_define(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/arcflow/arcflow_version.h"
+    AF_PACKAGE_FORMAT_VERSION ARCFLOW_PACKAGE_FORMAT_VERSION)
+arcflow_read_unsigned_define(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/arcflow/arcflow_host_sdk.h"
+    AF_HOST_SDK_VERSION_MAJOR ARCFLOW_HOST_SDK_VERSION_MAJOR)
+arcflow_read_unsigned_define(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/arcflow/arcflow_host_sdk.h"
+    AF_HOST_SDK_VERSION_MINOR ARCFLOW_HOST_SDK_VERSION_MINOR)
+arcflow_read_unsigned_define(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/arcflow/arcflow_host_sdk.h"
+    AF_HOST_SDK_VERSION_PATCH ARCFLOW_HOST_SDK_VERSION_PATCH)
+set(ARCFLOW_HOST_SDK_VERSION
+    "${ARCFLOW_HOST_SDK_VERSION_MAJOR}.${ARCFLOW_HOST_SDK_VERSION_MINOR}.${ARCFLOW_HOST_SDK_VERSION_PATCH}")
 
 option(ARCFLOW_ENABLE_VALIDATION "Enable Vulkan validation in debug builds" ON)
 option(ARCFLOW_BUILD_GPU_TESTS "Build Vulkan smoke tests" ON)
@@ -355,8 +384,16 @@ target_include_directories(arcflow_beta_performance_tests PRIVATE src include)
 target_link_libraries(arcflow_beta_performance_tests PRIVATE arcflow_runtime arcflow_project
     SDL3::SDL3-static)
 add_test(NAME arcflow_beta_performance_tests COMMAND arcflow_beta_performance_tests)
-set_tests_properties(arcflow_beta_performance_tests PROPERTIES LABELS "beta;performance"
+set_tests_properties(arcflow_beta_performance_tests PROPERTIES
+    LABELS "beta;production;performance;long-duration"
     TIMEOUT 120)
+
+add_executable(arcflow_release_tests tests/test_release.c)
+target_include_directories(arcflow_release_tests PRIVATE src include)
+target_link_libraries(arcflow_release_tests PRIVATE arcflow_runtime arcflow_project
+    SDL3::SDL3-static)
+add_test(NAME arcflow_release_tests COMMAND arcflow_release_tests)
+set_tests_properties(arcflow_release_tests PROPERTIES LABELS "production;release" TIMEOUT 120)
 
 add_executable(arcflow_parser_fuzz_tests tests/test_parser_fuzz.c)
 target_include_directories(arcflow_parser_fuzz_tests PRIVATE src include)
@@ -452,7 +489,7 @@ add_custom_target(arcflow_ci
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
     DEPENDS arcflow_tests arcflow_performance_tests arcflow_localization_tests
             arcflow_stability_tests arcflow_beta_performance_tests arcflow_parser_fuzz_tests
-            arcflow_import_fuzz_tests
+            arcflow_import_fuzz_tests arcflow_release_tests
             arcflow_interchange_tests arcflow_editor_workflow_tests
             arcflow_editor_recovery_tests arcflow_collaboration_tests arcflow_compiler
             arcflow_platform_tests arcflow_update_tests arcflow_onboarding_tests
@@ -481,7 +518,7 @@ set(ARCFLOW_OWN_TARGETS
     arcflow_compiler arcflow_player_app arcflow_player arcflow_editor arcflow_tests
     arcflow_performance_tests
     arcflow_stability_tests arcflow_beta_performance_tests arcflow_parser_fuzz_tests
-    arcflow_import_fuzz_tests
+    arcflow_import_fuzz_tests arcflow_release_tests
     arcflow_localization_tests
     arcflow_interchange_tests
     arcflow_editor_workflow_tests
@@ -552,6 +589,10 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/test/api/fonts/NotoSans-Bold.ttf"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/fonts")
 install(FILES "${ARCFLOW_NOTICE_FILE}" DESTINATION ".")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/arcflow")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/arcflow")
 
 configure_file(cmake/uninstall.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake" @ONLY)
 add_custom_target(uninstall
@@ -655,4 +696,34 @@ if(NOT WIN32)
     if(TARGET arcflow_symbols)
         add_dependencies(arcflow_reproducibility arcflow_symbols)
     endif()
+endif()
+
+set(ARCFLOW_PORTABLE_PACKAGE
+    "${CMAKE_CURRENT_BINARY_DIR}/${ARCFLOW_BINARY_PACKAGE_FILE_NAME}${ARCFLOW_UPDATE_PACKAGE_EXTENSION}")
+set(ARCFLOW_EXPECT_SYMBOLS OFF)
+if(TARGET arcflow_symbols)
+    set(ARCFLOW_EXPECT_SYMBOLS ON)
+endif()
+add_custom_target(arcflow_production_acceptance
+    COMMAND "${CMAKE_COMMAND}"
+        "-DARCFLOW_SOURCE_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DARCFLOW_BUILD_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+        "-DARCFLOW_PRODUCT_VERSION=${PROJECT_VERSION}"
+        "-DARCFLOW_RELEASE_CHANNEL=${ARCFLOW_RELEASE_CHANNEL}"
+        "-DARCFLOW_SOURCE_REVISION=${ARCFLOW_SOURCE_REVISION}"
+        "-DARCFLOW_BUILD_EPOCH=${ARCFLOW_BUILD_EPOCH}"
+        "-DARCFLOW_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}"
+        "-DARCFLOW_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}"
+        "-DARCFLOW_PROJECT_FORMAT_VERSION=${ARCFLOW_PROJECT_FORMAT_VERSION}"
+        "-DARCFLOW_PACKAGE_FORMAT_VERSION=${ARCFLOW_PACKAGE_FORMAT_VERSION}"
+        "-DARCFLOW_RUNTIME_VERSION=${ARCFLOW_RUNTIME_VERSION}"
+        "-DARCFLOW_HOST_SDK_VERSION=${ARCFLOW_HOST_SDK_VERSION}"
+        "-DARCFLOW_PORTABLE_PACKAGE=${ARCFLOW_PORTABLE_PACKAGE}"
+        "-DARCFLOW_NOTICE_FILE=${ARCFLOW_NOTICE_FILE}"
+        "-DARCFLOW_EXPECT_SYMBOLS=${ARCFLOW_EXPECT_SYMBOLS}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_production_release.cmake"
+    DEPENDS arcflow_ci arcflow_release_bundle
+    USES_TERMINAL)
+if(TARGET arcflow_reproducibility)
+    add_dependencies(arcflow_production_acceptance arcflow_reproducibility)
 endif()

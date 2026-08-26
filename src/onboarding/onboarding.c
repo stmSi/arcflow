@@ -168,7 +168,8 @@ static const AfOnboardingGuide af_onboarding_guides[AF_ONBOARDING_TOPIC_COUNT] =
         .summary = "Current constraints are explicit so projects can plan around them.",
         .steps = {"Primary validated targets are Linux x64 and Windows x64; macOS is later.",
                   "Cloud collaboration is not built in; use standard source control and locks.",
-                  "Lottie import and several advanced SVG/VFX export features remain partial.",
+                  "Lottie import remains unavailable. Lottie JSON and dotLottie export cover core "
+                  "vector motion; advanced SVG/VFX features may require GIF, MP4, or .afp.",
                   "Interactive state-machine authoring is less complete than runtime playback.",
                   "Automatic updates are opt-in and require a host-provided signature verifier.",
                   "GPU behavior still depends on Vulkan driver and feature support."},

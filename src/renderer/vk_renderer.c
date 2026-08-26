@@ -1,5 +1,6 @@
 #include "renderer/vk_renderer.h"
 
+#include "arcflow/arcflow_build_info.h"
 #include "core/hash.h"
 #include "core/log.h"
 #include "core/png.h"
@@ -22,7 +23,7 @@
 #define AF_MAX_SURFACE_FORMATS 64U
 #define AF_MAX_PRESENT_MODES 32U
 #define AF_MAX_QUEUE_FAMILIES 64U
-#define AF_MAX_GPU_PATH_VERTICES (AF_MAX_PATH_TESSELLATED_VERTICES * 2U)
+#define AF_MAX_GPU_PATH_VERTICES (AF_MAX_PATH_TESSELLATED_VERTICES * 4U)
 #define AF_MAX_RENDER_ITEMS (AF_MAX_NODES * 2U)
 #define AF_MAX_GPU_IMAGE_VERTICES (AF_MAX_NODES * 54U)
 #define AF_CAPTURE_PATH_CAPACITY 1024U
@@ -165,6 +166,17 @@ struct AfVkRenderer {
 
 static void af_vk_destroy_image_pipeline(AfVkRenderer *renderer);
 static AfResult af_vk_create_image_pipeline(AfVkRenderer *renderer);
+
+static bool af_vk_format_is_srgb(VkFormat format) {
+    return format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
+}
+
+static float af_vk_srgb_to_linear_component(float component) {
+    if (component <= 0.04045F) {
+        return component / 12.92F;
+    }
+    return powf((component + 0.055F) / 1.055F, 2.4F);
+}
 
 // clang-format off
 #include "renderer/vk_renderer_device.inc"

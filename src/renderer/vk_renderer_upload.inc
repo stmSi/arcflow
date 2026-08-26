@@ -42,10 +42,18 @@ static AfResult af_vk_update_path_cache(AfVkRenderer *renderer, const AfPathData
     result = af_path_tessellate(data, path, 0.25F, renderer->path_scratch,
                                 renderer->path_staging_vertices, AF_MAX_PATH_TESSELLATED_VERTICES,
                                 &vertex_count);
-    if (result != AF_RESULT_SUCCESS ||
-        vertex_count >
-            AF_MAX_GPU_PATH_VERTICES - (renderer->cached_path_vertex_count - cache->vertex_count)) {
-        return result == AF_RESULT_SUCCESS ? AF_RESULT_LIMIT_EXCEEDED : result;
+    if (result != AF_RESULT_SUCCESS) {
+        af_log(AF_LOG_ERROR, "Path %llu tessellation failed: %s", (unsigned long long)path->id,
+               af_result_string(result));
+        return result;
+    }
+    if (vertex_count >
+        AF_MAX_GPU_PATH_VERTICES - (renderer->cached_path_vertex_count - cache->vertex_count)) {
+        af_log(AF_LOG_ERROR,
+               "Path cache vertex limit: path=%llu new=%u cached=%u previous=%u limit=%u",
+               (unsigned long long)path->id, vertex_count, renderer->cached_path_vertex_count,
+               cache->vertex_count, AF_MAX_GPU_PATH_VERTICES);
+        return AF_RESULT_LIMIT_EXCEEDED;
     }
     if (vertex_count != cache->vertex_count) {
         AfVec2 *vertices = NULL;
@@ -357,9 +365,15 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                 return AF_RESULT_INVALID_ARGUMENT;
             }
             result = af_vk_update_path_cache(renderer, scene->paths, path, &cache);
-            if (result != AF_RESULT_SUCCESS ||
-                cache->vertex_count > AF_MAX_GPU_PATH_VERTICES - path_vertex_count) {
-                return result == AF_RESULT_SUCCESS ? AF_RESULT_LIMIT_EXCEEDED : result;
+            if (result != AF_RESULT_SUCCESS) {
+                return result;
+            }
+            if (cache->vertex_count > AF_MAX_GPU_PATH_VERTICES - path_vertex_count) {
+                af_log(AF_LOG_ERROR,
+                       "Frame path vertex limit: path=%llu path_vertices=%u incoming=%u limit=%u",
+                       (unsigned long long)path->id, path_vertex_count, cache->vertex_count,
+                       AF_MAX_GPU_PATH_VERTICES);
+                return AF_RESULT_LIMIT_EXCEEDED;
             }
             for (uint32_t vertex_index = 0U; vertex_index < cache->vertex_count; ++vertex_index) {
                 AfColor color = node->fill;

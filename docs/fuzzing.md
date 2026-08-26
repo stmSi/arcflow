@@ -1,6 +1,6 @@
 # Deterministic fuzzing
 
-Arcflow treats editable projects and runtime packages as untrusted input. The beta CI gate builds
+Arcflow treats editable projects and runtime packages as untrusted input. The production CI gate builds
 all six shipped project templates, serializes and release-compiles them, and applies deterministic
 bit, byte, truncation, extension, range, deletion, boundary-value, and embedded-zero mutations.
 

@@ -315,8 +315,8 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
     }
     if (mouse.y >= timeline_top) {
         const float local_x = mouse.x - editor->left_width;
-        if (mouse.y < timeline_top + 40.0F) {
-            if (local_x >= 10.0F && local_x < 36.0F) {
+        if (mouse.y < timeline_top + 42.0F) {
+            if (local_x >= 10.0F && local_x < 56.0F) {
                 return (AfEditorTooltip){
                     .id = UINT64_C(0x30000),
                     .title = "Play / Pause",
@@ -324,16 +324,16 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                     .details = "Playback advances the playhead and respects the clip loop region.",
                     .shortcut = "Shortcut: Space"};
             }
-            if (local_x >= 42.0F && local_x < 68.0F) {
+            if (local_x >= 62.0F && local_x < 114.0F) {
                 return (AfEditorTooltip){
                     .id = UINT64_C(0x30001),
-                    .title = "Stop",
+                    .title = "Reset Preview",
                     .summary = "Stop preview and return to time zero.",
                     .details =
                         "The scene updates immediately to the first evaluated animation frame.",
                     .shortcut = "Shortcut: Home moves the playhead to zero"};
             }
-            if (local_x >= 73.0F && local_x < 107.0F) {
+            if (local_x >= 120.0F && local_x < 178.0F) {
                 return (AfEditorTooltip){
                     .id = UINT64_C(0x30002),
                     .title = "Curve Editor",
@@ -341,25 +341,24 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                     .details = "Curve view exposes cubic Bézier tangent handles for selected keys.",
                     .shortcut = "Shortcut: F6"};
             }
-            if (local_x >= 116.0F && local_x < 296.0F) {
-                const uint32_t property = (uint32_t)((local_x - 116.0F) / 20.0F);
-                static const char *const titles[] = {
-                    "Position Track",       "Rotation Track",
-                    "Scale Track",          "Opacity Track",
-                    "Fill Track",           "Corner Radius Track",
-                    "Path Anchor Track",    "Incoming Handle Track",
-                    "Outgoing Handle Track"};
-                if (property < 9U) {
-                    return (AfEditorTooltip){
-                        .id = UINT64_C(0x30100) + property,
-                        .title = titles[property],
-                        .summary = "Choose the property used by new keyframes.",
-                        .details = property < 6U ? "The active object, clip, and property identify "
-                                                   "the animation track."
-                                                 : "Each vector command index owns independent "
-                                                   "anchor and Bézier handle tracks.",
-                        .shortcut = "Shortcut: K adds a key at the playhead"};
-                }
+            if (local_x >= 188.0F && local_x < 390.0F) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x30100) + (uint64_t)editor->selected_property,
+                    .title = "Animated Property",
+                    .summary = "Choose which property the key button records.",
+                    .details = "Use the arrows to cycle through properties valid for the selected "
+                               "object or vector point.",
+                    .shortcut = "Canvas handles choose position, scale, skew, or rotation for you"};
+            }
+            if (local_x >= 398.0F && local_x < 514.0F) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x30120),
+                    .title = "Add or Update Keyframe",
+                    .summary = "Record the selected property at the playhead.",
+                    .details =
+                        "After the first key, move the playhead and drag the object; Arcflow "
+                        "creates the next key automatically.",
+                    .shortcut = "Shortcut: K"};
             }
             for (uint32_t index = 0U; index < editor->project.clip_count && index < 8U; ++index) {
                 const float x = center_right - 74.0F * (float)(index + 1U);
@@ -379,7 +378,8 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                 .id = UINT64_C(0x30300),
                 .title = "Timeline Ruler",
                 .summary = "Click or drag to scrub the playhead.",
-                .details = "Drag green loop handles to set the bounded playback region.",
+                .details = "Drag the upper red marker to scrub. In the lower green lane, drag an "
+                           "endpoint to resize the loop or drag the bar to move it.",
                 .shortcut = "Wheel zooms; Shift+wheel pans"};
         }
         return (AfEditorTooltip){
@@ -389,8 +389,9 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                                              : "Select, box-select, and move keyframes.",
             .details = editor->curve_visible
                            ? "Cubic keys expose bounded in and out tangent controls."
-                           : "Ctrl toggles key selection; drag moves keys with optional snapping.",
-            .shortcut = "Right click for keyframe actions"};
+                           : "Drag the red playhead line anywhere along its full height to scrub. "
+                             "Ctrl toggles key selection; dragging a key moves it.",
+            .shortcut = "Drag playhead to scrub; right click for keyframe actions"};
     }
     if (mouse.x < editor->left_width && editor->asset_browser_visible &&
         mouse.y >= af_editor_asset_browser_top(editor, height)) {

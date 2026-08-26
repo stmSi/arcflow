@@ -16,6 +16,7 @@
 #include "performance/metrics.h"
 #include "platform/platform_sdl.h"
 #include "project/image_import.h"
+#include "project/interchange.h"
 #include "project/project.h"
 #include "project/project_templates.h"
 #include "renderer/vk_renderer.h"
@@ -39,11 +40,13 @@
 #define AF_EDITOR_MENU_HEIGHT 28.0F
 #define AF_EDITOR_TOOLBAR_HEIGHT 72.0F
 #define AF_EDITOR_STATUS_HEIGHT 28.0F
-#define AF_EDITOR_TIMELINE_DEFAULT_HEIGHT 270.0F
-#define AF_EDITOR_TIMELINE_MIN_HEIGHT 170.0F
-#define AF_EDITOR_TIMELINE_RULER_HEIGHT 54.0F
-#define AF_EDITOR_TIMELINE_TRACK_HEIGHT 26.0F
-#define AF_EDITOR_TIMELINE_HEADER_WIDTH 154.0F
+#define AF_EDITOR_TIMELINE_DEFAULT_HEIGHT 300.0F
+#define AF_EDITOR_TIMELINE_MIN_HEIGHT 200.0F
+#define AF_EDITOR_TIMELINE_RULER_HEIGHT 72.0F
+#define AF_EDITOR_TIMELINE_TRACK_HEIGHT 34.0F
+#define AF_EDITOR_TIMELINE_HEADER_WIDTH 190.0F
+#define AF_EDITOR_PATH_ACTION_Y 32.0F
+#define AF_EDITOR_PATH_ACTION_HEIGHT 34.0F
 #define AF_EDITOR_ROW_HEIGHT 28.0F
 #define AF_EDITOR_MIN_DOCK_WIDTH 150.0F
 #define AF_EDITOR_MIN_VIEW_WIDTH 240.0F
@@ -92,6 +95,7 @@ typedef enum AfEditorDragMode {
     AF_EDITOR_DRAG_PLAYHEAD,
     AF_EDITOR_DRAG_LOOP_START,
     AF_EDITOR_DRAG_LOOP_END,
+    AF_EDITOR_DRAG_LOOP_RANGE,
     AF_EDITOR_DRAG_KEYFRAMES,
     AF_EDITOR_DRAG_KEY_BOX,
     AF_EDITOR_DRAG_TANGENT_IN,
@@ -140,7 +144,13 @@ typedef enum AfEditorDialogAction {
     AF_EDITOR_DIALOG_SAVE_PROJECT_AS,
     AF_EDITOR_DIALOG_IMPORT_IMAGE,
     AF_EDITOR_DIALOG_REPAIR_IMAGE,
-    AF_EDITOR_DIALOG_UPDATE_MANIFEST
+    AF_EDITOR_DIALOG_UPDATE_MANIFEST,
+    AF_EDITOR_DIALOG_EXPORT_PACKAGE,
+    AF_EDITOR_DIALOG_EXPORT_SVG,
+    AF_EDITOR_DIALOG_EXPORT_LOTTIE,
+    AF_EDITOR_DIALOG_EXPORT_DOTLOTTIE,
+    AF_EDITOR_DIALOG_EXPORT_GIF,
+    AF_EDITOR_DIALOG_EXPORT_MP4
 } AfEditorDialogAction;
 
 typedef struct AfEditorContextMenuInfo {
@@ -232,7 +242,7 @@ typedef struct AfEditorState {
     uint32_t selection_drag_count;
     uint64_t transform_drag_node_ids[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     uint64_t transform_drag_key_ids[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
-    AfVec2 transform_drag_key_starts[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    float transform_drag_key_starts[AF_EDITOR_COMMAND_MAX_SNAPSHOTS][4];
     AfProjectKeyframeSnapshot transform_drag_key_before[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     bool transform_drag_key_created[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     uint32_t transform_drag_key_count;
@@ -270,6 +280,7 @@ typedef struct AfEditorState {
     bool onboarding_smoke;
     bool vector_animation_smoke_prepared;
     bool dialog_active;
+    bool export_panel_visible;
     bool help_overlay;
     bool shortcuts_overlay;
     bool asset_browser_visible;
@@ -698,7 +709,7 @@ int af_editor_run(int argument_count, char **arguments) {
             (void)af_platform_query_capabilities(&editor.window, &editor.platform_capabilities);
             af_editor_status(&editor, "Programmatic display, DPI and input capability capture");
         } else if (editor.workflow_smoke) {
-            const uint32_t stage = (editor.rendered_frames / 2U) % 9U;
+            const uint32_t stage = (editor.rendered_frames / 2U) % 10U;
             editor.command_palette.open = false;
             editor.profiler_visible = false;
             editor.validation_visible = false;
@@ -708,6 +719,7 @@ int af_editor_run(int argument_count, char **arguments) {
             editor.preset_panel_visible = false;
             editor.shortcuts_overlay = false;
             editor.help_overlay = false;
+            editor.export_panel_visible = false;
             if (stage == 0U) {
                 (void)af_editor_command_palette_open(&editor.command_palette,
                                                      AF_EDITOR_ACTION_CONTEXT_ALL);
@@ -728,10 +740,12 @@ int af_editor_run(int argument_count, char **arguments) {
                 editor.preset_panel_visible = true;
             } else if (stage == 7U) {
                 editor.shortcuts_overlay = true;
-            } else {
+            } else if (stage == 8U) {
                 editor.help_overlay = true;
+            } else {
+                editor.export_panel_visible = true;
             }
-            af_editor_status(&editor, "Programmatic Milestone 24 workflow capture");
+            af_editor_status(&editor, "Programmatic workflow and export capture");
         } else if (editor.menu_smoke) {
             const uint32_t menu = (editor.rendered_frames / 2U) % (uint32_t)AF_EDITOR_MENU_HELP;
             editor.top_menu = (AfEditorTopMenu)(AF_EDITOR_MENU_FILE + menu);

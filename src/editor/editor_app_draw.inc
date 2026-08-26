@@ -27,6 +27,44 @@ static void af_editor_add_rect(AfEditorState *editor, float x, float y, float wi
                         (AfVec2){width, height}, color, 0.0F, layer);
 }
 
+static bool af_editor_hovered_rect(const AfEditorState *editor, float x, float y, float width,
+                                   float height) {
+    return editor->mouse_position.x >= x && editor->mouse_position.x <= x + width &&
+           editor->mouse_position.y >= y && editor->mouse_position.y <= y + height;
+}
+
+static void af_editor_add_button_rect(AfEditorState *editor, float x, float y, float width,
+                                      float height, AfColor color, int32_t layer) {
+    const bool hovered = af_editor_hovered_rect(editor, x, y, width, height);
+    if (hovered) {
+        color.r = af_editor_clamp(color.r + 0.08F, 0.0F, 1.0F);
+        color.g = af_editor_clamp(color.g + 0.08F, 0.0F, 1.0F);
+        color.b = af_editor_clamp(color.b + 0.08F, 0.0F, 1.0F);
+    }
+    af_editor_add_rect(editor, x, y, width, height, color, layer);
+    if (hovered) {
+        af_editor_add_rect(editor, x, y + height - 2.0F, width, 2.0F,
+                           (AfColor){0.4F, 0.78F, 1.0F, 1.0F}, layer + 1);
+    }
+}
+
+static void af_editor_add_button_rounded(AfEditorState *editor, float x, float y, float width,
+                                         float height, AfColor color, float radius, int32_t layer) {
+    const bool hovered = af_editor_hovered_rect(editor, x, y, width, height);
+    if (hovered) {
+        color.r = af_editor_clamp(color.r + 0.08F, 0.0F, 1.0F);
+        color.g = af_editor_clamp(color.g + 0.08F, 0.0F, 1.0F);
+        color.b = af_editor_clamp(color.b + 0.08F, 0.0F, 1.0F);
+    }
+    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
+                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = y},
+                        (AfVec2){width, height}, color, radius, layer);
+    if (hovered) {
+        af_editor_add_rect(editor, x + radius, y + height - 2.0F, width - radius * 2.0F, 2.0F,
+                           (AfColor){0.4F, 0.78F, 1.0F, 1.0F}, layer + 1);
+    }
+}
+
 static void af_editor_add_line(AfEditorState *editor, AfVec2 start, AfVec2 end, float thickness,
                                AfColor color, int32_t layer) {
     const float x = end.x - start.x;

@@ -13,6 +13,9 @@
 #define AF_INTERCHANGE_DIAGNOSTIC_MESSAGE_CAPACITY 160U
 #define AF_INTERCHANGE_MAX_EASING_TEXT 128U
 #define AF_INTERCHANGE_MAX_SPRITE_PADDING 256U
+#define AF_INTERCHANGE_DEFAULT_FRAME_RATE 60.0F
+
+struct AfProject;
 
 typedef enum AfInterchangeDiagnosticSeverity {
     AF_INTERCHANGE_DIAGNOSTIC_INFO = 0,
@@ -94,6 +97,10 @@ typedef struct AfSpriteSheetPlan {
     uint32_t frame_count;
 } AfSpriteSheetPlan;
 
+typedef struct AfLottieExportOptions {
+    float frame_rate;
+} AfLottieExportOptions;
+
 typedef AfResult (*AfInterchangeStageCallback)(void *user_data, AfAllocator *allocator,
                                                void **out_staging,
                                                AfInterchangeDiagnostics *diagnostics);
@@ -128,6 +135,13 @@ AfResult af_interchange_export_sprite_sheet_png(const char *path,
 AfResult af_interchange_export_static_svg(const AfScene *scene, AfVec2 canvas_size, char *output,
                                           size_t output_capacity, size_t *out_size,
                                           AfInterchangeDiagnostics *diagnostics);
+AfResult af_interchange_export_lottie_json(const struct AfProject *project, uint64_t clip_id,
+                                           const AfLottieExportOptions *options, char *output,
+                                           size_t output_capacity, size_t *out_size,
+                                           AfInterchangeDiagnostics *diagnostics);
+AfResult af_interchange_pack_dotlottie(const char *lottie_json, size_t lottie_size, uint8_t *output,
+                                       size_t output_capacity, size_t *out_size,
+                                       AfInterchangeDiagnostics *diagnostics);
 AfResult af_interchange_transaction_execute(AfAllocator *allocator, void *user_data,
                                             AfInterchangeStageCallback stage,
                                             AfInterchangeCommitCallback commit,

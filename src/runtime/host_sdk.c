@@ -58,6 +58,13 @@ static uint32_t af_host_sdk_read_u32(const uint8_t *bytes) {
            ((uint32_t)bytes[3] << 24U);
 }
 
+static int af_host_sdk_version_component_compare(uint32_t requested, uint32_t current) {
+    if (requested == current) {
+        return 0;
+    }
+    return requested < current ? -1 : 1;
+}
+
 AfResult af_host_sdk_create(const AfHostSdkCreateInfo *create_info, AfHostSdk **out_sdk) {
     AfHostSdk *sdk = NULL;
     bool has_vulkan = false;
@@ -170,10 +177,15 @@ AfResult af_host_sdk_query_version(AfHostSdkVersion *out_version) {
 }
 
 bool af_host_sdk_semantic_version_compatible(uint32_t major, uint32_t minor, uint32_t patch) {
-    if (major != AF_HOST_SDK_VERSION_MAJOR || minor != AF_HOST_SDK_VERSION_MINOR) {
+    const int minor_comparison =
+        af_host_sdk_version_component_compare(minor, AF_HOST_SDK_VERSION_MINOR);
+    if (major != AF_HOST_SDK_VERSION_MAJOR) {
         return false;
     }
-    return patch <= AF_HOST_SDK_VERSION_PATCH;
+    if (major == 0U) {
+        return minor_comparison == 0 && patch <= AF_HOST_SDK_VERSION_PATCH;
+    }
+    return minor_comparison < 0 || (minor_comparison == 0 && patch <= AF_HOST_SDK_VERSION_PATCH);
 }
 
 AfResult af_host_sdk_query_features(const AfHostSdk *sdk, AfHostSdkFeatureQuery *out_features) {

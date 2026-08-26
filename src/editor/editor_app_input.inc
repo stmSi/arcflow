@@ -81,30 +81,28 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
     if (event->button != SDL_BUTTON_LEFT) {
         return true;
     }
-    if (event->y < top + 40.0F) {
+    if (event->y < top + 42.0F) {
         const float local_x = event->x - editor->left_width;
-        if (local_x >= 10.0F && local_x < 36.0F) {
+        if (local_x >= 10.0F && local_x < 56.0F) {
             editor->preview_playing = !editor->preview_playing;
-        } else if (local_x >= 42.0F && local_x < 68.0F) {
+            af_editor_status(editor,
+                             editor->preview_playing ? "Animation playing" : "Animation paused");
+        } else if (local_x >= 62.0F && local_x < 114.0F) {
             editor->preview_playing = false;
             editor->playhead = 0.0F;
-        } else if (local_x >= 73.0F && local_x < 107.0F) {
+            af_editor_status(editor, "Preview reset to time zero");
+        } else if (local_x >= 120.0F && local_x < 178.0F) {
             editor->curve_visible = !editor->curve_visible;
-        } else if (local_x >= 116.0F && local_x < 316.0F) {
-            const uint32_t property = (uint32_t)((local_x - 116.0F) / 20.0F);
-            const AfPath *path =
-                af_path_find_node_const(&editor->project.path_data, editor->selected_id);
-            const AfPathCommand *command =
-                path != NULL && editor->selected_path_command < path->command_count
-                    ? &editor->project.path_data
-                           .commands[path->command_start + editor->selected_path_command]
-                    : NULL;
-            if (property <= AF_PROPERTY_PATH_CONTROL_OUT &&
-                (property <= AF_PROPERTY_SKEW ||
-                 (command != NULL && command->type != AF_PATH_CLOSE &&
-                  (property == AF_PROPERTY_PATH_POINT || command->type == AF_PATH_CUBIC)))) {
-                editor->selected_property = (AfPropertyType)property;
-                af_editor_clear_key_selection(editor);
+            af_editor_status(editor, editor->curve_visible ? "Animation graph opened"
+                                                           : "Dope sheet opened");
+        } else if (local_x >= 188.0F && local_x < 220.0F) {
+            af_editor_select_adjacent_property(editor, -1);
+        } else if ((local_x >= 226.0F && local_x < 352.0F) ||
+                   (local_x >= 358.0F && local_x < 390.0F)) {
+            af_editor_select_adjacent_property(editor, 1);
+        } else if (local_x >= 398.0F && local_x < 514.0F) {
+            if (af_editor_add_keyframe(editor) != AF_RESULT_SUCCESS) {
+                af_editor_status(editor, "Select an object and an animatable property first");
             }
         } else {
             for (index = 0U; index < editor->project.clip_count && index < 8U; ++index) {
@@ -125,18 +123,33 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
     if (event->y < top + AF_EDITOR_TIMELINE_RULER_HEIGHT) {
         const float start_x = af_editor_time_to_x(editor, clip->loop_start);
         const float end_x = af_editor_time_to_x(editor, clip->loop_end);
-        if (clip->loop && fabsf(event->x - start_x) <= 7.0F) {
+        const bool in_loop_lane = event->y >= top + 58.0F;
+        if (clip->loop && in_loop_lane && fabsf(event->x - start_x) <= 7.0F) {
             editor->drag_mode = AF_EDITOR_DRAG_LOOP_START;
             (void)af_project_clip_snapshot(&editor->project, clip->id, &editor->clip_drag_before);
-        } else if (clip->loop && fabsf(event->x - end_x) <= 7.0F) {
+            af_editor_status(editor, "Drag to set the loop start");
+        } else if (clip->loop && in_loop_lane && fabsf(event->x - end_x) <= 7.0F) {
             editor->drag_mode = AF_EDITOR_DRAG_LOOP_END;
             (void)af_project_clip_snapshot(&editor->project, clip->id, &editor->clip_drag_before);
+            af_editor_status(editor, "Drag to set the loop end");
+        } else if (clip->loop && in_loop_lane && event->x > start_x && event->x < end_x) {
+            editor->drag_mode = AF_EDITOR_DRAG_LOOP_RANGE;
+            editor->drag_start_mouse = (AfVec2){event->x, event->y};
+            (void)af_project_clip_snapshot(&editor->project, clip->id, &editor->clip_drag_before);
+            af_editor_status(editor, "Drag to move the loop range");
         } else if (event->x >= ruler_x) {
             editor->drag_mode = AF_EDITOR_DRAG_PLAYHEAD;
             editor->preview_playing = false;
             editor->playhead =
                 af_editor_clamp(af_editor_x_to_time(editor, event->x), 0.0F, clip->duration);
         }
+        return true;
+    }
+    if (event->y >= top + AF_EDITOR_TIMELINE_RULER_HEIGHT + 3.0F && event->x >= ruler_x &&
+        fabsf(event->x - af_editor_time_to_x(editor, editor->playhead)) <= 8.0F) {
+        editor->drag_mode = AF_EDITOR_DRAG_PLAYHEAD;
+        editor->preview_playing = false;
+        af_editor_status(editor, "Drag the playhead to scrub animation time");
         return true;
     }
     if (editor->curve_visible) {
@@ -165,14 +178,29 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
         return true;
     }
     {
+        const uint32_t clicked_row = (uint32_t)((event->y - top - AF_EDITOR_TIMELINE_RULER_HEIGHT) /
+                                                AF_EDITOR_TIMELINE_TRACK_HEIGHT);
+        const AfProjectTrack *clicked_track = af_editor_track_at_row(editor, clicked_row);
         uint64_t hit_id = 0U;
         float hit_distance = 10.0F;
+        if (clicked_track != NULL) {
+            af_editor_select_only(editor, clicked_track->node_id);
+            editor->selected_property = clicked_track->property;
+            if (clicked_track->property >= AF_PROPERTY_PATH_POINT) {
+                editor->selected_path_command = clicked_track->element_index;
+            }
+            af_editor_status(editor, "Animation track selected");
+        }
+        if (event->x < ruler_x) {
+            af_editor_clear_key_selection(editor);
+            return true;
+        }
         for (index = 0U; index < editor->project.keyframe_count; ++index) {
             const AfProjectKeyframe *key = &editor->project.keyframes[index];
             const uint32_t row = af_editor_track_row(editor, key->track_id);
             const float x = af_editor_time_to_x(editor, key->keyframe.time);
             const float y = top + AF_EDITOR_TIMELINE_RULER_HEIGHT +
-                            (float)row * AF_EDITOR_TIMELINE_TRACK_HEIGHT + 12.0F;
+                            (float)row * AF_EDITOR_TIMELINE_TRACK_HEIGHT + 17.0F;
             const float distance = fabsf(event->x - x) + fabsf(event->y - y);
             if (row != UINT32_MAX && distance < hit_distance) {
                 hit_id = key->id;
@@ -210,7 +238,7 @@ static void af_editor_timeline_box_select(AfEditorState *editor, int height) {
         const uint32_t row = af_editor_track_row(editor, key->track_id);
         const float x = af_editor_time_to_x(editor, key->keyframe.time);
         const float y = top + AF_EDITOR_TIMELINE_RULER_HEIGHT +
-                        (float)row * AF_EDITOR_TIMELINE_TRACK_HEIGHT + 12.0F;
+                        (float)row * AF_EDITOR_TIMELINE_TRACK_HEIGHT + 17.0F;
         if (row != UINT32_MAX && x >= left && x <= right && y >= box_top && y <= bottom &&
             editor->selected_keyframe_count < AF_EDITOR_COMMAND_MAX_KEYFRAMES) {
             editor->selected_keyframes[editor->selected_keyframe_count++] = key->id;
@@ -312,6 +340,83 @@ static bool af_editor_path_mouse_down(AfEditorState *editor, int width, int heig
             editor->selected_property = AF_PROPERTY_PATH_POINT;
             return af_editor_begin_path_drag(editor, path, AF_EDITOR_DRAG_PATH_POINT);
         }
+    }
+    return false;
+}
+
+static bool af_editor_path_action_mouse_down(AfEditorState *editor, int width, int height,
+                                             AfVec2 mouse) {
+    float canvas_x = 0.0F;
+    float canvas_y = 0.0F;
+    float canvas_width = 0.0F;
+    float canvas_height = 0.0F;
+    const AfPath *path = af_editor_selected_path(editor);
+    const AfPathCommand *command = NULL;
+    float x = 0.0F;
+    float y = 0.0F;
+    float right = 0.0F;
+    if (path == NULL || editor->selected_path_command >= path->command_count) {
+        return false;
+    }
+    command =
+        &editor->project.path_data.commands[path->command_start + editor->selected_path_command];
+    if (command->type == AF_PATH_CLOSE) {
+        return false;
+    }
+    af_editor_layout(editor, width, height, &canvas_x, &canvas_y, &canvas_width, &canvas_height);
+    (void)canvas_height;
+    x = canvas_x + 12.0F;
+    y = canvas_y + AF_EDITOR_PATH_ACTION_Y;
+    right = canvas_x + canvas_width;
+    if (mouse.y < y || mouse.y > y + AF_EDITOR_PATH_ACTION_HEIGHT || mouse.x < x ||
+        mouse.x > right) {
+        return false;
+    }
+    if (mouse.x <= x + 116.0F) {
+        return true;
+    }
+    if (af_editor_path_action_fits(x + 122.0F, 96.0F, right) && mouse.x >= x + 122.0F &&
+        mouse.x <= x + 218.0F) {
+        editor->selected_property = AF_PROPERTY_PATH_POINT;
+        if (af_editor_add_keyframe(editor) != AF_RESULT_SUCCESS) {
+            af_editor_status(editor, "Point keyframe could not be added");
+        }
+        return true;
+    }
+    if (af_editor_path_action_fits(x + 224.0F, 82.0F, right) && mouse.x >= x + 224.0F &&
+        mouse.x <= x + 306.0F) {
+        if (editor->selected_path_command == 0U ||
+            (command->type != AF_PATH_LINE && command->type != AF_PATH_CUBIC)) {
+            af_editor_status(editor, "Select a segment point to change line or curve type");
+        } else {
+            (void)af_editor_convert_path_point(editor);
+        }
+        return true;
+    }
+    if (af_editor_path_action_fits(x + 312.0F, 62.0F, right) && mouse.x >= x + 312.0F &&
+        mouse.x <= x + 374.0F) {
+        if (editor->selected_path_command == 0U ||
+            (command->type != AF_PATH_LINE && command->type != AF_PATH_CUBIC)) {
+            af_editor_status(editor, "Select a segment point before inserting a point");
+        } else {
+            (void)af_editor_insert_path_point(editor);
+        }
+        return true;
+    }
+    if (af_editor_path_action_fits(x + 380.0F, 80.0F, right) && mouse.x >= x + 380.0F &&
+        mouse.x <= x + 460.0F) {
+        (void)af_editor_toggle_path_closed(editor);
+        return true;
+    }
+    if (af_editor_path_action_fits(x + 466.0F, 68.0F, right) && mouse.x >= x + 466.0F &&
+        mouse.x <= x + 534.0F) {
+        if (editor->selected_path_command == 0U ||
+            (command->type != AF_PATH_LINE && command->type != AF_PATH_CUBIC)) {
+            af_editor_status(editor, "The contour start point cannot be deleted");
+        } else {
+            (void)af_editor_delete_path_point(editor);
+        }
+        return true;
     }
     return false;
 }
@@ -757,8 +862,11 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         } else if (toolbar_x >= 172.0F && toolbar_x < 260.0F) {
             if (y < AF_EDITOR_MENU_HEIGHT + 22.0F) {
                 editor->grid_visible = !editor->grid_visible;
+                af_editor_status(editor, editor->grid_visible ? "Grid enabled" : "Grid disabled");
             } else {
                 editor->snapping = !editor->snapping;
+                af_editor_status(editor,
+                                 editor->snapping ? "Snapping enabled" : "Snapping disabled");
             }
         }
         return;
@@ -774,6 +882,10 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         const AfSceneNode *selected =
             af_scene_find_const(&editor->preview_scene, editor->selected_id);
         AfEditorGizmoGeometry geometry = {0};
+        if (editor->selected_count == 1U &&
+            af_editor_path_action_mouse_down(editor, width, height, (AfVec2){x, y})) {
+            return;
+        }
         if (editor->selected_count <= 1U &&
             af_editor_path_mouse_down(editor, width, height, (AfVec2){x, y})) {
             return;
@@ -875,14 +987,26 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
         return;
     }
     if ((editor->drag_mode == AF_EDITOR_DRAG_LOOP_START ||
-         editor->drag_mode == AF_EDITOR_DRAG_LOOP_END) &&
+         editor->drag_mode == AF_EDITOR_DRAG_LOOP_END ||
+         editor->drag_mode == AF_EDITOR_DRAG_LOOP_RANGE) &&
         clip != NULL) {
         AfProjectClip *mutable_clip = af_project_find_clip(&editor->project, clip->id);
         const float time = af_editor_key_time(editor, clip, af_editor_x_to_time(editor, event->x));
         if (editor->drag_mode == AF_EDITOR_DRAG_LOOP_START) {
             mutable_clip->loop_start = fminf(time, mutable_clip->loop_end);
-        } else {
+        } else if (editor->drag_mode == AF_EDITOR_DRAG_LOOP_END) {
             mutable_clip->loop_end = fmaxf(time, mutable_clip->loop_start);
+        } else {
+            const float length =
+                editor->clip_drag_before.clip.loop_end - editor->clip_drag_before.clip.loop_start;
+            float start = editor->clip_drag_before.clip.loop_start +
+                          (event->x - editor->drag_start_mouse.x) / editor->timeline_zoom;
+            if (editor->snapping) {
+                start = roundf(start * 10.0F) * 0.1F;
+            }
+            start = af_editor_clamp(start, 0.0F, fmaxf(0.0F, clip->duration - length));
+            mutable_clip->loop_start = start;
+            mutable_clip->loop_end = start + length;
         }
         return;
     }
@@ -973,9 +1097,11 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
                                          editor->transform_drag_key_ids[(uint32_t)key_drag_index]);
             AfVec2 current = project_current;
             AfVec2 start = editor->drag_start_mouse;
-            AfVec2 position = key_drag_index < 0
-                                  ? before->node.local_transform.position
-                                  : editor->transform_drag_key_starts[(uint32_t)key_drag_index];
+            AfVec2 position =
+                key_drag_index < 0
+                    ? before->node.local_transform.position
+                    : (AfVec2){editor->transform_drag_key_starts[(uint32_t)key_drag_index][0],
+                               editor->transform_drag_key_starts[(uint32_t)key_drag_index][1]};
             if (node == NULL) {
                 continue;
             }
@@ -1042,7 +1168,10 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
     if (editor->drag_mode == AF_EDITOR_DRAG_COLOR_SV ||
         editor->drag_mode == AF_EDITOR_DRAG_COLOR_HUE ||
         editor->drag_mode == AF_EDITOR_DRAG_COLOR_ALPHA) {
-        (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_FILL, false);
+        if (!af_editor_transform_key_drag_covers_selection(editor)) {
+            (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_FILL, false);
+        }
+        (void)af_editor_commit_transform_key_drag(editor, false);
     } else if (editor->drag_mode == AF_EDITOR_DRAG_MOVE || editor->drag_mode == AF_EDITOR_DRAG_X ||
                editor->drag_mode == AF_EDITOR_DRAG_Y) {
         if (!af_editor_transform_key_drag_covers_selection(editor)) {
@@ -1059,7 +1188,8 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
     } else if (editor->drag_mode == AF_EDITOR_DRAG_KEYFRAMES) {
         af_editor_timeline_commit_keys(editor, AF_EDITOR_MERGE_KEYFRAME_TIME);
     } else if (editor->drag_mode == AF_EDITOR_DRAG_LOOP_START ||
-               editor->drag_mode == AF_EDITOR_DRAG_LOOP_END) {
+               editor->drag_mode == AF_EDITOR_DRAG_LOOP_END ||
+               editor->drag_mode == AF_EDITOR_DRAG_LOOP_RANGE) {
         af_editor_timeline_commit_clip(editor);
     } else if (editor->drag_mode == AF_EDITOR_DRAG_TANGENT_IN ||
                editor->drag_mode == AF_EDITOR_DRAG_TANGENT_OUT) {

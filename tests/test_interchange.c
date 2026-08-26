@@ -1,6 +1,7 @@
 #include "core/allocator.h"
 #include "core/file_io.h"
 #include "project/interchange.h"
+#include "project/project.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -23,6 +24,19 @@ typedef struct AfInterchangeTransactionTest {
     AfResult commit_result;
     uint32_t discard_count;
 } AfInterchangeTransactionTest;
+
+static bool af_test_bytes_contain(const uint8_t *data, size_t size, const char *text) {
+    const size_t text_size = strlen(text);
+    if (data == NULL || text_size == 0U || text_size > size) {
+        return false;
+    }
+    for (size_t index = 0U; index <= size - text_size; ++index) {
+        if (memcmp(data + index, text, text_size) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 static AfResult af_test_interchange_stage(void *user_data, AfAllocator *allocator,
                                           void **out_staging,
@@ -209,6 +223,85 @@ static bool af_test_interchange_static_svg(void) {
     return true;
 }
 
+static bool af_test_interchange_lottie(void) {
+    AfSceneNode nodes[2] = {{.id = 1U,
+                             .parent_id = AF_INVALID_NODE_ID,
+                             .type = AF_NODE_GROUP,
+                             .local_transform = {.scale = {1.0F, 1.0F}},
+                             .opacity = 1.0F,
+                             .visible = true},
+                            {.id = 2U,
+                             .parent_id = 1U,
+                             .type = AF_NODE_ROUNDED_RECTANGLE,
+                             .local_transform = {.position = {10.0F, 20.0F}, .scale = {1.0F, 1.0F}},
+                             .bounds = {80.0F, 40.0F},
+                             .fill = {0.2F, 0.4F, 0.8F, 1.0F},
+                             .opacity = 1.0F,
+                             .corner_radius = 6.0F,
+                             .layer_order = 3,
+                             .visible = true}};
+    char names[2][AF_PROJECT_NAME_CAPACITY] = {"Root", "Animated card"};
+    AfStyle styles[2] = {af_style_default(10U, 1U, nodes[0].fill),
+                         af_style_default(11U, 2U, nodes[1].fill)};
+    AfProjectClip clip = {.id = 20U, .duration = 1.0F, .loop_end = 1.0F, .loop = true};
+    AfProjectTrack track = {
+        .id = 21U, .clip_id = 20U, .node_id = 2U, .property = AF_PROPERTY_POSITION};
+    AfProjectKeyframe keys[2] = {{.id = 22U,
+                                  .track_id = 21U,
+                                  .keyframe = {.time = 0.0F,
+                                               .value = {10.0F, 20.0F},
+                                               .interpolation = AF_INTERPOLATION_CUBIC_BEZIER,
+                                               .easing = {0.42F, 0.0F, 0.58F, 1.0F}}},
+                                 {.id = 23U,
+                                  .track_id = 21U,
+                                  .keyframe = {.time = 1.0F,
+                                               .value = {110.0F, 70.0F},
+                                               .interpolation = AF_INTERPOLATION_LINEAR}}};
+    AfProject project = {.scene = {.nodes = nodes, .count = 2U, .capacity = 2U},
+                         .names = names,
+                         .canvas_size = {320.0F, 180.0F},
+                         .clips = &clip,
+                         .clip_count = 1U,
+                         .tracks = &track,
+                         .track_count = 1U,
+                         .keyframes = keys,
+                         .keyframe_count = 2U,
+                         .style_data = {.styles = styles, .count = 2U, .capacity = 2U}};
+    AfInterchangeDiagnostics diagnostics = {0};
+    char lottie[8192];
+    char small[32];
+    uint8_t dotlottie[12288];
+    uint8_t tiny_dotlottie[32];
+    size_t lottie_size = 0U;
+    size_t dotlottie_size = 0U;
+    (void)snprintf(clip.name, sizeof(clip.name), "Motion");
+    CHECK(af_scene_evaluate_world(&project.scene) == AF_RESULT_SUCCESS);
+    CHECK(af_interchange_export_lottie_json(
+              &project, clip.id, &(AfLottieExportOptions){.frame_rate = 60.0F}, lottie,
+              sizeof(lottie), &lottie_size, &diagnostics) == AF_RESULT_SUCCESS);
+    CHECK(lottie_size == strlen(lottie));
+    CHECK(strstr(lottie, "\"v\":\"5.12.2\"") != NULL && strstr(lottie, "\"fr\":60") != NULL &&
+          strstr(lottie, "\"op\":60") != NULL &&
+          strstr(lottie, "\"nm\":\"Animated card\"") != NULL &&
+          strstr(lottie, "\"parent\":1") != NULL && strstr(lottie, "\"p\":{\"a\":1") != NULL &&
+          strstr(lottie, "\"ty\":\"rc\"") != NULL);
+    CHECK(af_interchange_export_lottie_json(&project, clip.id, NULL, small, sizeof(small),
+                                            &lottie_size, NULL) == AF_RESULT_LIMIT_EXCEEDED);
+    CHECK(small[0] == '\0' && lottie_size == 0U);
+    CHECK(af_interchange_pack_dotlottie(lottie, strlen(lottie), dotlottie, sizeof(dotlottie),
+                                        &dotlottie_size, NULL) == AF_RESULT_SUCCESS);
+    CHECK(dotlottie_size > strlen(lottie) && dotlottie[0] == 'P' && dotlottie[1] == 'K' &&
+          dotlottie[2] == 3U && dotlottie[3] == 4U);
+    CHECK(af_test_bytes_contain(dotlottie, dotlottie_size, "manifest.json") &&
+          af_test_bytes_contain(dotlottie, dotlottie_size, "a/animation.json"));
+    dotlottie_size = 99U;
+    CHECK(af_interchange_pack_dotlottie(lottie, strlen(lottie), tiny_dotlottie,
+                                        sizeof(tiny_dotlottie), &dotlottie_size,
+                                        NULL) == AF_RESULT_LIMIT_EXCEEDED);
+    CHECK(dotlottie_size == 0U);
+    return true;
+}
+
 static bool af_test_interchange_transactions(void) {
     AfAllocator allocator;
     AfInterchangeTransactionTest transaction = {
@@ -234,7 +327,8 @@ static bool af_test_interchange_transactions(void) {
 
 int main(void) {
     return af_test_interchange_diagnostics_and_easing() && af_test_interchange_sprite_sheet() &&
-                   af_test_interchange_static_svg() && af_test_interchange_transactions()
+                   af_test_interchange_static_svg() && af_test_interchange_lottie() &&
+                   af_test_interchange_transactions()
                ? 0
                : 1;
 }

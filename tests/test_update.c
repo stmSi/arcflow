@@ -1,4 +1,5 @@
 #include "arcflow/arcflow_build_info.h"
+#include "arcflow/arcflow_version.h"
 #include "core/hash.h"
 #include "update/update.h"
 
@@ -41,15 +42,16 @@ int main(void) {
 #endif
     const int written =
         snprintf(text, sizeof(text),
-                 "arcflow_update 1\nversion 0.2.0\nchannel Beta\nruntime_min 10\npackage_min "
-                 "12\nsize %zu\nhash %016llx\nurl https://updates.example/arcflow.zip\nsignature "
-                 "test-signature\n",
-                 sizeof(artifact) - 1U, (unsigned long long)hash);
-    CHECK(AF_VERSION_STRING[0] != '\0' && AF_BUILD_ID[0] != '\0');
-    CHECK(af_semantic_version_parse("0.1.0", &current) == AF_RESULT_SUCCESS);
+                 "arcflow_update 1\nversion 1.1.0\nchannel Beta\nruntime_min %u\npackage_min "
+                 "%u\nsize %zu\nhash %016llx\nurl https://updates.example/arcflow.zip\n"
+                 "signature test-signature\n",
+                 AF_RUNTIME_VERSION, AF_PACKAGE_FORMAT_VERSION, sizeof(artifact) - 1U,
+                 (unsigned long long)hash);
+    CHECK(strcmp(AF_VERSION_STRING, "1.0.0") == 0 && AF_BUILD_ID[0] != '\0');
+    CHECK(af_semantic_version_parse(AF_VERSION_STRING, &current) == AF_RESULT_SUCCESS);
     CHECK(af_semantic_version_parse("01.1.0", &current) == AF_RESULT_INVALID_ARGUMENT);
     CHECK(af_semantic_version_parse("+1.1.0", &current) == AF_RESULT_INVALID_ARGUMENT);
-    CHECK(af_semantic_version_parse("0.2.0", &newer) == AF_RESULT_SUCCESS);
+    CHECK(af_semantic_version_parse("1.1.0", &newer) == AF_RESULT_SUCCESS);
     CHECK(af_semantic_version_compare(current, newer) < 0);
     CHECK(written > 0 && (size_t)written < sizeof(text));
     CHECK(af_update_manifest_parse(text, (size_t)written, &manifest) == AF_RESULT_SUCCESS);
@@ -63,12 +65,12 @@ int main(void) {
         CHECK(af_update_manifest_parse(malformed, strlen(malformed), &manifest) ==
               AF_RESULT_INVALID_PACKAGE);
     }
-    CHECK(af_update_check(&manifest, current, AF_RELEASE_CHANNEL_BETA, 10U, 12U) ==
-          AF_UPDATE_STATUS_AVAILABLE);
-    CHECK(af_update_check(&manifest, newer, AF_RELEASE_CHANNEL_STABLE, 10U, 12U) ==
-          AF_UPDATE_STATUS_CHANNEL_BLOCKED);
-    CHECK(af_update_check(&manifest, current, AF_RELEASE_CHANNEL_BETA, 9U, 12U) ==
-          AF_UPDATE_STATUS_INCOMPATIBLE);
+    CHECK(af_update_check(&manifest, current, AF_RELEASE_CHANNEL_BETA, AF_RUNTIME_VERSION,
+                          AF_PACKAGE_FORMAT_VERSION) == AF_UPDATE_STATUS_AVAILABLE);
+    CHECK(af_update_check(&manifest, newer, AF_RELEASE_CHANNEL_STABLE, AF_RUNTIME_VERSION,
+                          AF_PACKAGE_FORMAT_VERSION) == AF_UPDATE_STATUS_CHANNEL_BLOCKED);
+    CHECK(af_update_check(&manifest, current, AF_RELEASE_CHANNEL_BETA, AF_RUNTIME_VERSION - 1U,
+                          AF_PACKAGE_FORMAT_VERSION) == AF_UPDATE_STATUS_INCOMPATIBLE);
     (void)snprintf(staging_path, sizeof(staging_path), "arcflow_update_test_%lu.stage", process_id);
     (void)remove(staging_path);
     CHECK(af_update_stage_artifact(&manifest, artifact, sizeof(artifact) - 1U, af_test_verify, NULL,

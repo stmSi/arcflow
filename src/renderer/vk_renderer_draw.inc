@@ -71,6 +71,11 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
         .clearValue = {.color = {{0.018F, 0.024F, 0.04F, 1.0F}}}};
+    if (af_vk_format_is_srgb(renderer->swapchain_format)) {
+        color_attachment.clearValue.color.float32[0] = af_vk_srgb_to_linear_component(0.018F);
+        color_attachment.clearValue.color.float32[1] = af_vk_srgb_to_linear_component(0.024F);
+        color_attachment.clearValue.color.float32[2] = af_vk_srgb_to_linear_component(0.04F);
+    }
     VkRenderingInfo rendering = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
                                  .layerCount = 1U,
                                  .colorAttachmentCount = 1U,

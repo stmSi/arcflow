@@ -145,7 +145,6 @@ static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera
             command->type == AF_PATH_CUBIC) {
             const AfVec2 point = af_affine_transform_point(transform, command->point);
             bool keyed = false;
-            char point_label[20];
             for (uint32_t track_index = 0U; track_index < editor->project.track_count;
                  ++track_index) {
                 const AfProjectTrack *track = &editor->project.tracks[track_index];
@@ -156,19 +155,13 @@ static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera
                     break;
                 }
             }
-            af_editor_add_rect(editor, point.x - 4.0F, point.y - 4.0F, 8.0F, 8.0F, point_color,
-                               90040);
-            (void)snprintf(point_label, sizeof(point_label), "P%u%s", index + 1U,
-                           keyed ? " KEY" : "");
-            af_editor_add_text(editor, point.x + 7.0F, point.y - 10.0F, point_label, 0.68F, 46.0F,
-                               keyed ? (AfColor){0.35F, 0.92F, 0.82F, 1.0F}
-                                     : (AfColor){0.68F, 0.72F, 0.8F, 1.0F},
-                               90045);
-            if (chosen) {
-                af_editor_add_text(editor, point.x + 7.0F, point.y + 8.0F,
-                                   "TIMELINE A / I / H  -  K KEY", 0.58F, 178.0F,
-                                   (AfColor){0.46F, 0.82F, 0.9F, 1.0F}, 90045);
+            if (keyed) {
+                af_editor_add_rect(editor, point.x - 6.0F, point.y - 6.0F, 12.0F, 12.0F,
+                                   (AfColor){0.2F, 0.84F, 0.76F, 1.0F}, 90038);
             }
+            af_editor_add_rect(editor, point.x - (chosen ? 5.0F : 4.0F),
+                               point.y - (chosen ? 5.0F : 4.0F), chosen ? 10.0F : 8.0F,
+                               chosen ? 10.0F : 8.0F, point_color, 90040);
             if (chosen && command->type == AF_PATH_CUBIC && have_previous) {
                 const AfVec2 first = af_affine_transform_point(transform, command->control1);
                 const AfVec2 second = af_affine_transform_point(transform, command->control2);
@@ -191,6 +184,99 @@ static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera
         } else if (command->type == AF_PATH_CLOSE) {
             have_previous = false;
         }
+    }
+}
+
+static bool af_editor_path_action_fits(float x, float width, float canvas_right) {
+    return x + width <= canvas_right - 8.0F;
+}
+
+static void af_editor_render_path_actions(AfEditorState *editor, int width, int height) {
+    float canvas_x = 0.0F;
+    float canvas_y = 0.0F;
+    float canvas_width = 0.0F;
+    float canvas_height = 0.0F;
+    const AfPath *path = af_path_find_node_const(&editor->render_path_data, editor->selected_id);
+    const AfPathCommand *command = NULL;
+    const AfProjectTrack *point_track = NULL;
+    const AfProjectClip *clip =
+        af_project_find_clip_const(&editor->project, editor->selected_clip_id);
+    float x = 0.0F;
+    float y = 0.0F;
+    float right = 0.0F;
+    char point_label[32];
+    bool segment_editable = false;
+    if (path == NULL || editor->selected_path_command >= path->command_count) {
+        return;
+    }
+    command =
+        &editor->render_path_data.commands[path->command_start + editor->selected_path_command];
+    if (command->type == AF_PATH_CLOSE) {
+        return;
+    }
+    segment_editable = editor->selected_path_command != 0U &&
+                       (command->type == AF_PATH_LINE || command->type == AF_PATH_CUBIC);
+    af_editor_layout(editor, width, height, &canvas_x, &canvas_y, &canvas_width, &canvas_height);
+    (void)canvas_height;
+    x = canvas_x + 12.0F;
+    y = canvas_y + AF_EDITOR_PATH_ACTION_Y;
+    right = canvas_x + canvas_width;
+    (void)snprintf(point_label, sizeof(point_label), "EDIT PATH  POINT #%u",
+                   editor->selected_path_command + 1U);
+    af_editor_add_rect(editor, x, y, 116.0F, AF_EDITOR_PATH_ACTION_HEIGHT,
+                       (AfColor){0.11F, 0.13F, 0.17F, 0.96F}, 90050);
+    af_editor_add_text(editor, x + 8.0F, y + 10.0F, point_label, 0.6F, 102.0F,
+                       (AfColor){0.82F, 0.85F, 0.92F, 1.0F}, 90060);
+    point_track = af_editor_find_track(editor, editor->selected_id, AF_PROPERTY_PATH_POINT,
+                                       editor->selected_path_command);
+    if (af_editor_path_action_fits(x + 122.0F, 96.0F, right)) {
+        const bool has_key =
+            point_track != NULL && clip != NULL &&
+            af_editor_track_key_at(editor, point_track->id,
+                                   af_editor_key_time(editor, clip, editor->playhead)) != NULL;
+        af_editor_add_button_rect(editor, x + 122.0F, y, 96.0F, AF_EDITOR_PATH_ACTION_HEIGHT,
+                                  has_key ? (AfColor){0.62F, 0.43F, 0.14F, 0.97F}
+                                          : (AfColor){0.12F, 0.48F, 0.64F, 0.97F},
+                                  90050);
+        af_editor_add_text(editor, x + 131.0F, y + 12.0F, has_key ? "UPDATE KEY" : "+ KEY POINT",
+                           0.58F, 80.0F, (AfColor){0.96F, 0.97F, 1.0F, 1.0F}, 90060);
+    }
+    if (af_editor_path_action_fits(x + 224.0F, 82.0F, right)) {
+        af_editor_add_button_rect(editor, x + 224.0F, y, 82.0F, AF_EDITOR_PATH_ACTION_HEIGHT,
+                                  segment_editable ? (AfColor){0.2F, 0.23F, 0.29F, 0.97F}
+                                                   : (AfColor){0.14F, 0.15F, 0.18F, 0.92F},
+                                  90050);
+        af_editor_add_text(editor, x + 232.0F, y + 12.0F,
+                           command->type == AF_PATH_CUBIC ? "TO LINE" : "TO CURVE", 0.58F, 68.0F,
+                           segment_editable ? (AfColor){0.82F, 0.85F, 0.92F, 1.0F}
+                                            : (AfColor){0.38F, 0.4F, 0.46F, 1.0F},
+                           90060);
+    }
+    if (af_editor_path_action_fits(x + 312.0F, 62.0F, right)) {
+        af_editor_add_button_rect(editor, x + 312.0F, y, 62.0F, AF_EDITOR_PATH_ACTION_HEIGHT,
+                                  segment_editable ? (AfColor){0.2F, 0.23F, 0.29F, 0.97F}
+                                                   : (AfColor){0.14F, 0.15F, 0.18F, 0.92F},
+                                  90050);
+        af_editor_add_text(editor, x + 320.0F, y + 12.0F, "INSERT", 0.58F, 48.0F,
+                           segment_editable ? (AfColor){0.82F, 0.85F, 0.92F, 1.0F}
+                                            : (AfColor){0.38F, 0.4F, 0.46F, 1.0F},
+                           90060);
+    }
+    if (af_editor_path_action_fits(x + 380.0F, 80.0F, right)) {
+        af_editor_add_button_rect(editor, x + 380.0F, y, 80.0F, AF_EDITOR_PATH_ACTION_HEIGHT,
+                                  (AfColor){0.2F, 0.23F, 0.29F, 0.97F}, 90050);
+        af_editor_add_text(editor, x + 388.0F, y + 12.0F, "OPEN/CLOSE", 0.53F, 66.0F,
+                           (AfColor){0.82F, 0.85F, 0.92F, 1.0F}, 90060);
+    }
+    if (af_editor_path_action_fits(x + 466.0F, 68.0F, right)) {
+        af_editor_add_button_rect(editor, x + 466.0F, y, 68.0F, AF_EDITOR_PATH_ACTION_HEIGHT,
+                                  segment_editable ? (AfColor){0.48F, 0.2F, 0.24F, 0.97F}
+                                                   : (AfColor){0.18F, 0.14F, 0.16F, 0.92F},
+                                  90050);
+        af_editor_add_text(editor, x + 474.0F, y + 12.0F, "DELETE", 0.58F, 52.0F,
+                           segment_editable ? (AfColor){0.98F, 0.88F, 0.9F, 1.0F}
+                                            : (AfColor){0.42F, 0.36F, 0.38F, 1.0F},
+                           90060);
     }
 }
 
@@ -258,6 +344,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     af_editor_render_gizmo(editor, camera);
     if (editor->selected_count == 1U) {
         af_editor_render_path_points(editor, camera);
+        af_editor_render_path_actions(editor, width, height);
     }
     af_editor_render_canvas_box(editor);
     af_editor_add_rect(editor, 0.0F, 0.0F, editor->left_width, (float)height,

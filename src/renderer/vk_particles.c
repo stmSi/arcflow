@@ -264,10 +264,22 @@ static void af_vk_particles_destroy_graphics_pipeline(AfVkParticleSystem *system
     }
 }
 
+static bool af_vk_particles_format_is_srgb(VkFormat format) {
+    return format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
+}
+
 static AfResult af_vk_particles_create_graphics_pipeline(AfVkParticleSystem *system) {
     VkShaderModule vertex_shader = VK_NULL_HANDLE;
     VkShaderModule fragment_shader = VK_NULL_HANDLE;
     VkPipelineShaderStageCreateInfo stages[2];
+    const uint32_t output_is_srgb = af_vk_particles_format_is_srgb(system->color_format) ? 1U : 0U;
+    const VkSpecializationMapEntry fragment_specialization_entry = {
+        .constantID = 0U, .offset = 0U, .size = sizeof(output_is_srgb)};
+    const VkSpecializationInfo fragment_specialization = {.mapEntryCount = 1U,
+                                                          .pMapEntries =
+                                                              &fragment_specialization_entry,
+                                                          .dataSize = sizeof(output_is_srgb),
+                                                          .pData = &output_is_srgb};
     const VkPipelineVertexInputStateCreateInfo vertex_input = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     const VkPipelineInputAssemblyStateCreateInfo input_assembly = {
@@ -339,7 +351,8 @@ static AfResult af_vk_particles_create_graphics_pipeline(AfVkParticleSystem *sys
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
             .module = fragment_shader,
-            .pName = "main"};
+            .pName = "main",
+            .pSpecializationInfo = &fragment_specialization};
         if (vkCreateGraphicsPipelines(system->device, VK_NULL_HANDLE, 1U, &pipeline_info, NULL,
                                       &system->graphics_pipeline) != VK_SUCCESS) {
             result = AF_RESULT_VULKAN_ERROR;

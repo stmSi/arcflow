@@ -28,6 +28,11 @@ execute_process(COMMAND "${ARCFLOW_COMPILER}" --beta-audit "${project}"
 if(NOT result EQUAL 0 OR NOT beta_audit MATCHES "beta audit READY")
     message(FATAL_ERROR "beta project audit failed")
 endif()
+execute_process(COMMAND "${ARCFLOW_COMPILER}" --release-audit "${project}"
+                RESULT_VARIABLE result OUTPUT_VARIABLE release_audit)
+if(NOT result EQUAL 0 OR NOT release_audit MATCHES "release audit READY")
+    message(FATAL_ERROR "production project audit failed")
+endif()
 set(legacy_project "${ARCFLOW_SOURCE_DIRECTORY}/assets/editor_demo.afproj")
 set(migrated_project "${ARCFLOW_TEST_DIRECTORY}/migrated-project.afproj")
 execute_process(COMMAND "${ARCFLOW_COMPILER}" --migrate-project "${legacy_project}"
@@ -93,7 +98,7 @@ file(WRITE "${ARCFLOW_TEST_DIRECTORY}/package.sha256" "${package_hash}\n")
 execute_process(COMMAND "${ARCFLOW_COMPILER}" --help
                 RESULT_VARIABLE result OUTPUT_VARIABLE help)
 if(NOT result EQUAL 0 OR NOT help MATCHES "--generate-examples" OR
-   NOT help MATCHES "--migrate-project")
+   NOT help MATCHES "--migrate-project" OR NOT help MATCHES "--release-audit")
     message(FATAL_ERROR "compiler help is incomplete")
 endif()
 execute_process(COMMAND "${ARCFLOW_COMPILER}" --list-templates

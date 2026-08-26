@@ -388,7 +388,7 @@ static AfResult af_editor_toggle_path_closed(AfEditorState *editor) {
     memmove(&commands[end + 1U], &commands[end],
             (size_t)(path->command_count - end) * sizeof(*commands));
     commands[end] = (AfPathCommand){.type = AF_PATH_CLOSE};
-    editor->selected_path_command = end;
+    editor->selected_path_command = end > start + 1U ? end - 1U : start;
     return af_editor_apply_path_edit(editor, commands, path->command_count + 1U, path->fill_rule,
                                      "Path contour closed");
 }

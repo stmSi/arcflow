@@ -20,11 +20,14 @@ jobs:
       - name: Release configure
         run: cmake --preset release -DARCFLOW_BUILD_GPU_TESTS=OFF
       - name: Release build
-        run: cmake --build --preset release --target arcflow_ci arcflow_release_bundle arcflow_reproducibility
+        run: cmake --build --preset release --target arcflow_production_acceptance
       - uses: actions/upload-artifact@v4
         with:
           name: arcflow-linux-release
-          path: build/release/Arcflow-*
+          path: |
+            build/release/Arcflow-*
+            build/release/arcflow-production-readiness.json
+            build/release/symbols/*
 
   windows:
     runs-on: windows-2025
@@ -47,8 +50,11 @@ jobs:
         run: cmake --preset release -DARCFLOW_BUILD_GPU_TESTS=OFF
       - name: Build and test
         shell: msys2 {0}
-        run: cmake --build --preset release --target arcflow_ci arcflow_release_bundle
+        run: cmake --build --preset release --target arcflow_production_acceptance
       - uses: actions/upload-artifact@v4
         with:
           name: arcflow-windows-release
-          path: build/release/Arcflow-*
+          path: |
+            build/release/Arcflow-*
+            build/release/arcflow-production-readiness.json
+            build/release/symbols/*

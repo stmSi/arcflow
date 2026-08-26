@@ -37,6 +37,20 @@ normal CMake configuration. Exact versions and licenses are recorded in
 Shaders are compiled offline for Vulkan 1.3 with `glslc` and validated by `spirv-val` on every shader
 rebuild. Release playback never compiles shaders.
 
+The stable preset stamps Arcflow 1.0.0 and the Stable channel. Its production acceptance target
+builds the portable package and debug symbols, runs the complete test/install suite, repeats package
+generation to prove reproducibility on Linux, checks versioned documentation and notices, and emits
+`build/release/arcflow-production-readiness.json`:
+
+```sh
+cmake --preset release
+cmake --build --preset release --target arcflow_production_acceptance
+```
+
+This local gate is necessary but does not replace successful Linux and Windows CI jobs or the
+supported Vulkan hardware/validation matrix described in the
+[production release guide](production-release.md).
+
 Runtime requirements are a Vulkan loader and a driver supporting Vulkan 1.3, dynamic rendering,
 synchronization 2, timeline semaphores, swapchains, and presentation. Debug validation is enabled
 when `VK_LAYER_KHRONOS_validation` is installed and falls back safely when it is absent.

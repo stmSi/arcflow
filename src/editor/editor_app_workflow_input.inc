@@ -3,6 +3,31 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
     if (af_editor_onboarding_mouse_down(editor, width, height, x, y)) {
         return true;
     }
+    if (editor->export_panel_visible) {
+        static const AfEditorDialogAction actions[] = {
+            AF_EDITOR_DIALOG_EXPORT_PACKAGE,   AF_EDITOR_DIALOG_EXPORT_LOTTIE,
+            AF_EDITOR_DIALOG_EXPORT_DOTLOTTIE, AF_EDITOR_DIALOG_EXPORT_SVG,
+            AF_EDITOR_DIALOG_EXPORT_GIF,       AF_EDITOR_DIALOG_EXPORT_MP4};
+        const float box_x = ((float)width - 780.0F) * 0.5F;
+        const float box_y = ((float)height - 500.0F) * 0.5F;
+        if (x >= box_x + 24.0F && y >= box_y + 78.0F) {
+            const uint32_t column = (uint32_t)((x - box_x - 24.0F) / 250.0F);
+            const uint32_t row = (uint32_t)((y - box_y - 78.0F) / 178.0F);
+            const uint32_t index = row * 3U + column;
+            const float card_x = box_x + 24.0F + (float)column * 250.0F;
+            const float card_y = box_y + 78.0F + (float)row * 178.0F;
+            if (column < 3U && row < 2U && index < 6U && x < card_x + 232.0F &&
+                y < card_y + 160.0F) {
+                editor->export_panel_visible = false;
+                af_editor_show_project_dialog(editor, actions[index]);
+            }
+        }
+        if (x < box_x || x >= box_x + 780.0F || y < box_y || y >= box_y + 500.0F) {
+            editor->export_panel_visible = false;
+            af_editor_status(editor, "Export canceled");
+        }
+        return true;
+    }
     if (editor->platform_panel_visible) {
         editor->platform_panel_visible = false;
         return true;
@@ -18,7 +43,9 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
             const uint32_t column = (uint32_t)((x - box_x - 18.0F) / 250.0F);
             const uint32_t row = (uint32_t)((y - box_y - 75.0F) / 145.0F);
             const uint32_t index = row * 3U + column;
-            if (index < af_project_template_count()) {
+            const float card_x = box_x + 18.0F + (float)column * 250.0F;
+            const float card_y = box_y + 75.0F + (float)row * 145.0F;
+            if (index < af_project_template_count() && x < card_x + 238.0F && y < card_y + 132.0F) {
                 editor->template_selected_index = index;
                 editor->template_panel_visible = false;
                 (void)af_editor_create_template(editor, index);
@@ -31,7 +58,8 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
         const float box_y = ((float)height - 390.0F) * 0.5F;
         if (x >= box_x + 14.0F && x < box_x + 636.0F && y >= box_y + 76.0F) {
             const uint32_t row = (uint32_t)((y - box_y - 76.0F) / 32.0F);
-            if (row < editor->preferences.recent_project_count && row < 9U) {
+            const float row_y = box_y + 76.0F + (float)row * 32.0F;
+            if (row < editor->preferences.recent_project_count && row < 9U && y < row_y + 29.0F) {
                 editor->recent_selected_index = row;
                 af_editor_open_recent_index(editor, row);
             }
@@ -41,13 +69,15 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
     if (editor->command_palette.open) {
         const float box_x = ((float)width - AF_EDITOR_WORKFLOW_OVERLAY_WIDTH) * 0.5F;
         const float first_y = 170.0F;
-        if (x >= box_x && x < box_x + AF_EDITOR_WORKFLOW_OVERLAY_WIDTH && y >= first_y) {
+        if (x >= box_x + 12.0F && x < box_x + AF_EDITOR_WORKFLOW_OVERLAY_WIDTH - 12.0F &&
+            y >= first_y) {
             const uint32_t row = (uint32_t)((y - first_y) / 38.0F);
+            const float row_y = first_y + (float)row * 38.0F;
             const uint32_t first_result =
                 (editor->command_palette.selected_index / AF_EDITOR_WORKFLOW_PALETTE_ROWS) *
                 AF_EDITOR_WORKFLOW_PALETTE_ROWS;
             if (first_result + row < editor->command_palette.result_count &&
-                row < AF_EDITOR_WORKFLOW_PALETTE_ROWS) {
+                row < AF_EDITOR_WORKFLOW_PALETTE_ROWS && y < row_y + 34.0F) {
                 const AfEditorActionId action_id =
                     editor->command_palette.results[first_result + row].action_id;
                 af_editor_command_palette_close(&editor->command_palette);
@@ -70,10 +100,11 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
                         ? editor->actions.count - AF_EDITOR_WORKFLOW_SHORTCUT_ROWS
                         : 0U;
         }
-        if (x >= box_x && x < box_x + box_width && y >= box_y + 70.0F &&
+        if (x >= box_x + 12.0F && x < box_x + box_width - 12.0F && y >= box_y + 70.0F &&
             y < box_y + 70.0F + AF_EDITOR_WORKFLOW_SHORTCUT_ROWS * 33.0F) {
             const uint32_t row = (uint32_t)((y - box_y - 70.0F) / 33.0F);
-            if (start + row < editor->actions.count) {
+            const float row_y = box_y + 70.0F + (float)row * 33.0F;
+            if (start + row < editor->actions.count && y < row_y + 30.0F) {
                 editor->shortcut_selected_index = start + row;
                 editor->shortcut_capture = true;
             }
@@ -132,7 +163,11 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
         }
         if (x >= box_x + 18.0F && x < box_x + 412.0F && y >= box_y + 106.0F) {
             const uint32_t requested = (uint32_t)((y - box_y - 106.0F) / 32.0F);
+            const float row_y = box_y + 106.0F + (float)requested * 32.0F;
             uint32_t row = 0U;
+            if (y >= row_y + 28.0F) {
+                return true;
+            }
             for (uint32_t index = 0U; index < editor->project.style_data.count; ++index) {
                 const AfStyle *preset = &editor->project.style_data.styles[index];
                 if (preset->node_id != 0U) {
@@ -178,8 +213,8 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
             editor->validation_visible = false;
             return true;
         }
-        if (x >= panel_x && x < panel_x + AF_EDITOR_WORKFLOW_PANEL_WIDTH && y >= panel_y + 96.0F &&
-            y < panel_y + 142.0F) {
+        if (x >= panel_x + 12.0F && x < panel_x + AF_EDITOR_WORKFLOW_PANEL_WIDTH - 12.0F &&
+            y >= panel_y + 156.0F && y < panel_y + 194.0F) {
             uint64_t affected = 0U;
             (void)af_editor_missing_asset_count(editor, &affected);
             if (affected != 0U) {
@@ -212,6 +247,30 @@ static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEven
         return false;
     }
     if (af_editor_onboarding_key(editor, event)) {
+        return true;
+    }
+    if (editor->export_panel_visible) {
+        AfEditorDialogAction export_action = AF_EDITOR_DIALOG_NONE;
+        if (event->key == SDLK_ESCAPE) {
+            editor->export_panel_visible = false;
+            af_editor_status(editor, "Export canceled");
+        } else if (event->key == SDLK_1) {
+            export_action = AF_EDITOR_DIALOG_EXPORT_PACKAGE;
+        } else if (event->key == SDLK_2) {
+            export_action = AF_EDITOR_DIALOG_EXPORT_LOTTIE;
+        } else if (event->key == SDLK_3) {
+            export_action = AF_EDITOR_DIALOG_EXPORT_DOTLOTTIE;
+        } else if (event->key == SDLK_4) {
+            export_action = AF_EDITOR_DIALOG_EXPORT_SVG;
+        } else if (event->key == SDLK_5) {
+            export_action = AF_EDITOR_DIALOG_EXPORT_GIF;
+        } else if (event->key == SDLK_6) {
+            export_action = AF_EDITOR_DIALOG_EXPORT_MP4;
+        }
+        if (export_action != AF_EDITOR_DIALOG_NONE) {
+            editor->export_panel_visible = false;
+            af_editor_show_project_dialog(editor, export_action);
+        }
         return true;
     }
     if (editor->platform_panel_visible) {

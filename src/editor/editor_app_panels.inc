@@ -25,6 +25,9 @@ static void af_editor_render_hierarchy(AfEditorState *editor, int height) {
             row_color = (AfColor){0.16F, 0.34F, 0.58F, 1.0F};
         } else if (af_editor_selection_contains(editor, node->id)) {
             row_color = (AfColor){0.12F, 0.25F, 0.4F, 1.0F};
+        } else if (af_editor_hovered_rect(editor, 6.0F, y, editor->left_width - 12.0F,
+                                          AF_EDITOR_ROW_HEIGHT - 2.0F)) {
+            row_color = (AfColor){0.18F, 0.2F, 0.24F, 1.0F};
         }
         af_editor_add_rect(editor, 6.0F, y, editor->left_width - 12.0F, AF_EDITOR_ROW_HEIGHT - 2.0F,
                            row_color, 100110);
@@ -69,10 +72,10 @@ static void af_editor_render_asset_browser(AfEditorState *editor, int height) {
         char info[96];
         const uint32_t uses = af_editor_asset_use_count(editor, asset->id);
         const bool selected = asset->id == editor->selected_asset_id;
-        af_editor_add_rect(editor, 7.0F, y, editor->left_width - 14.0F, 24.0F,
-                           selected ? (AfColor){0.16F, 0.34F, 0.58F, 1.0F}
-                                    : (AfColor){0.12F, 0.13F, 0.16F, 1.0F},
-                           100115);
+        af_editor_add_button_rect(editor, 7.0F, y, editor->left_width - 14.0F, 24.0F,
+                                  selected ? (AfColor){0.16F, 0.34F, 0.58F, 1.0F}
+                                           : (AfColor){0.12F, 0.13F, 0.16F, 1.0F},
+                                  100115);
         af_editor_add_rect(editor, 12.0F, y + 5.0F, 14.0F, 14.0F,
                            asset->missing ? (AfColor){0.9F, 0.27F, 0.24F, 1.0F}
                                           : (AfColor){0.31F, 0.7F, 0.94F, 1.0F},
@@ -144,8 +147,8 @@ static void af_editor_render_image_inspector(AfEditorState *editor, int width,
                                                                  : "DISPLAY: STRETCH"};
         for (uint32_t row = 0U; row < 5U; ++row) {
             const float y = 150.0F + (float)row * 38.0F;
-            af_editor_add_rect(editor, x, y, editor->right_width - 36.0F, 30.0F,
-                               (AfColor){0.2F, 0.23F, 0.29F, 1.0F}, 100120);
+            af_editor_add_button_rect(editor, x, y, editor->right_width - 36.0F, 32.0F,
+                                      (AfColor){0.2F, 0.23F, 0.29F, 1.0F}, 100120);
             af_editor_add_text(editor, x + 10.0F, y + 10.0F, labels[row], 0.82F,
                                editor->right_width - 56.0F, (AfColor){0.78F, 0.82F, 0.9F, 1.0F},
                                100130);
@@ -161,10 +164,10 @@ static void af_editor_render_image_inspector(AfEditorState *editor, int width,
             const float y = 375.0F + (float)row * 36.0F;
             char value[48];
             (void)snprintf(value, sizeof(value), "%s %u", names[row], values[row]);
-            af_editor_add_rect(editor, x, y, 30.0F, 26.0F, (AfColor){0.24F, 0.26F, 0.32F, 1.0F},
-                               100120);
-            af_editor_add_rect(editor, x + 40.0F, y, 30.0F, 26.0F,
-                               (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
+            af_editor_add_button_rect(editor, x, y, 34.0F, 28.0F,
+                                      (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
+            af_editor_add_button_rect(editor, x + 38.0F, y, 34.0F, 28.0F,
+                                      (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
             af_editor_add_text(editor, x + 10.0F, y + 9.0F, "-", 0.9F, 12.0F,
                                (AfColor){0.82F, 0.84F, 0.9F, 1.0F}, 100130);
             af_editor_add_text(editor, x + 50.0F, y + 9.0F, "+", 0.9F, 12.0F,
@@ -182,18 +185,18 @@ static void af_editor_render_image_inspector(AfEditorState *editor, int width,
                        sequence == NULL ? "CREATE FROM ALL ASSETS" : "REMOVE %s (%u FRAMES)",
                        sequence == NULL ? "" : sequence->name,
                        sequence == NULL ? 0U : sequence->frame_count);
-        af_editor_add_rect(editor, x, 548.0F, editor->right_width - 36.0F, 30.0F,
-                           (AfColor){0.2F, 0.23F, 0.29F, 1.0F}, 100120);
+        af_editor_add_button_rect(editor, x, 548.0F, editor->right_width - 36.0F, 32.0F,
+                                  (AfColor){0.2F, 0.23F, 0.29F, 1.0F}, 100120);
         af_editor_add_text(editor, x + 10.0F, 558.0F, sequence_info, 0.76F,
                            editor->right_width - 56.0F, (AfColor){0.78F, 0.82F, 0.9F, 1.0F},
                            100130);
     }
     if (sequence != NULL) {
         char fps[48];
-        af_editor_add_rect(editor, x, 586.0F, 30.0F, 26.0F, (AfColor){0.24F, 0.26F, 0.32F, 1.0F},
-                           100120);
-        af_editor_add_rect(editor, x + 40.0F, 586.0F, 30.0F, 26.0F,
-                           (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
+        af_editor_add_button_rect(editor, x, 586.0F, 34.0F, 28.0F,
+                                  (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
+        af_editor_add_button_rect(editor, x + 38.0F, 586.0F, 34.0F, 28.0F,
+                                  (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
         af_editor_add_text(editor, x + 10.0F, 595.0F, "-", 0.9F, 12.0F,
                            (AfColor){0.82F, 0.84F, 0.9F, 1.0F}, 100130);
         af_editor_add_text(editor, x + 50.0F, 595.0F, "+", 0.9F, 12.0F,
@@ -201,8 +204,8 @@ static void af_editor_render_image_inspector(AfEditorState *editor, int width,
         (void)snprintf(fps, sizeof(fps), "FPS %.1F", (double)binding->frames_per_second);
         af_editor_add_text(editor, x + 82.0F, 594.0F, fps, 0.85F, editor->right_width - 118.0F,
                            (AfColor){0.7F, 0.73F, 0.81F, 1.0F}, 100130);
-        af_editor_add_rect(editor, x, 622.0F, editor->right_width - 36.0F, 28.0F,
-                           (AfColor){0.2F, 0.23F, 0.29F, 1.0F}, 100120);
+        af_editor_add_button_rect(editor, x, 622.0F, editor->right_width - 36.0F, 30.0F,
+                                  (AfColor){0.2F, 0.23F, 0.29F, 1.0F}, 100120);
         af_editor_add_text(editor, x + 10.0F, 631.0F, binding->loop ? "LOOP: ON" : "LOOP: OFF",
                            0.82F, editor->right_width - 56.0F, (AfColor){0.78F, 0.82F, 0.9F, 1.0F},
                            100130);
@@ -213,20 +216,20 @@ static void af_editor_render_toolbar(AfEditorState *editor) {
     const float start = editor->left_width + 14.0F;
     const float top = AF_EDITOR_MENU_HEIGHT;
     const AfColor button = {0.18F, 0.2F, 0.25F, 1.0F};
-    af_editor_add_rect(editor, start, top + 6.0F, 34.0F, 32.0F, button, 100110);
+    af_editor_add_button_rect(editor, start, top + 6.0F, 34.0F, 32.0F, button, 100110);
     af_editor_add_rect(editor, start + 8.0F, top + 13.0F, 18.0F, 17.0F,
                        (AfColor){0.22F, 0.58F, 0.96F, 1.0F}, 100120);
-    af_editor_add_rect(editor, start + 42.0F, top + 6.0F, 34.0F, 32.0F, button, 100110);
+    af_editor_add_button_rect(editor, start + 42.0F, top + 6.0F, 34.0F, 32.0F, button, 100110);
     af_editor_add_shape(
         editor, AF_NODE_ROUNDED_RECTANGLE,
         (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = start + 50.0F, .ty = top + 13.0F},
         (AfVec2){18.0F, 17.0F}, (AfColor){0.94F, 0.35F, 0.27F, 1.0F}, 5.0F, 100120);
-    af_editor_add_rect(editor, start + 84.0F, top + 6.0F, 34.0F, 32.0F, button, 100110);
+    af_editor_add_button_rect(editor, start + 84.0F, top + 6.0F, 34.0F, 32.0F, button, 100110);
     af_editor_add_shape(
         editor, AF_NODE_ELLIPSE,
         (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = start + 92.0F, .ty = top + 13.0F},
         (AfVec2){18.0F, 17.0F}, (AfColor){0.32F, 0.86F, 0.54F, 1.0F}, 0.0F, 100120);
-    af_editor_add_rect(editor, start + 126.0F, top + 6.0F, 34.0F, 32.0F, button, 100110);
+    af_editor_add_button_rect(editor, start + 126.0F, top + 6.0F, 34.0F, 32.0F, button, 100110);
     af_editor_add_line(editor, (AfVec2){start + 133.0F, top + 28.0F},
                        (AfVec2){start + 141.0F, top + 14.0F}, 3.0F,
                        (AfColor){0.78F, 0.42F, 0.96F, 1.0F}, 100120);
@@ -241,18 +244,24 @@ static void af_editor_render_toolbar(AfEditorState *editor) {
                        (AfColor){0.8F, 0.82F, 0.88F, 1.0F}, 100135);
     af_editor_add_text(editor, start + 130.0F, top + 30.0F, "PATH", 0.65F, 27.0F,
                        (AfColor){0.8F, 0.82F, 0.88F, 1.0F}, 100135);
-    af_editor_add_rect(editor, start + 172.0F, top + 12.0F, 48.0F, 5.0F,
+    af_editor_add_button_rect(editor, start + 172.0F, top + 3.0F, 88.0F, 18.0F,
+                              (AfColor){0.18F, 0.2F, 0.25F, 1.0F}, 100110);
+    af_editor_add_button_rect(editor, start + 172.0F, top + 22.0F, 88.0F, 20.0F,
+                              (AfColor){0.18F, 0.2F, 0.25F, 1.0F}, 100110);
+    af_editor_add_rect(editor, start + 178.0F, top + 8.0F, 7.0F, 9.0F,
                        editor->grid_visible ? (AfColor){0.35F, 0.7F, 0.98F, 1.0F}
                                             : (AfColor){0.4F, 0.42F, 0.48F, 1.0F},
-                       100120);
-    af_editor_add_rect(editor, start + 172.0F, top + 25.0F, 48.0F, 5.0F,
+                       100125);
+    af_editor_add_rect(editor, start + 178.0F, top + 27.0F, 7.0F, 9.0F,
                        editor->snapping ? (AfColor){0.96F, 0.55F, 0.25F, 1.0F}
                                         : (AfColor){0.4F, 0.42F, 0.48F, 1.0F},
-                       100120);
-    af_editor_add_text(editor, start + 225.0F, top + 10.0F, "GRID", 0.8F, 34.0F,
-                       (AfColor){0.69F, 0.72F, 0.8F, 1.0F}, 100130);
-    af_editor_add_text(editor, start + 225.0F, top + 24.0F, "SNAP", 0.8F, 34.0F,
-                       (AfColor){0.69F, 0.72F, 0.8F, 1.0F}, 100130);
+                       100125);
+    af_editor_add_text(editor, start + 191.0F, top + 8.0F,
+                       editor->grid_visible ? "GRID ON" : "GRID OFF", 0.65F, 62.0F,
+                       (AfColor){0.76F, 0.79F, 0.86F, 1.0F}, 100130);
+    af_editor_add_text(editor, start + 191.0F, top + 27.0F,
+                       editor->snapping ? "SNAP ON" : "SNAP OFF", 0.65F, 62.0F,
+                       (AfColor){0.76F, 0.79F, 0.86F, 1.0F}, 100130);
 }
 
 static void af_editor_render_color_picker(AfEditorState *editor, float x,
@@ -441,10 +450,10 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
         const float y =
             AF_EDITOR_INSPECTOR_SCALAR_Y + (float)index * AF_EDITOR_INSPECTOR_SCALAR_STEP;
         char value[64];
-        af_editor_add_rect(editor, x, y, 30.0F, 26.0F, (AfColor){0.24F, 0.26F, 0.32F, 1.0F},
-                           100120);
-        af_editor_add_rect(editor, x + 40.0F, y, 30.0F, 26.0F, (AfColor){0.24F, 0.26F, 0.32F, 1.0F},
-                           100120);
+        af_editor_add_button_rect(editor, x, y, 34.0F, 28.0F, (AfColor){0.24F, 0.26F, 0.32F, 1.0F},
+                                  100120);
+        af_editor_add_button_rect(editor, x + 38.0F, y, 34.0F, 28.0F,
+                                  (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
         af_editor_add_rect(editor, x + 8.0F, y + 12.0F, 14.0F, 2.0F,
                            (AfColor){0.75F, 0.78F, 0.84F, 1.0F}, 100130);
         af_editor_add_rect(editor, x + 48.0F, y + 12.0F, 14.0F, 2.0F,
@@ -489,10 +498,10 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
                                   (index == 3U && style->fill.type != AF_PAINT_SOLID))) {
                 button = (AfColor){0.22F, 0.58F, 0.96F, 1.0F};
             }
-            af_editor_add_rect(editor, x + (float)index * 38.0F, AF_EDITOR_STYLE_ROW_Y, 32.0F,
-                               28.0F, button, 100120);
-            af_editor_add_rect(editor, x + (float)index * 38.0F, AF_EDITOR_LAYOUT_ROW_Y, 32.0F,
-                               28.0F, (AfColor){0.28F, 0.3F, 0.37F, 1.0F}, 100120);
+            af_editor_add_button_rect(editor, x + (float)index * 38.0F, AF_EDITOR_STYLE_ROW_Y,
+                                      34.0F, 28.0F, button, 100120);
+            af_editor_add_button_rect(editor, x + (float)index * 38.0F, AF_EDITOR_LAYOUT_ROW_Y,
+                                      34.0F, 28.0F, (AfColor){0.28F, 0.3F, 0.37F, 1.0F}, 100120);
             af_editor_add_text(editor, x + (float)index * 38.0F + 4.0F,
                                AF_EDITOR_STYLE_ROW_Y + 9.0F, style_labels[index], 0.65F, 26.0F,
                                (AfColor){0.82F, 0.84F, 0.9F, 1.0F}, 100135);
@@ -523,11 +532,11 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
             af_editor_particle_labels(editor, emitter, labels);
             for (uint32_t page = 0U; page < AF_EDITOR_PARTICLE_PAGE_COUNT; ++page) {
                 const float page_x = x + (float)page * 32.0F;
-                af_editor_add_rect(editor, page_x, AF_EDITOR_PARTICLE_PAGE_Y, 29.0F, 23.0F,
-                                   page == editor->particle_page
-                                       ? (AfColor){0.18F, 0.48F, 0.76F, 1.0F}
-                                       : (AfColor){0.2F, 0.22F, 0.27F, 1.0F},
-                                   100120);
+                af_editor_add_button_rect(editor, page_x, AF_EDITOR_PARTICLE_PAGE_Y, 30.0F, 26.0F,
+                                          page == editor->particle_page
+                                              ? (AfColor){0.18F, 0.48F, 0.76F, 1.0F}
+                                              : (AfColor){0.2F, 0.22F, 0.27F, 1.0F},
+                                          100120);
                 af_editor_add_text(editor, page_x + 3.0F, AF_EDITOR_PARTICLE_PAGE_Y + 7.0F,
                                    page_names[page], 0.5F, 24.0F,
                                    (AfColor){0.86F, 0.89F, 0.95F, 1.0F}, 100135);
@@ -535,10 +544,10 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
             for (uint32_t row = 0U; row < AF_EDITOR_PARTICLE_ROW_COUNT; ++row) {
                 const float row_y =
                     AF_EDITOR_PARTICLE_ROW_Y + (float)row * AF_EDITOR_PARTICLE_ROW_STEP;
-                af_editor_add_rect(editor, x, row_y, 28.0F, 24.0F,
-                                   (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
-                af_editor_add_rect(editor, x + 34.0F, row_y, 28.0F, 24.0F,
-                                   (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
+                af_editor_add_button_rect(editor, x, row_y, 31.0F, 26.0F,
+                                          (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
+                af_editor_add_button_rect(editor, x + 34.0F, row_y, 31.0F, 26.0F,
+                                          (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
                 af_editor_add_text(editor, x + 9.0F, row_y + 6.0F, "-", 0.8F, 10.0F,
                                    (AfColor){0.85F, 0.87F, 0.92F, 1.0F}, 100135);
                 af_editor_add_text(editor, x + 42.0F, row_y + 6.0F, "+", 0.8F, 12.0F,

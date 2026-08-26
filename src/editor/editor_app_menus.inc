@@ -64,7 +64,8 @@ typedef enum AfEditorMenuAction {
     AF_EDITOR_MENU_ACTION_BUTTON_GUIDE,
     AF_EDITOR_MENU_ACTION_SHORTCUTS,
     AF_EDITOR_MENU_ACTION_CHECK_UPDATES,
-    AF_EDITOR_MENU_ACTION_ABOUT
+    AF_EDITOR_MENU_ACTION_ABOUT,
+    AF_EDITOR_MENU_ACTION_EXPORT
 } AfEditorMenuAction;
 
 static void af_editor_execute_workflow_action(AfEditorState *editor, AfEditorMenuAction action,
@@ -96,8 +97,9 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
                    {"SAVE PROJECT", "CTRL+S", AF_EDITOR_MENU_ACTION_SAVE_PROJECT},
                    {"SAVE PROJECT AS...", "CTRL+SHIFT+S", AF_EDITOR_MENU_ACTION_SAVE_PROJECT_AS},
                    {"COMPILE RUNTIME", "F5", AF_EDITOR_MENU_ACTION_COMPILE},
+                   {"EXPORT...", "CTRL+SHIFT+E", AF_EDITOR_MENU_ACTION_EXPORT},
                    {"EXIT", "ALT+F4", AF_EDITOR_MENU_ACTION_EXIT}},
-         .item_count = 9U},
+         .item_count = 10U},
         {.label = "EDIT",
          .width = 52.0F,
          .items = {{"UNDO", "CTRL+Z", AF_EDITOR_MENU_ACTION_UNDO},
@@ -321,6 +323,429 @@ static bool af_editor_project_path_with_extension(const char *path, char output[
     return true;
 }
 
+static bool af_editor_export_path_with_extension(const char *path, const char *extension,
+                                                 char output[], size_t capacity) {
+    const char *current_extension = NULL;
+    size_t length = 0U;
+    size_t extension_length = 0U;
+    if (path == NULL || path[0] == '\0' || extension == NULL || extension[0] != '.' ||
+        output == NULL || capacity == 0U) {
+        return false;
+    }
+    length = strlen(path);
+    extension_length = strlen(extension);
+    current_extension = strrchr(path, '.');
+    if (current_extension != NULL && strcmp(current_extension, extension) == 0) {
+        if (length >= capacity) {
+            return false;
+        }
+        memcpy(output, path, length + 1U);
+        return true;
+    }
+    if (length >= capacity || extension_length >= capacity - length) {
+        return false;
+    }
+    memcpy(output, path, length);
+    memcpy(output + length, extension, extension_length + 1U);
+    return true;
+}
+
+static void af_editor_export_default_path(const AfEditorState *editor, const char *extension,
+                                          char output[], size_t capacity) {
+    const char *slash = NULL;
+    const char *backslash = NULL;
+    const char *dot = NULL;
+    size_t prefix = 0U;
+    const size_t extension_length = strlen(extension);
+    if (editor->project_path[0] == '\0') {
+        (void)snprintf(output, capacity, "untitled%s", extension);
+        return;
+    }
+    prefix = strlen(editor->project_path);
+    slash = strrchr(editor->project_path, '/');
+    backslash = strrchr(editor->project_path, '\\');
+    dot = strrchr(editor->project_path, '.');
+    if (dot != NULL && (slash == NULL || dot > slash) && (backslash == NULL || dot > backslash)) {
+        prefix = (size_t)(dot - editor->project_path);
+    }
+    if (prefix >= capacity || extension_length >= capacity - prefix) {
+        (void)snprintf(output, capacity, "untitled%s", extension);
+        return;
+    }
+    memcpy(output, editor->project_path, prefix);
+    memcpy(output + prefix, extension, extension_length + 1U);
+}
+
+static AfResult af_editor_export_package_path(AfEditorState *editor, const char *path) {
+    AfPackageBlob package = {0};
+    char status[AF_EDITOR_STATUS_CAPACITY];
+    AfResult result = af_project_compile_release(&editor->project, &editor->allocator, &package);
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_package_validate(package.data, package.size);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_file_write_atomic(path, package.data, package.size, 1U);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        (void)snprintf(status, sizeof(status), "Runtime package exported (%zu KB)",
+                       (package.size + 1023U) / 1024U);
+        af_editor_status(editor, status);
+    } else {
+        af_editor_status(editor, "Runtime package export failed; destination was not replaced");
+    }
+    af_package_blob_destroy(&editor->allocator, &package);
+    return result;
+}
+
+static AfResult af_editor_export_svg_path(AfEditorState *editor, const char *path) {
+    AfInterchangeDiagnostics diagnostics = {0};
+    char status[AF_EDITOR_STATUS_CAPACITY];
+    char *output = NULL;
+    size_t capacity = 256U * 1024U;
+    size_t output_size = 0U;
+    AfResult result = AF_RESULT_LIMIT_EXCEEDED;
+    af_editor_update_preview(editor);
+    while (capacity <= AF_PROJECT_MAX_FILE_SIZE) {
+        output = af_allocate(&editor->allocator, capacity, _Alignof(char));
+        if (output == NULL) {
+            result = AF_RESULT_OUT_OF_MEMORY;
+            break;
+        }
+        af_interchange_diagnostics_clear(&diagnostics);
+        result =
+            af_interchange_export_static_svg(&editor->preview_scene, editor->project.canvas_size,
+                                             output, capacity, &output_size, &diagnostics);
+        if (result != AF_RESULT_LIMIT_EXCEEDED || capacity == AF_PROJECT_MAX_FILE_SIZE) {
+            break;
+        }
+        af_deallocate(&editor->allocator, output);
+        output = NULL;
+        capacity =
+            capacity > AF_PROJECT_MAX_FILE_SIZE / 2U ? AF_PROJECT_MAX_FILE_SIZE : capacity * 2U;
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result = af_file_write_atomic(path, output, output_size, 1U);
+    }
+    if (result == AF_RESULT_SUCCESS && diagnostics.warning_count != 0U) {
+        (void)snprintf(status, sizeof(status),
+                       "Static SVG exported with %u compatibility warning%s",
+                       diagnostics.warning_count, diagnostics.warning_count == 1U ? "" : "s");
+        af_editor_status(editor, status);
+    } else if (result == AF_RESULT_SUCCESS) {
+        af_editor_status(editor, "Static SVG exported at the current playhead frame");
+    } else {
+        af_editor_status(editor, "Static SVG export failed; destination was not replaced");
+    }
+    if (output != NULL) {
+        af_deallocate(&editor->allocator, output);
+    }
+    return result;
+}
+
+static AfResult af_editor_build_lottie(AfEditorState *editor, char **out_output,
+                                       size_t *out_output_size,
+                                       AfInterchangeDiagnostics *diagnostics) {
+    char *output = NULL;
+    size_t capacity = 256U * 1024U;
+    size_t output_size = 0U;
+    AfResult result = AF_RESULT_INVALID_ARGUMENT;
+    if (editor == NULL || out_output == NULL || out_output_size == NULL) {
+        return result;
+    }
+    *out_output = NULL;
+    *out_output_size = 0U;
+    if (af_project_find_clip_const(&editor->project, editor->selected_clip_id) == NULL) {
+        return AF_RESULT_NOT_FOUND;
+    }
+    while (capacity <= AF_PROJECT_MAX_FILE_SIZE) {
+        output = af_allocate(&editor->allocator, capacity, _Alignof(char));
+        if (output == NULL) {
+            return AF_RESULT_OUT_OF_MEMORY;
+        }
+        af_interchange_diagnostics_clear(diagnostics);
+        result = af_interchange_export_lottie_json(
+            &editor->project, editor->selected_clip_id,
+            &(AfLottieExportOptions){.frame_rate = AF_INTERCHANGE_DEFAULT_FRAME_RATE}, output,
+            capacity, &output_size, diagnostics);
+        if (result != AF_RESULT_LIMIT_EXCEEDED || capacity == AF_PROJECT_MAX_FILE_SIZE) {
+            break;
+        }
+        af_deallocate(&editor->allocator, output);
+        output = NULL;
+        capacity =
+            capacity > AF_PROJECT_MAX_FILE_SIZE / 2U ? AF_PROJECT_MAX_FILE_SIZE : capacity * 2U;
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        *out_output = output;
+        *out_output_size = output_size;
+    } else if (output != NULL) {
+        af_deallocate(&editor->allocator, output);
+    }
+    return result;
+}
+
+static AfResult af_editor_export_lottie_path(AfEditorState *editor, const char *path,
+                                             bool dotlottie) {
+    AfInterchangeDiagnostics diagnostics = {0};
+    char status[AF_EDITOR_STATUS_CAPACITY];
+    char *lottie = NULL;
+    size_t lottie_size = 0U;
+    uint8_t *archive = NULL;
+    size_t archive_capacity = 0U;
+    size_t archive_size = 0U;
+    AfResult result = af_editor_build_lottie(editor, &lottie, &lottie_size, &diagnostics);
+    if (result == AF_RESULT_SUCCESS && dotlottie) {
+        const size_t block_overhead = ((lottie_size + 65534U) / 65535U + 4U) * 5U;
+        if (lottie_size > SIZE_MAX - block_overhead - 2048U) {
+            result = AF_RESULT_LIMIT_EXCEEDED;
+        } else {
+            archive_capacity = lottie_size + block_overhead + 2048U;
+            archive = af_allocate(&editor->allocator, archive_capacity, _Alignof(uint8_t));
+            if (archive == NULL) {
+                result = AF_RESULT_OUT_OF_MEMORY;
+            }
+        }
+        if (result == AF_RESULT_SUCCESS) {
+            result = af_interchange_pack_dotlottie(lottie, lottie_size, archive, archive_capacity,
+                                                   &archive_size, &diagnostics);
+        }
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        result =
+            af_file_write_atomic(path, dotlottie ? (const void *)archive : (const void *)lottie,
+                                 dotlottie ? archive_size : lottie_size, 1U);
+    }
+    if (result == AF_RESULT_SUCCESS && diagnostics.warning_count != 0U) {
+        (void)snprintf(status, sizeof(status), "%s exported with %u compatibility warning%s",
+                       dotlottie ? "dotLottie" : "Lottie JSON", diagnostics.warning_count,
+                       diagnostics.warning_count == 1U ? "" : "s");
+        af_editor_status(editor, status);
+    } else if (result == AF_RESULT_SUCCESS) {
+        af_editor_status(editor, dotlottie ? "dotLottie animation exported"
+                                           : "Lottie JSON animation exported");
+    } else if (result == AF_RESULT_NOT_FOUND) {
+        af_editor_status(editor, "Create or select an animation clip before exporting");
+    } else {
+        af_editor_status(editor, dotlottie ? "dotLottie export failed; destination was not replaced"
+                                           : "Lottie export failed; destination was not replaced");
+    }
+    if (archive != NULL) {
+        af_deallocate(&editor->allocator, archive);
+    }
+    if (lottie != NULL) {
+        af_deallocate(&editor->allocator, lottie);
+    }
+    return result;
+}
+
+static void af_editor_remove_export_frames(const char *prefix, uint32_t frame_count) {
+    char frame_path[AF_EDITOR_PATH_CAPACITY];
+    if (prefix == NULL) {
+        return;
+    }
+    for (uint32_t frame = 0U; frame < frame_count; ++frame) {
+        if (snprintf(frame_path, sizeof(frame_path), "%s%06u.svg", prefix, frame) > 0) {
+            (void)remove(frame_path);
+        }
+    }
+}
+
+static bool af_editor_ffmpeg_sequence_pattern(const char *prefix, char *output, size_t capacity) {
+    size_t position = 0U;
+    if (prefix == NULL || output == NULL || capacity == 0U) {
+        return false;
+    }
+    for (size_t index = 0U; prefix[index] != '\0'; ++index) {
+        const size_t bytes = prefix[index] == '%' ? 2U : 1U;
+        if (bytes >= capacity - position) {
+            return false;
+        }
+        output[position++] = prefix[index];
+        if (prefix[index] == '%') {
+            output[position++] = '%';
+        }
+    }
+    if (9U >= capacity - position) {
+        return false;
+    }
+    memcpy(output + position, "%06d.svg", 9U);
+    return true;
+}
+
+static AfResult af_editor_export_media_path(AfEditorState *editor, const char *path, bool gif) {
+    const AfProjectClip *clip =
+        af_project_find_clip_const(&editor->project, editor->selected_clip_id);
+    const float frame_rate = 30.0F;
+    const float previous_playhead = editor->playhead;
+    const bool previous_playing = editor->preview_playing;
+    const uint64_t unique = SDL_GetTicksNS();
+    char prefix[AF_EDITOR_PATH_CAPACITY];
+    char pattern[AF_EDITOR_PATH_CAPACITY];
+    char frame_path[AF_EDITOR_PATH_CAPACITY];
+    char temporary_output[AF_EDITOR_PATH_CAPACITY];
+    char frame_rate_text[24];
+    char *svg = NULL;
+    size_t svg_capacity = 512U * 1024U;
+    size_t svg_size = 0U;
+    uint32_t frame_count = 0U;
+    uint32_t written_frames = 0U;
+    bool compatibility_warning = false;
+    AfResult result = AF_RESULT_SUCCESS;
+    if (clip == NULL) {
+        af_editor_status(editor, "Create or select an animation clip before exporting");
+        return AF_RESULT_NOT_FOUND;
+    }
+    if (!isfinite(clip->duration) || clip->duration < 0.0F ||
+        ceilf(clip->duration * frame_rate) > (float)AF_MAX_IMAGE_SEQUENCE_FRAMES) {
+        af_editor_status(editor, "Media export exceeds the 2,048 frame safety limit");
+        return AF_RESULT_LIMIT_EXCEEDED;
+    }
+    frame_count = (uint32_t)fmaxf(1.0F, ceilf(clip->duration * frame_rate));
+    {
+        const int prefix_length = snprintf(prefix, sizeof(prefix), "%s.arcflow-%llu-frame-", path,
+                                           (unsigned long long)unique);
+        const int temporary_length =
+            snprintf(temporary_output, sizeof(temporary_output), "%s.arcflow-%llu.tmp", path,
+                     (unsigned long long)unique);
+        if (prefix_length < 0 || (size_t)prefix_length >= sizeof(prefix) || temporary_length < 0 ||
+            (size_t)temporary_length >= sizeof(temporary_output) ||
+            strlen(prefix) + 10U >= sizeof(frame_path) ||
+            !af_editor_ffmpeg_sequence_pattern(prefix, pattern, sizeof(pattern))) {
+            af_editor_status(editor, "Export path is too long for temporary frames");
+            return AF_RESULT_LIMIT_EXCEEDED;
+        }
+    }
+    svg = af_allocate(&editor->allocator, svg_capacity, _Alignof(char));
+    if (svg == NULL) {
+        return AF_RESULT_OUT_OF_MEMORY;
+    }
+    editor->preview_playing = false;
+    for (uint32_t frame = 0U; frame < frame_count; ++frame) {
+        AfInterchangeDiagnostics diagnostics = {0};
+        editor->playhead = fminf(clip->duration, (float)frame / frame_rate);
+        af_editor_update_preview(editor);
+        for (;;) {
+            result = af_interchange_export_static_svg(&editor->preview_scene,
+                                                      editor->project.canvas_size, svg,
+                                                      svg_capacity, &svg_size, &diagnostics);
+            if (result != AF_RESULT_LIMIT_EXCEEDED || svg_capacity == AF_PROJECT_MAX_FILE_SIZE) {
+                break;
+            }
+            af_deallocate(&editor->allocator, svg);
+            svg_capacity = svg_capacity > AF_PROJECT_MAX_FILE_SIZE / 2U ? AF_PROJECT_MAX_FILE_SIZE
+                                                                        : svg_capacity * 2U;
+            svg = af_allocate(&editor->allocator, svg_capacity, _Alignof(char));
+            if (svg == NULL) {
+                result = AF_RESULT_OUT_OF_MEMORY;
+                break;
+            }
+            af_interchange_diagnostics_clear(&diagnostics);
+        }
+        if (result != AF_RESULT_SUCCESS ||
+            snprintf(frame_path, sizeof(frame_path), "%s%06u.svg", prefix, frame) < 0) {
+            break;
+        }
+        result = af_file_write(frame_path, svg, svg_size);
+        if (result != AF_RESULT_SUCCESS) {
+            break;
+        }
+        compatibility_warning = compatibility_warning || diagnostics.warning_count != 0U;
+        ++written_frames;
+    }
+    editor->playhead = previous_playhead;
+    editor->preview_playing = previous_playing;
+    af_editor_update_preview(editor);
+    if (result == AF_RESULT_SUCCESS) {
+        SDL_Process *process = NULL;
+        int exit_code = -1;
+        (void)snprintf(frame_rate_text, sizeof(frame_rate_text), "%.9g", (double)frame_rate);
+        if (gif) {
+            const char *const arguments[] = {
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-y",
+                "-framerate",
+                frame_rate_text,
+                "-start_number",
+                "0",
+                "-i",
+                pattern,
+                "-filter_complex",
+                "split[frames][palette];[palette]palettegen=reserve_transparent=1[p];"
+                "[frames][p]paletteuse=dither=sierra2_4a",
+                "-loop",
+                "0",
+                "-f",
+                "gif",
+                temporary_output,
+                NULL};
+            process = SDL_CreateProcess(arguments, false);
+        } else {
+            const char *const arguments[] = {
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-y",
+                "-framerate",
+                frame_rate_text,
+                "-start_number",
+                "0",
+                "-i",
+                pattern,
+                "-an",
+                "-vf",
+                "scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,format=yuv420p",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "18",
+                "-movflags",
+                "+faststart",
+                "-f",
+                "mp4",
+                temporary_output,
+                NULL};
+            process = SDL_CreateProcess(arguments, false);
+        }
+        if (process == NULL) {
+            result = AF_RESULT_UNSUPPORTED_FEATURE;
+        } else {
+            (void)SDL_WaitProcess(process, true, &exit_code);
+            SDL_DestroyProcess(process);
+            if (exit_code != 0) {
+                result = AF_RESULT_IO_ERROR;
+            }
+        }
+        if (result == AF_RESULT_SUCCESS && !SDL_RenamePath(temporary_output, path)) {
+            result = AF_RESULT_IO_ERROR;
+        }
+    }
+    (void)remove(temporary_output);
+    af_editor_remove_export_frames(prefix, written_frames);
+    if (svg != NULL) {
+        af_deallocate(&editor->allocator, svg);
+    }
+    if (result == AF_RESULT_SUCCESS && compatibility_warning) {
+        af_editor_status(editor, gif ? "GIF exported; unsupported vector effects were omitted"
+                                     : "MP4 exported; unsupported vector effects were omitted");
+    } else if (result == AF_RESULT_SUCCESS) {
+        af_editor_status(editor, gif ? "Animated GIF exported" : "H.264 MP4 exported");
+    } else if (result == AF_RESULT_UNSUPPORTED_FEATURE) {
+        af_editor_status(editor, "FFmpeg was not found; install it to export GIF or MP4");
+    } else {
+        af_editor_status(editor, gif ? "GIF export failed; destination was not replaced"
+                                     : "MP4 export failed; destination was not replaced");
+    }
+    return result;
+}
+
 static void SDLCALL af_editor_project_dialog_callback(void *userdata, const char *const *filelist,
                                                       int filter) {
     AfEditorState *editor = userdata;
@@ -350,8 +775,13 @@ static void af_editor_show_project_dialog(AfEditorState *editor, AfEditorDialogA
         {"JPEG", "jpg;jpeg"},
         {"KTX2", "ktx2"},
         {"SVG", "svg"}};
-    static const SDL_DialogFileFilter update_filters[] = {
-        {"Arcflow Update Manifest", "afupdate"}};
+    static const SDL_DialogFileFilter update_filters[] = {{"Arcflow Update Manifest", "afupdate"}};
+    static const SDL_DialogFileFilter package_filters[] = {{"Arcflow Runtime Package", "afp"}};
+    static const SDL_DialogFileFilter svg_filters[] = {{"Scalable Vector Graphics", "svg"}};
+    static const SDL_DialogFileFilter lottie_filters[] = {{"Lottie JSON Animation", "json"}};
+    static const SDL_DialogFileFilter dotlottie_filters[] = {{"dotLottie Animation", "lottie"}};
+    static const SDL_DialogFileFilter gif_filters[] = {{"Animated GIF", "gif"}};
+    static const SDL_DialogFileFilter mp4_filters[] = {{"MPEG-4 Video", "mp4"}};
     if (editor->dialog_active || action == AF_EDITOR_DIALOG_NONE) {
         return;
     }
@@ -370,13 +800,41 @@ static void af_editor_show_project_dialog(AfEditorState *editor, AfEditorDialogA
             &editor->window, af_editor_project_dialog_callback, editor, filters, 1,
             editor->project_path[0] == '\0' ? "untitled.afproj" : editor->project_path);
     } else if (action == AF_EDITOR_DIALOG_UPDATE_MANIFEST) {
-        (void)af_platform_show_open_file_dialog(
-            &editor->window, af_editor_project_dialog_callback, editor, update_filters, 1, NULL,
-            false);
+        (void)af_platform_show_open_file_dialog(&editor->window, af_editor_project_dialog_callback,
+                                                editor, update_filters, 1, NULL, false);
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_PACKAGE) {
+        char default_path[AF_EDITOR_PATH_CAPACITY];
+        af_editor_export_default_path(editor, ".afp", default_path, sizeof(default_path));
+        (void)af_platform_show_save_file_dialog(&editor->window, af_editor_project_dialog_callback,
+                                                editor, package_filters, 1, default_path);
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_SVG) {
+        char default_path[AF_EDITOR_PATH_CAPACITY];
+        af_editor_export_default_path(editor, ".svg", default_path, sizeof(default_path));
+        (void)af_platform_show_save_file_dialog(&editor->window, af_editor_project_dialog_callback,
+                                                editor, svg_filters, 1, default_path);
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_LOTTIE) {
+        char default_path[AF_EDITOR_PATH_CAPACITY];
+        af_editor_export_default_path(editor, ".json", default_path, sizeof(default_path));
+        (void)af_platform_show_save_file_dialog(&editor->window, af_editor_project_dialog_callback,
+                                                editor, lottie_filters, 1, default_path);
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_DOTLOTTIE) {
+        char default_path[AF_EDITOR_PATH_CAPACITY];
+        af_editor_export_default_path(editor, ".lottie", default_path, sizeof(default_path));
+        (void)af_platform_show_save_file_dialog(&editor->window, af_editor_project_dialog_callback,
+                                                editor, dotlottie_filters, 1, default_path);
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_GIF) {
+        char default_path[AF_EDITOR_PATH_CAPACITY];
+        af_editor_export_default_path(editor, ".gif", default_path, sizeof(default_path));
+        (void)af_platform_show_save_file_dialog(&editor->window, af_editor_project_dialog_callback,
+                                                editor, gif_filters, 1, default_path);
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_MP4) {
+        char default_path[AF_EDITOR_PATH_CAPACITY];
+        af_editor_export_default_path(editor, ".mp4", default_path, sizeof(default_path));
+        (void)af_platform_show_save_file_dialog(&editor->window, af_editor_project_dialog_callback,
+                                                editor, mp4_filters, 1, default_path);
     } else {
-        (void)af_platform_show_open_file_dialog(&editor->window,
-                                                af_editor_project_dialog_callback, editor,
-                                                image_filters, 5, NULL, false);
+        (void)af_platform_show_open_file_dialog(&editor->window, af_editor_project_dialog_callback,
+                                                editor, image_filters, 5, NULL, false);
     }
 }
 
@@ -417,6 +875,49 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
         } else {
             af_editor_status(editor, "Project path is too long");
         }
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_PACKAGE) {
+        char export_path[AF_EDITOR_PATH_CAPACITY];
+        if (af_editor_export_path_with_extension(path, ".afp", export_path, sizeof(export_path))) {
+            (void)af_editor_export_package_path(editor, export_path);
+        } else {
+            af_editor_status(editor, "Export path is too long");
+        }
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_SVG) {
+        char export_path[AF_EDITOR_PATH_CAPACITY];
+        if (af_editor_export_path_with_extension(path, ".svg", export_path, sizeof(export_path))) {
+            (void)af_editor_export_svg_path(editor, export_path);
+        } else {
+            af_editor_status(editor, "Export path is too long");
+        }
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_LOTTIE) {
+        char export_path[AF_EDITOR_PATH_CAPACITY];
+        if (af_editor_export_path_with_extension(path, ".json", export_path, sizeof(export_path))) {
+            (void)af_editor_export_lottie_path(editor, export_path, false);
+        } else {
+            af_editor_status(editor, "Export path is too long");
+        }
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_DOTLOTTIE) {
+        char export_path[AF_EDITOR_PATH_CAPACITY];
+        if (af_editor_export_path_with_extension(path, ".lottie", export_path,
+                                                 sizeof(export_path))) {
+            (void)af_editor_export_lottie_path(editor, export_path, true);
+        } else {
+            af_editor_status(editor, "Export path is too long");
+        }
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_GIF) {
+        char export_path[AF_EDITOR_PATH_CAPACITY];
+        if (af_editor_export_path_with_extension(path, ".gif", export_path, sizeof(export_path))) {
+            (void)af_editor_export_media_path(editor, export_path, true);
+        } else {
+            af_editor_status(editor, "Export path is too long");
+        }
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_MP4) {
+        char export_path[AF_EDITOR_PATH_CAPACITY];
+        if (af_editor_export_path_with_extension(path, ".mp4", export_path, sizeof(export_path))) {
+            (void)af_editor_export_media_path(editor, export_path, false);
+        } else {
+            af_editor_status(editor, "Export path is too long");
+        }
     } else if (action == AF_EDITOR_DIALOG_REPAIR_IMAGE) {
         const AfResult result = af_project_repair_image_source(
             &editor->project, editor->project_path, editor->selected_asset_id, path);
@@ -432,7 +933,7 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
         AfSemanticVersion current = {0};
         AfReleaseChannel channel = AF_RELEASE_CHANNEL_DEVELOPMENT;
         AfResult update_result = af_file_read_limited(path, AF_UPDATE_MANIFEST_MAX_SIZE,
-                                                       &editor->allocator, &manifest_file);
+                                                      &editor->allocator, &manifest_file);
         if (update_result == AF_RESULT_SUCCESS) {
             update_result = af_update_manifest_parse(manifest_file.data, manifest_file.size,
                                                      &editor->update_manifest);
@@ -445,8 +946,7 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
         }
         if (update_result == AF_RESULT_SUCCESS) {
             editor->update_status = af_update_check(&editor->update_manifest, current, channel,
-                                                    AF_RUNTIME_VERSION,
-                                                    AF_PACKAGE_FORMAT_VERSION);
+                                                    AF_RUNTIME_VERSION, AF_PACKAGE_FORMAT_VERSION);
             editor->update_checked = true;
         } else {
             editor->update_checked = false;
@@ -540,6 +1040,11 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         } else {
             (void)af_editor_compile(editor);
         }
+        break;
+    case AF_EDITOR_MENU_ACTION_EXPORT:
+        editor->export_panel_visible = true;
+        editor->preview_playing = false;
+        af_editor_status(editor, "Choose an export format");
         break;
     case AF_EDITOR_MENU_ACTION_EXIT:
         if (!editor->dialog_active && af_editor_confirm_discard(editor, "Exit Arcflow Editor?")) {
@@ -720,8 +1225,8 @@ static void af_editor_render_help_overlay(AfEditorState *editor, int width, int 
     af_editor_add_text(editor, x + 22.0F, y + 20.0F, "ARCFLOW EDITOR QUICK GUIDE", 1.4F,
                        box_width - 44.0F, (AfColor){0.62F, 0.8F, 1.0F, 1.0F}, 220010);
     af_editor_add_text(editor, x + 22.0F, y + 58.0F,
-                       "FILE: create, open, save and compile projects", 1.0F, box_width - 44.0F,
-                       (AfColor){0.83F, 0.85F, 0.9F, 1.0F}, 220010);
+                       "FILE: create, open, save, compile and export projects", 1.0F,
+                       box_width - 44.0F, (AfColor){0.83F, 0.85F, 0.9F, 1.0F}, 220010);
     af_editor_add_text(editor, x + 22.0F, y + 87.0F,
                        "EDIT: undo, redo, duplicate, rename and multi-select", 1.0F,
                        box_width - 44.0F, (AfColor){0.83F, 0.85F, 0.9F, 1.0F}, 220010);

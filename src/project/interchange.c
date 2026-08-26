@@ -3,6 +3,7 @@
 #include "core/png.h"
 #include "core/safe_math.h"
 #include "path/path.h"
+#include "project/project.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -577,6 +578,8 @@ output_limit:
                           "Static SVG output capacity is too small");
     return AF_RESULT_LIMIT_EXCEEDED;
 }
+
+#include "project/interchange_lottie.inc"
 
 AfResult af_interchange_transaction_execute(AfAllocator *allocator, void *user_data,
                                             AfInterchangeStageCallback stage,

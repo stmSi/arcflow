@@ -255,13 +255,13 @@ static void af_editor_begin_transform_key_drag(AfEditorState *editor, AfProperty
         }
         editor->transform_drag_node_ids[drag_index] = node_id;
         editor->transform_drag_key_ids[drag_index] = key->id;
-        editor->transform_drag_key_starts[drag_index] = (AfVec2){value[0], value[1]};
+        memcpy(editor->transform_drag_key_starts[drag_index], value, sizeof(value));
         editor->transform_drag_key_created[drag_index] = created;
         ++editor->transform_drag_key_count;
     }
     if (editor->transform_drag_key_count != 0U) {
         editor->preview_playing = false;
-        af_editor_status(editor, "Transform auto-key active at playhead");
+        af_editor_status(editor, "Auto-key active at playhead");
     }
 }
 
@@ -296,8 +296,11 @@ static AfResult af_editor_commit_transform_key_drag(AfEditorState *editor, bool 
                                            allow_merge && editor->transform_drag_key_count == 1U);
     }
     if (result == AF_RESULT_SUCCESS) {
+        editor->selected_keyframe_count = editor->transform_drag_key_count;
+        memcpy(editor->selected_keyframes, editor->transform_drag_key_ids,
+               (size_t)editor->selected_keyframe_count * sizeof(editor->selected_keyframes[0]));
         af_editor_mark_dirty(editor);
-        af_editor_status(editor, "Transform keyframe edited");
+        af_editor_status(editor, "Animation keyframe edited");
     } else {
         for (uint32_t index = editor->transform_drag_key_count; index > 0U; --index) {
             const uint32_t rollback = index - 1U;
