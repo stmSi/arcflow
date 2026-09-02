@@ -35,6 +35,7 @@ typedef struct AfAffine2 {
 
 AfAffine2 af_affine_identity(void);
 AfAffine2 af_affine_from_transform(AfTransform2D transform);
+AfAffine2 af_affine_from_transform_pivot(AfTransform2D transform, AfVec2 pivot);
 AfAffine2 af_affine_multiply(AfAffine2 parent, AfAffine2 child);
 AfVec2 af_affine_transform_point(AfAffine2 transform, AfVec2 point);
 bool af_affine_inverse(AfAffine2 transform, AfAffine2 *out_inverse);

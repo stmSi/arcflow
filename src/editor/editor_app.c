@@ -9,8 +9,10 @@
 #include "editor/editor_actions.h"
 #include "editor/editor_commands.h"
 #include "editor/editor_gizmo.h"
+#include "editor/editor_inspector.h"
 #include "editor/editor_preferences.h"
 #include "editor/editor_recovery.h"
+#include "editor/editor_vector_tools.h"
 #include "editor/editor_workflow.h"
 #include "onboarding/onboarding.h"
 #include "performance/metrics.h"
@@ -61,17 +63,22 @@
 #define AF_EDITOR_COLOR_SV_HEIGHT 86.0F
 #define AF_EDITOR_COLOR_HUE_X 150.0F
 #define AF_EDITOR_COLOR_HUE_WIDTH 16.0F
+#define AF_EDITOR_COLOR_TARGET_Y 52.0F
+#define AF_EDITOR_COLOR_TARGET_HEIGHT 20.0F
 #define AF_EDITOR_COLOR_ALPHA_Y 170.0F
 #define AF_EDITOR_COLOR_ALPHA_HEIGHT 14.0F
-#define AF_EDITOR_INSPECTOR_SCALAR_Y 210.0F
-#define AF_EDITOR_INSPECTOR_SCALAR_STEP 44.0F
-#define AF_EDITOR_STYLE_BAR_Y 382.0F
-#define AF_EDITOR_STYLE_LABEL_Y 400.0F
-#define AF_EDITOR_STYLE_ROW_Y 414.0F
-#define AF_EDITOR_LAYOUT_ROW_Y 450.0F
-#define AF_EDITOR_PARTICLE_LABEL_Y 493.0F
-#define AF_EDITOR_PARTICLE_PAGE_Y 510.0F
-#define AF_EDITOR_PARTICLE_ROW_Y 540.0F
+#define AF_EDITOR_COLOR_HEX_Y 190.0F
+#define AF_EDITOR_COLOR_COMPONENT_Y 218.0F
+#define AF_EDITOR_INSPECTOR_LABEL_Y 249.0F
+#define AF_EDITOR_INSPECTOR_FIELD_Y 264.0F
+#define AF_EDITOR_INSPECTOR_FIELD_HEIGHT 26.0F
+#define AF_EDITOR_INSPECTOR_FIELD_STEP 30.0F
+#define AF_EDITOR_STYLE_BAR_Y 416.0F
+#define AF_EDITOR_STYLE_ROW_Y 448.0F
+#define AF_EDITOR_LAYOUT_ROW_Y 484.0F
+#define AF_EDITOR_PARTICLE_LABEL_Y 527.0F
+#define AF_EDITOR_PARTICLE_PAGE_Y 544.0F
+#define AF_EDITOR_PARTICLE_ROW_Y 574.0F
 #define AF_EDITOR_PARTICLE_ROW_STEP 29.0F
 #define AF_EDITOR_PARTICLE_ROW_COUNT 8U
 #define AF_EDITOR_PARTICLE_PAGE_COUNT 7U
@@ -103,10 +110,13 @@ typedef enum AfEditorDragMode {
     AF_EDITOR_DRAG_PATH_POINT,
     AF_EDITOR_DRAG_PATH_CONTROL1,
     AF_EDITOR_DRAG_PATH_CONTROL2,
+    AF_EDITOR_DRAG_PATH_SEGMENT,
     AF_EDITOR_DRAG_CANVAS_BOX,
     AF_EDITOR_DRAG_COLOR_SV,
     AF_EDITOR_DRAG_COLOR_HUE,
-    AF_EDITOR_DRAG_COLOR_ALPHA
+    AF_EDITOR_DRAG_COLOR_ALPHA,
+    AF_EDITOR_DRAG_INSPECTOR_SCRUB,
+    AF_EDITOR_DRAG_TOOL_CREATE
 } AfEditorDragMode;
 
 typedef enum AfEditorContextMenu {
@@ -153,6 +163,26 @@ typedef enum AfEditorDialogAction {
     AF_EDITOR_DIALOG_EXPORT_MP4
 } AfEditorDialogAction;
 
+typedef enum AfEditorInspectorField {
+    AF_EDITOR_INSPECTOR_NONE = 0,
+    AF_EDITOR_INSPECTOR_COLOR_HEX,
+    AF_EDITOR_INSPECTOR_COLOR_R,
+    AF_EDITOR_INSPECTOR_COLOR_G,
+    AF_EDITOR_INSPECTOR_COLOR_B,
+    AF_EDITOR_INSPECTOR_COLOR_A,
+    AF_EDITOR_INSPECTOR_POSITION_X,
+    AF_EDITOR_INSPECTOR_POSITION_Y,
+    AF_EDITOR_INSPECTOR_WIDTH,
+    AF_EDITOR_INSPECTOR_HEIGHT,
+    AF_EDITOR_INSPECTOR_SCALE_X,
+    AF_EDITOR_INSPECTOR_SCALE_Y,
+    AF_EDITOR_INSPECTOR_ROTATION,
+    AF_EDITOR_INSPECTOR_OPACITY,
+    AF_EDITOR_INSPECTOR_RADIUS,
+    AF_EDITOR_INSPECTOR_LAYER,
+    AF_EDITOR_INSPECTOR_OUTLINE_WIDTH
+} AfEditorInspectorField;
+
 typedef struct AfEditorContextMenuInfo {
     const char *title;
     const char *items[7];
@@ -195,6 +225,7 @@ typedef struct AfEditorState {
     AfVec2 pan;
     float grid_step;
     float color_hue;
+    bool color_target_outline;
     uint32_t particle_page;
     bool grid_visible;
     bool snapping;
@@ -226,11 +257,16 @@ typedef struct AfEditorState {
     AfGlyphPlacement *text_glyphs;
     AfTextLine *text_lines;
     uint32_t selected_path_command;
+    uint64_t path_command_selection_node_id;
+    uint32_t selected_path_commands[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY];
+    uint32_t selected_path_command_count;
     AfProjectPathSnapshot path_drag_before;
     AfPathCommand path_drag_commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
     AfProjectKeyframeSnapshot path_key_drag_before;
     uint64_t path_drag_key_id;
     bool path_key_drag;
+    float path_segment_t;
+    AfVec2 path_segment_start;
     bool timeline_focus;
     bool curve_visible;
     bool preview_playing;
@@ -242,6 +278,7 @@ typedef struct AfEditorState {
     uint32_t selection_drag_count;
     uint64_t transform_drag_node_ids[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     uint64_t transform_drag_key_ids[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    AfPropertyType transform_drag_key_properties[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     float transform_drag_key_starts[AF_EDITOR_COMMAND_MAX_SNAPSHOTS][4];
     AfProjectKeyframeSnapshot transform_drag_key_before[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     bool transform_drag_key_created[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
@@ -249,10 +286,32 @@ typedef struct AfEditorState {
     AfPropertyType transform_drag_property;
     AfEditorGizmoHandle gizmo_handle;
     AfTransform2D gizmo_start_transform;
+    AfAffine2 gizmo_start_parent_affine;
+    AfVec2 gizmo_start_pivot;
+    AfVec2 gizmo_start_pivot_parent;
+    AfLayoutNode gizmo_start_layout;
+    bool gizmo_start_has_layout;
+    bool gizmo_position_changed;
     float gizmo_start_angle;
     AfVec2 canvas_box_start;
     AfVec2 canvas_box_current;
     bool canvas_box_additive;
+    AfEditorVectorTool active_tool;
+    AfVec2 tool_start;
+    AfVec2 tool_current;
+    AfVec2 tool_points[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY];
+    uint32_t tool_point_count;
+    AfPathCommand tool_commands[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U];
+    uint32_t tool_command_count;
+    AfVec2 tool_pen_outgoing;
+    bool tool_pen_has_outgoing;
+    AfEditorInspectorField inspector_field;
+    bool inspector_replace;
+    bool inspector_ratio_locked;
+    AfEditorInspectorField inspector_scrub_field;
+    float inspector_scrub_start_value;
+    bool inspector_scrub_changed;
+    char inspector_buffer[48];
     bool rename_active;
     AfProjectNodeSnapshot rename_before;
     char rename_buffer[AF_PROJECT_NAME_CAPACITY];
@@ -269,6 +328,9 @@ typedef struct AfEditorState {
     bool context_smoke;
     bool tooltip_smoke;
     bool selection_smoke;
+    bool outline_smoke;
+    bool inspector_smoke;
+    bool vector_tools_smoke;
     bool vfx_smoke;
     bool particle_view_smoke;
     bool vector_animation_smoke;
@@ -279,6 +341,11 @@ typedef struct AfEditorState {
     bool release_smoke;
     bool onboarding_smoke;
     bool vector_animation_smoke_prepared;
+    bool outline_smoke_prepared;
+    uint32_t inspector_smoke_stage;
+    uint32_t vector_tools_smoke_stage;
+    uint32_t vector_tools_smoke_scene_start;
+    uint32_t vector_tools_smoke_path_start;
     bool dialog_active;
     bool export_panel_visible;
     bool help_overlay;
@@ -368,10 +435,12 @@ static void af_editor_onboarding_show_welcome(AfEditorState *editor);
 static void af_editor_onboarding_show_examples(AfEditorState *editor);
 static void af_editor_onboarding_show_guides(AfEditorState *editor, AfOnboardingTopic topic);
 static void af_editor_collaboration_release(AfEditorState *editor);
+static AfColor af_editor_inspector_color(const AfEditorState *editor, const AfSceneNode *node);
 static void af_editor_collaboration_track_path(AfEditorState *editor);
 static void af_editor_collaboration_saved(AfEditorState *editor);
 static void af_editor_collaboration_update(AfEditorState *editor, uint64_t now_ns);
 static bool af_editor_hierarchy_name_matches(const AfEditorState *editor, uint32_t node_index);
+static AfVec2 af_editor_tool_line_end(AfVec2 start, AfVec2 end, SDL_Keymod modifiers);
 
 // clang-format off
 #include "editor/editor_app_core.inc"
@@ -519,6 +588,7 @@ int af_editor_run(int argument_count, char **arguments) {
     af_scene_init(&editor.render_scene, editor.render_nodes, AF_MAX_NODES);
     af_scene_init(&editor.preview_scene, editor.preview_nodes, AF_EDITOR_PROJECT_CAPACITY);
     editor.render_scene.paths = &editor.render_path_data;
+    editor.render_scene.styles = &editor.project.style_data;
     editor.render_scene.images = &editor.project.image_data;
     editor.render_scene.particles = &editor.project.particle_data;
     editor.preview_scene.paths = &editor.project.path_data;
@@ -618,12 +688,361 @@ int af_editor_run(int argument_count, char **arguments) {
                 editor.playhead =
                     clip->duration * (float)editor.rendered_frames / (float)denominator;
             }
+        } else if (editor.outline_smoke && !editor.outline_smoke_prepared) {
+            af_editor_prepare_outline_smoke(&editor);
+            editor.outline_smoke_prepared = true;
+        }
+        if (editor.vector_tools_smoke && editor.vector_tools_smoke_stage < 7U) {
+            const float toolbar_start = editor.left_width + 14.0F;
+            const float canvas_left = editor.left_width + 90.0F;
+            const float canvas_top = AF_EDITOR_TOOLBAR_HEIGHT + 90.0F;
+            SDL_MouseButtonEvent click = {.button = SDL_BUTTON_LEFT, .down = true, .clicks = 1U};
+            if (editor.vector_tools_smoke_stage == 0U) {
+                editor.vector_tools_smoke_scene_start = editor.project.scene.count;
+                editor.vector_tools_smoke_path_start = editor.project.path_data.path_count;
+            }
+            {
+                static const AfEditorVectorTool tools[7] = {
+                    AF_EDITOR_TOOL_RECTANGLE, AF_EDITOR_TOOL_STAR,
+                    AF_EDITOR_TOOL_PENCIL,    AF_EDITOR_TOOL_PEN,
+                    AF_EDITOR_TOOL_SCISSORS,  AF_EDITOR_TOOL_SEGMENT_DELETE,
+                    AF_EDITOR_TOOL_NODE};
+                click.x =
+                    toolbar_start + (float)tools[editor.vector_tools_smoke_stage] * 42.0F + 16.0F;
+                click.y = AF_EDITOR_MENU_HEIGHT + 16.0F;
+                af_editor_mouse_down(&editor, width, height, &click, SDL_KMOD_NONE);
+            }
+            if (editor.vector_tools_smoke_stage == 0U || editor.vector_tools_smoke_stage == 1U) {
+                SDL_MouseMotionEvent motion = {0};
+                click.x = canvas_left + (float)editor.vector_tools_smoke_stage * 220.0F;
+                click.y = canvas_top;
+                af_editor_mouse_down(&editor, width, height, &click, SDL_KMOD_NONE);
+                motion.x = click.x + 170.0F;
+                motion.y = click.y + 120.0F;
+                motion.xrel = 170.0F;
+                motion.yrel = 120.0F;
+                af_editor_mouse_motion(&editor, width, height, &motion);
+                af_editor_mouse_up(&editor, width, height);
+            } else if (editor.vector_tools_smoke_stage == 2U) {
+                click.x = canvas_left + 80.0F;
+                click.y = canvas_top + 220.0F;
+                af_editor_mouse_down(&editor, width, height, &click, SDL_KMOD_NONE);
+                for (uint32_t point = 1U; point <= 12U; ++point) {
+                    SDL_MouseMotionEvent motion = {.x = click.x + (float)point * 18.0F,
+                                                   .y = click.y + sinf((float)point * 0.7F) * 34.0F,
+                                                   .xrel = 18.0F};
+                    af_editor_mouse_motion(&editor, width, height, &motion);
+                }
+                af_editor_mouse_up(&editor, width, height);
+            } else if (editor.vector_tools_smoke_stage == 3U) {
+                static const AfVec2 points[3] = {
+                    {520.0F, 170.0F}, {660.0F, 270.0F}, {500.0F, 350.0F}};
+                for (uint32_t point = 0U; point < 3U; ++point) {
+                    click.x = editor.left_width + points[point].x;
+                    click.y = points[point].y;
+                    click.clicks = point == 2U ? 2U : 1U;
+                    af_editor_mouse_down(&editor, width, height, &click, SDL_KMOD_NONE);
+                    if (point == 1U) {
+                        SDL_MouseMotionEvent motion = {.x = click.x + 34.0F,
+                                                       .y = click.y - 28.0F,
+                                                       .xrel = 34.0F,
+                                                       .yrel = -28.0F};
+                        af_editor_mouse_motion(&editor, width, height, &motion);
+                    }
+                    af_editor_mouse_up(&editor, width, height);
+                }
+            } else if (editor.vector_tools_smoke_stage == 4U) {
+                const AfSceneNode *node =
+                    af_scene_find_const(&editor.preview_scene, editor.selected_id);
+                const AfPath *path =
+                    af_path_find_node_const(&editor.render_path_data, editor.selected_id);
+                if (node == NULL || path == NULL || path->command_count <= 1U) {
+                    result = AF_RESULT_INVALID_ARGUMENT;
+                    goto cleanup;
+                }
+                {
+                    const AfPathCommand *commands =
+                        &editor.render_path_data.commands[path->command_start];
+                    const AfVec2 local =
+                        af_editor_path_segment_point(commands[0].point, &commands[1], 0.5F);
+                    const AfVec2 screen = af_affine_transform_point(
+                        af_affine_multiply(af_editor_camera(&editor, width, height),
+                                           node->world_transform),
+                        local);
+                    click.x = screen.x;
+                    click.y = screen.y;
+                    af_editor_mouse_down(&editor, width, height, &click, SDL_KMOD_NONE);
+                }
+            } else if (editor.vector_tools_smoke_stage == 5U) {
+                const AfSceneNode *node =
+                    af_scene_find_const(&editor.preview_scene, editor.selected_id);
+                const AfPath *path =
+                    af_path_find_node_const(&editor.render_path_data, editor.selected_id);
+                if (node == NULL || path == NULL || path->command_count <= 3U) {
+                    result = AF_RESULT_INVALID_ARGUMENT;
+                    goto cleanup;
+                }
+                {
+                    const AfPathCommand *commands =
+                        &editor.render_path_data.commands[path->command_start];
+                    const AfVec2 local =
+                        af_editor_path_segment_point(commands[2].point, &commands[3], 0.5F);
+                    const AfVec2 screen = af_affine_transform_point(
+                        af_affine_multiply(af_editor_camera(&editor, width, height),
+                                           node->world_transform),
+                        local);
+                    click.x = screen.x;
+                    click.y = screen.y;
+                    af_editor_mouse_down(&editor, width, height, &click, SDL_KMOD_NONE);
+                }
+            } else {
+                const AfPath *path =
+                    af_path_find_node_const(&editor.project.path_data, editor.selected_id);
+                if (path != NULL && path->command_count > 2U) {
+                    float action_canvas_x = 0.0F;
+                    float action_canvas_y = 0.0F;
+                    float action_canvas_width = 0.0F;
+                    float action_canvas_height = 0.0F;
+                    af_editor_path_selection_clear(&editor);
+                    for (uint32_t command_index = 0U; command_index < path->command_count;
+                         ++command_index) {
+                        if (editor.project.path_data.commands[path->command_start + command_index]
+                                .type != AF_PATH_CLOSE) {
+                            (void)af_editor_path_selection_add(&editor, command_index);
+                        }
+                    }
+                    af_editor_layout(&editor, width, height, &action_canvas_x, &action_canvas_y,
+                                     &action_canvas_width, &action_canvas_height);
+                    (void)action_canvas_width;
+                    (void)action_canvas_height;
+                    if (!af_editor_path_action_mouse_down(
+                            &editor, width, height,
+                            (AfVec2){action_canvas_x + 12.0F + 692.0F + 35.0F,
+                                     action_canvas_y + AF_EDITOR_PATH_ACTION_Y + 16.0F},
+                            SDL_KMOD_NONE)) {
+                        result = AF_RESULT_INVALID_ARGUMENT;
+                        goto cleanup;
+                    }
+                    editor.selected_path_command = 1U;
+                    af_editor_path_selection_only(&editor, editor.selected_path_command);
+                    editor.selected_property = AF_PROPERTY_PATH_CONTROL_IN;
+                    if (af_editor_add_keyframe(&editor) != AF_RESULT_SUCCESS) {
+                        result = AF_RESULT_INVALID_ARGUMENT;
+                        goto cleanup;
+                    }
+                    for (uint32_t command_index = 0U; command_index < path->command_count;
+                         ++command_index) {
+                        if (editor.project.path_data.commands[path->command_start + command_index]
+                                .type != AF_PATH_CLOSE) {
+                            (void)af_editor_path_selection_add(&editor, command_index);
+                        }
+                    }
+                    editor.selected_path_command = 1U;
+                }
+            }
+            af_editor_update_preview(&editor);
+            {
+                const uint32_t stage = editor.vector_tools_smoke_stage;
+                const uint32_t expected_nodes =
+                    editor.vector_tools_smoke_scene_start + (stage < 4U ? stage + 1U : 4U);
+                const uint32_t expected_paths = editor.vector_tools_smoke_path_start +
+                                                (stage == 0U ? 0U : (stage < 4U ? stage : 3U));
+                bool pen_curve = stage < 3U;
+                bool animated_handle = stage < 6U;
+                bool scissors_cut = stage < 4U;
+                bool segment_deleted = stage < 5U;
+                const AfPath *selected_path =
+                    af_path_find_node_const(&editor.project.path_data, editor.selected_id);
+                if (stage >= 3U && selected_path != NULL) {
+                    for (uint32_t command = 0U; command < selected_path->command_count; ++command) {
+                        if (editor.project.path_data
+                                .commands[selected_path->command_start + command]
+                                .type == AF_PATH_CUBIC) {
+                            pen_curve = true;
+                            break;
+                        }
+                    }
+                }
+                if (stage >= 4U && selected_path != NULL) {
+                    uint32_t move_count = 0U;
+                    for (uint32_t command = 0U; command < selected_path->command_count; ++command) {
+                        move_count += editor.project.path_data
+                                          .commands[selected_path->command_start + command]
+                                          .type == AF_PATH_MOVE;
+                    }
+                    scissors_cut = move_count >= 2U;
+                    if (stage >= 5U) {
+                        segment_deleted = selected_path->command_count == 4U;
+                    }
+                }
+                if (stage >= 6U) {
+                    for (uint32_t track = 0U; track < editor.project.track_count; ++track) {
+                        const AfProjectTrack *candidate = &editor.project.tracks[track];
+                        if (candidate->node_id == editor.selected_id &&
+                            candidate->property == AF_PROPERTY_PATH_CONTROL_IN &&
+                            candidate->element_index == 1U) {
+                            animated_handle = true;
+                            break;
+                        }
+                    }
+                }
+                const bool valid = editor.project.scene.count == expected_nodes &&
+                                   editor.project.path_data.path_count == expected_paths &&
+                                   pen_curve && scissors_cut && segment_deleted &&
+                                   animated_handle &&
+                                   af_project_validate(&editor.project) == AF_RESULT_SUCCESS &&
+                                   (stage != 6U || (editor.active_tool == AF_EDITOR_TOOL_NODE &&
+                                                    editor.selected_path_command_count >= 3U));
+                if (!valid) {
+                    result = AF_RESULT_INVALID_ARGUMENT;
+                    goto cleanup;
+                }
+            }
+            ++editor.vector_tools_smoke_stage;
+        }
+        if (editor.inspector_smoke && editor.inspector_smoke_stage < 7U) {
+            const float panel_x = (float)width - editor.right_width + 18.0F;
+            const float available = editor.right_width - 36.0F;
+            SDL_MouseButtonEvent field_click = {.button = SDL_BUTTON_LEFT, .down = true};
+            float initial_aspect = 0.0F;
+            bool finish_text_edit = true;
+            if (editor.selected_id == 0U) {
+                for (uint32_t index = 0U; index < editor.project.scene.count; ++index) {
+                    if (editor.project.scene.nodes[index].type != AF_NODE_GROUP) {
+                        af_editor_select_only(&editor, editor.project.scene.nodes[index].id);
+                        break;
+                    }
+                }
+            }
+            af_editor_update_preview(&editor);
+            if (editor.inspector_smoke_stage == 0U) {
+                field_click.x = panel_x + 20.0F;
+                field_click.y = AF_EDITOR_INSPECTOR_FIELD_Y + 12.0F;
+                af_editor_mouse_down(&editor, width, height, &field_click, SDL_KMOD_NONE);
+                af_editor_mouse_up(&editor, width, height);
+                af_editor_append_inspector_text(&editor, "275.5");
+            } else if (editor.inspector_smoke_stage == 1U) {
+                field_click.x = panel_x + 40.0F;
+                field_click.y = AF_EDITOR_COLOR_HEX_Y + 12.0F;
+                af_editor_mouse_down(&editor, width, height, &field_click, SDL_KMOD_NONE);
+                af_editor_append_inspector_text(&editor, "#3366CC80");
+            } else if (editor.inspector_smoke_stage == 2U) {
+                const AfSceneNode *before =
+                    af_scene_find_const(&editor.preview_scene, editor.selected_id);
+                SDL_MouseButtonEvent ratio_click = {.button = SDL_BUTTON_LEFT,
+                                                    .down = true,
+                                                    .x = panel_x + available - 38.0F,
+                                                    .y = AF_EDITOR_INSPECTOR_LABEL_Y + 2.0F};
+                if (before != NULL && before->resolved_bounds.y > 0.0001F) {
+                    initial_aspect = before->resolved_bounds.x / before->resolved_bounds.y;
+                }
+                af_editor_mouse_down(&editor, width, height, &ratio_click, SDL_KMOD_NONE);
+                field_click.x = panel_x + 20.0F;
+                field_click.y =
+                    AF_EDITOR_INSPECTOR_FIELD_Y + AF_EDITOR_INSPECTOR_FIELD_STEP + 12.0F;
+                af_editor_mouse_down(&editor, width, height, &field_click, SDL_KMOD_NONE);
+                af_editor_mouse_up(&editor, width, height);
+                af_editor_append_inspector_text(&editor, "310");
+            } else if (editor.inspector_smoke_stage == 3U) {
+                field_click.x = panel_x + 40.0F;
+                field_click.y = AF_EDITOR_STYLE_BAR_Y + 12.0F;
+                af_editor_mouse_down(&editor, width, height, &field_click, SDL_KMOD_NONE);
+                af_editor_mouse_up(&editor, width, height);
+                af_editor_append_inspector_text(&editor, "12.5");
+            } else if (editor.inspector_smoke_stage == 4U) {
+                field_click.x = panel_x + available - 10.0F;
+                field_click.y = AF_EDITOR_STYLE_BAR_Y + 12.0F;
+                af_editor_mouse_down(&editor, width, height, &field_click, SDL_KMOD_NONE);
+                finish_text_edit = false;
+            } else if (editor.inspector_smoke_stage == 5U) {
+                field_click.x = panel_x + 20.0F;
+                field_click.y =
+                    AF_EDITOR_INSPECTOR_FIELD_Y + 2.0F * AF_EDITOR_INSPECTOR_FIELD_STEP + 12.0F;
+                af_editor_mouse_down(&editor, width, height, &field_click, SDL_KMOD_NONE);
+                af_editor_mouse_up(&editor, width, height);
+                af_editor_append_inspector_text(&editor, "1.5");
+            } else {
+                SDL_MouseMotionEvent motion = {
+                    .x = panel_x + 60.0F, .y = AF_EDITOR_INSPECTOR_FIELD_Y + 12.0F, .xrel = 40.0F};
+                field_click.x = panel_x + 20.0F;
+                field_click.y = AF_EDITOR_INSPECTOR_FIELD_Y + 12.0F;
+                af_editor_mouse_down(&editor, width, height, &field_click, SDL_KMOD_NONE);
+                af_editor_mouse_motion(&editor, width, height, &motion);
+                af_editor_mouse_up(&editor, width, height);
+                finish_text_edit = false;
+            }
+            if (finish_text_edit && !af_editor_finish_inspector_edit(&editor, true)) {
+                result = AF_RESULT_INVALID_ARGUMENT;
+                goto cleanup;
+            }
+            {
+                const AfSceneNode *inspected =
+                    af_scene_find_const(&editor.preview_scene, editor.selected_id);
+                const bool valid_position =
+                    editor.inspector_smoke_stage != 0U ||
+                    (inspected != NULL &&
+                     fabsf(inspected->local_transform.position.x - 275.5F) < 0.001F);
+                const bool valid_color =
+                    editor.inspector_smoke_stage != 1U ||
+                    (inspected != NULL && fabsf(inspected->fill.r - 0.2F) < 0.001F &&
+                     fabsf(inspected->fill.g - 0.4F) < 0.001F &&
+                     fabsf(inspected->fill.b - 0.8F) < 0.001F &&
+                     fabsf(inspected->fill.a - 128.0F / 255.0F) < 0.001F);
+                const bool valid_width =
+                    editor.inspector_smoke_stage != 2U ||
+                    (inspected != NULL && initial_aspect > 0.0F &&
+                     fabsf(inspected->resolved_bounds.x - 310.0F) < 0.001F &&
+                     fabsf(inspected->resolved_bounds.x / inspected->resolved_bounds.y -
+                           initial_aspect) < 0.001F);
+                const AfStyle *style =
+                    af_style_find_node_const(&editor.project.style_data, editor.selected_id);
+                const bool valid_stroke =
+                    (editor.inspector_smoke_stage != 3U ||
+                     (style != NULL && fabsf(style->stroke.width - 12.5F) < 0.001F)) &&
+                    (editor.inspector_smoke_stage != 4U ||
+                     (style != NULL && fabsf(style->stroke.width - 13.5F) < 0.001F));
+                const bool valid_scrub =
+                    editor.inspector_smoke_stage != 6U ||
+                    (inspected != NULL &&
+                     fabsf(inspected->local_transform.position.x - 285.5F) < 0.001F);
+                const bool valid_scale =
+                    editor.inspector_smoke_stage != 5U ||
+                    (inspected != NULL &&
+                     fabsf(inspected->local_transform.scale.x - 1.5F) < 0.001F &&
+                     fabsf(inspected->local_transform.scale.y - 1.5F) < 0.001F);
+                if (!valid_position || !valid_color || !valid_width || !valid_stroke ||
+                    !valid_scrub || !valid_scale) {
+                    result = AF_RESULT_INVALID_ARGUMENT;
+                    goto cleanup;
+                }
+            }
+            ++editor.inspector_smoke_stage;
+        }
+        if (editor.outline_smoke) {
+            const float panel_x = (float)width - editor.right_width + 18.0F;
+            SDL_MouseButtonEvent target_click = {
+                .button = SDL_BUTTON_LEFT,
+                .down = true,
+                .x = panel_x + (editor.rendered_frames == 0U ? 110.0F : 36.0F),
+                .y = AF_EDITOR_COLOR_TARGET_Y + AF_EDITOR_COLOR_TARGET_HEIGHT * 0.5F};
+            af_editor_mouse_down(&editor, width, height, &target_click, SDL_KMOD_NONE);
         }
         af_editor_update_preview(&editor);
         af_editor_build_hierarchy(&editor);
         if (editor.vector_animation_smoke) {
             editor.selected_property = AF_PROPERTY_PATH_CONTROL_OUT;
             af_editor_status(&editor, "Programmatic animated vector handles capture");
+        } else if (editor.outline_smoke) {
+            af_editor_status(&editor, editor.color_target_outline
+                                          ? "Outline smoke: Outline tab click accepted"
+                                          : "Outline smoke: Fill tab click accepted");
+        } else if (editor.inspector_smoke) {
+            af_editor_status(
+                &editor,
+                "Inspector smoke: exact values, ratio lock, steppers, and scrubbing accepted");
+        } else if (editor.vector_tools_smoke) {
+            af_editor_status(&editor, "Vector tools smoke: construction, path surgery, multi-node "
+                                      "editing, and animation accepted");
         } else if (editor.particle_view_smoke) {
             const uint32_t stage = editor.rendered_frames / 8U;
             for (uint32_t index = 0U; index < editor.project.particle_data.count; ++index) {

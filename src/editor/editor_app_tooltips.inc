@@ -4,7 +4,8 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
     const float timeline_top = af_editor_timeline_top(editor, height);
     const float center_right = (float)width - editor->right_width;
     AfEditorTooltip tooltip = {0};
-    if (editor->drag_mode != AF_EDITOR_DRAG_NONE || editor->rename_active) {
+    if (editor->drag_mode != AF_EDITOR_DRAG_NONE || editor->rename_active ||
+        editor->inspector_field != AF_EDITOR_INSPECTOR_NONE) {
         return tooltip;
     }
     if (editor->context_menu != AF_EDITOR_CONTEXT_NONE) {
@@ -53,51 +54,53 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
     if (mouse.y >= AF_EDITOR_MENU_HEIGHT && mouse.y < AF_EDITOR_TOOLBAR_HEIGHT &&
         mouse.x >= editor->left_width) {
         const float local_x = mouse.x - editor->left_width - 14.0F;
-        static const AfEditorTooltip tools[] = {
-            {.id = 10U,
-             .title = "Rectangle Tool",
-             .summary = "Create a rectangle at the canvas center.",
-             .details = "The new object is selected immediately and every edit is undoable.",
-             .shortcut = "Shortcut: 1"},
-            {.id = 11U,
-             .title = "Rounded Rectangle Tool",
-             .summary = "Create a rectangle with rounded corners.",
-             .details = "Change its radius later with the Inspector or object context menu.",
-             .shortcut = "Shortcut: 2"},
-            {.id = 12U,
-             .title = "Ellipse Tool",
-             .summary = "Create an ellipse at the canvas center.",
-             .details = "Use equal width and height for a circle; its fill remains editable.",
-             .shortcut = "Shortcut: 3"},
-            {.id = 13U,
-             .title = "Vector Path Tool",
-             .summary = "Create an editable Bézier path.",
-             .details = "Select it to edit anchors and controls or use its object context menu.",
-             .shortcut = "Shortcut: 4"},
-            {.id = 14U,
-             .title = "Canvas Grid",
-             .summary = "Show or hide the canvas grid.",
-             .details = "The guide follows canvas zoom and is excluded from exported packages.",
-             .shortcut = "Shortcut: G"},
-            {.id = 15U,
-             .title = "Snapping",
-             .summary = "Enable or disable editing snap increments.",
-             .details = "Affects object movement and timeline edits for predictable alignment.",
-             .shortcut = "Shortcut: N"}};
-        if (local_x >= 0.0F && local_x < 34.0F) {
-            return tools[0];
+        const float tools_width = (float)AF_EDITOR_TOOL_COUNT * 42.0F;
+        if (local_x >= 0.0F && local_x < tools_width) {
+            const uint32_t tool = (uint32_t)(local_x / 42.0F);
+            const float button_x = (float)tool * 42.0F;
+            static const char *const summaries[AF_EDITOR_TOOL_COUNT] = {
+                "Select, move, scale, rotate, skew, and reposition pivots.",
+                "Edit path anchors and animated Bézier handles.",
+                "Cut a selected line or curve into two editable contours.",
+                "Remove the clicked segment while preserving the surrounding contours.",
+                "Drag an editable rectangle directly on the canvas.",
+                "Drag a live rounded rectangle with an editable radius.",
+                "Drag an ellipse; hold Shift for a circle.",
+                "Drag an open stroked line; Shift snaps its angle.",
+                "Click anchors or drag symmetric Bézier handles; Enter finishes.",
+                "Draw a bounded freehand stroke with automatic simplification.",
+                "Drag a six-sided editable polygon.",
+                "Drag a five-point editable star.",
+                "Drag an open three-quarter Bézier arc.",
+                "Drag a bounded three-turn editable spiral."};
+            static const char *const shortcuts[AF_EDITOR_TOOL_COUNT] = {
+                "V", "F10", "X", "D", "R", "Shift+R", "O", "L", "P", "B", "Y", "A", "C", "I"};
+            if (tool < AF_EDITOR_TOOL_COUNT && local_x < button_x + 38.0F) {
+                return (AfEditorTooltip){
+                    .id = 10U + tool,
+                    .title = af_editor_vector_tool_name((AfEditorVectorTool)tool),
+                    .summary = summaries[tool],
+                    .details = af_editor_vector_tool_is_construction((AfEditorVectorTool)tool)
+                                   ? "The result is undoable and uses Arcflow's animatable vector "
+                                     "properties."
+                                   : "Tool state stays active until another tool is selected.",
+                    .shortcut = shortcuts[tool]};
+            }
         }
-        if (local_x >= 42.0F && local_x < 76.0F) {
-            return tools[1];
-        }
-        if (local_x >= 84.0F && local_x < 118.0F) {
-            return tools[2];
-        }
-        if (local_x >= 126.0F && local_x < 160.0F) {
-            return tools[3];
-        }
-        if (local_x >= 172.0F && local_x < 260.0F) {
-            return mouse.y < AF_EDITOR_MENU_HEIGHT + 22.0F ? tools[4] : tools[5];
+        if (local_x >= tools_width + 8.0F && local_x < tools_width + 96.0F) {
+            return mouse.y < AF_EDITOR_MENU_HEIGHT + 22.0F
+                       ? (AfEditorTooltip){.id = 30U,
+                                           .title = "Canvas Grid",
+                                           .summary = "Show or hide the canvas grid.",
+                                           .details = "The guide follows canvas zoom and is "
+                                                      "excluded from export.",
+                                           .shortcut = "G"}
+                       : (AfEditorTooltip){
+                             .id = 31U,
+                             .title = "Snapping",
+                             .summary = "Enable or disable construction and editing snaps.",
+                             .details = "Construction points snap to the current grid interval.",
+                             .shortcut = "N"};
         }
         return tooltip;
     }
@@ -165,6 +168,23 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                     "Source, atlas, display, border, mip, color, and sequence controls are here.",
                 .shortcut = "Right click the object for image-specific actions"};
         }
+        if (af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_COLOR_TARGET_Y, 72.0F,
+                                    AF_EDITOR_COLOR_TARGET_HEIGHT)) {
+            return (AfEditorTooltip){.id = UINT64_C(0x1fff0),
+                                     .title = "Fill Color",
+                                     .summary = "Send the color controls to the object fill.",
+                                     .details =
+                                         "The blue target shows which paint the picker edits.",
+                                     .shortcut = "Click Fill, then drag the color controls"};
+        }
+        if (af_editor_point_in_rect(mouse, panel_x + 78.0F, AF_EDITOR_COLOR_TARGET_Y, 96.0F,
+                                    AF_EDITOR_COLOR_TARGET_HEIGHT)) {
+            return (AfEditorTooltip){.id = UINT64_C(0x1fff1),
+                                     .title = "Outline Color",
+                                     .summary = "Send the color controls to the object outline.",
+                                     .details = "Enable Outline below if the paint is not visible.",
+                                     .shortcut = "Click Outline, then drag the color controls"};
+        }
         if (af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_COLOR_SV_Y, AF_EDITOR_COLOR_SV_WIDTH,
                                     AF_EDITOR_COLOR_SV_HEIGHT)) {
             return (AfEditorTooltip){
@@ -173,7 +193,7 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                 .summary = "Drag to choose color intensity and brightness.",
                 .details =
                     "Horizontal movement changes saturation; vertical movement changes value.",
-                .shortcut = "One drag creates one undoable fill edit"};
+                .shortcut = "One drag creates one undoable color edit"};
         }
         if (af_editor_point_in_rect(mouse, panel_x + AF_EDITOR_COLOR_HUE_X, AF_EDITOR_COLOR_SV_Y,
                                     AF_EDITOR_COLOR_HUE_WIDTH, AF_EDITOR_COLOR_SV_HEIGHT)) {
@@ -189,44 +209,66 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                                     AF_EDITOR_COLOR_ALPHA_HEIGHT)) {
             return (AfEditorTooltip){
                 .id = UINT64_C(0x20002),
-                .title = "Fill Alpha",
+                .title = editor->color_target_outline ? "Outline Alpha" : "Fill Alpha",
                 .summary = "Drag to set color transparency.",
-                .details = "Alpha changes the fill color while object opacity remains independent.",
+                .details =
+                    editor->color_target_outline
+                        ? "Alpha changes the outline paint without changing object opacity."
+                        : "Alpha changes the fill color while object opacity remains independent.",
                 .shortcut = "Left is transparent; right is opaque"};
         }
-        for (uint32_t row = 0U; row < 4U; ++row) {
-            const float row_y =
-                AF_EDITOR_INSPECTOR_SCALAR_Y + (float)row * AF_EDITOR_INSPECTOR_SCALAR_STEP;
-            static const char *const titles[] = {"Opacity", "Corner Radius", "Layer Order",
-                                                 "Rotation"};
-            static const char *const summaries[] = {
-                "Decrease or increase object opacity.", "Decrease or increase corner rounding.",
-                "Move the object backward or forward.", "Rotate the object in small increments."};
-            static const char *const details[] = {
-                "Opacity is clamped from fully transparent to fully visible.",
-                "Radius is bounded by the selected shape and remains animatable.",
-                "Layer order changes drawing order without changing the parent hierarchy.",
-                "Rotation edits merge while repeated and can be animated on the timeline."};
-            static const char *const shortcuts[] = {"Value range: 0% to 100%",
-                                                    "Inspector or object context menu",
-                                                    "Shortcuts: [ and ]", "Shortcuts: Q and E"};
-            if (af_editor_point_in_rect(mouse, panel_x, row_y, 70.0F, 26.0F)) {
-                return (AfEditorTooltip){.id = UINT64_C(0x21000) + row,
-                                         .title = titles[row],
-                                         .summary = summaries[row],
-                                         .details = details[row],
-                                         .shortcut = shortcuts[row]};
-            }
+        if (af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_COLOR_HEX_Y,
+                                    editor->right_width - 36.0F,
+                                    AF_EDITOR_INSPECTOR_FIELD_HEIGHT) ||
+            af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_COLOR_COMPONENT_Y,
+                                    editor->right_width - 36.0F,
+                                    AF_EDITOR_INSPECTOR_FIELD_HEIGHT)) {
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x21000),
+                .title = "Exact Color",
+                .summary = "Click to enter hexadecimal or 0-255 RGBA values.",
+                .details = "Hex accepts #RGB, #RGBA, #RRGGBB, and #RRGGBBAA.",
+                .shortcut = "Enter applies · Esc cancels · Tab moves to the next field"};
+        }
+        if (af_editor_point_in_rect(mouse, panel_x + editor->right_width - 36.0F - 76.0F,
+                                    AF_EDITOR_INSPECTOR_LABEL_Y - 4.0F, 76.0F, 17.0F)) {
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x21003),
+                .title = "Ratio Lock",
+                .summary = "Link width and height, and link scale X and Y.",
+                .details = "Changes preserve the selected object's current proportions.",
+                .shortcut = "Click RATIO to toggle it for typing, scrubbing, and −/+"};
+        }
+        if (af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_INSPECTOR_FIELD_Y,
+                                    editor->right_width - 36.0F,
+                                    5.0F * AF_EDITOR_INSPECTOR_FIELD_STEP)) {
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x21001),
+                .title = "Exact Property Value",
+                .summary = "Click to type, or drag horizontally to scrub the value.",
+                .details = "Position, scale, rotation, opacity, and radius follow existing "
+                           "animation tracks; dimensions and layer edit the authored object.",
+                .shortcut = "−/+ step · Shift fine drag · Ctrl coarse drag"};
+        }
+        if (af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_STYLE_BAR_Y,
+                                    editor->right_width - 36.0F,
+                                    AF_EDITOR_INSPECTOR_FIELD_HEIGHT)) {
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x21002),
+                .title = "Exact Outline Width",
+                .summary = "Click to type, drag to scrub, or use −/+.",
+                .details = "The value is clamped to the supported 0-1000 px range and is undoable.",
+                .shortcut = "Shift fine drag · Ctrl coarse drag"};
         }
         if (mouse.y >= AF_EDITOR_STYLE_ROW_Y && mouse.y < AF_EDITOR_STYLE_ROW_Y + 28.0F &&
             mouse.x >= panel_x) {
             const uint32_t item = (uint32_t)((mouse.x - panel_x) / 38.0F);
-            static const char *const titles[] = {"Stroke",    "Stroke Width -", "Stroke Width +",
-                                                 "Fill Mode", "Line Cap",       "Line Join"};
+            static const char *const titles[] = {"Outline",   "Outline Width -", "Outline Width +",
+                                                 "Fill Mode", "Line Cap",        "Line Join"};
             static const char *const summaries[] = {
-                "Toggle the vector stroke.",       "Make the stroke thinner.",
-                "Make the stroke thicker.",        "Cycle the fill paint mode.",
-                "Cycle the stroke end-cap style.", "Cycle the stroke corner-join style."};
+                "Toggle the vector outline.",       "Make the outline thinner.",
+                "Make the outline thicker.",        "Cycle the fill paint mode.",
+                "Cycle the outline end-cap style.", "Cycle the outline corner-join style."};
             if (item < 6U) {
                 return (AfEditorTooltip){
                     .id = UINT64_C(0x22000) + item,
@@ -426,6 +468,44 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                 .shortcut = "Shift range / Ctrl toggle / Right click actions"};
         }
         return tooltip;
+    }
+    if (editor->selected_count == 1U && mouse.x >= editor->left_width && mouse.x < center_right &&
+        mouse.y >= AF_EDITOR_TOOLBAR_HEIGHT && mouse.y < timeline_top) {
+        const AfSceneNode *selected =
+            af_scene_find_const(&editor->preview_scene, editor->selected_id);
+        AfEditorGizmoGeometry geometry = {0};
+        if (selected != NULL &&
+            af_editor_gizmo_geometry(selected, af_editor_node_pivot(editor, selected),
+                                     af_editor_camera(editor, width, height), &geometry)) {
+            const AfEditorGizmoHandle handle = af_editor_gizmo_pick(&geometry, mouse, 10.0F);
+            if (handle == AF_EDITOR_GIZMO_PIVOT) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x50001),
+                    .title = "Transform Pivot",
+                    .summary = "Drag the point used by rotation and scaling.",
+                    .details = "Moving the pivot keeps the artwork visually stationary and saves "
+                               "the pivot with the project.",
+                    .shortcut = "Drag the gold ring; rotation uses the updated point"};
+            }
+            if (handle == AF_EDITOR_GIZMO_SCALE_X || handle == AF_EDITOR_GIZMO_SCALE_Y ||
+                handle == AF_EDITOR_GIZMO_SCALE_XY) {
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x50002),
+                    .title = "Scale",
+                    .summary = "Drag to resize from the opposite handle.",
+                    .details = "Shift preserves the original aspect ratio. Ctrl scales around the "
+                               "object center; combine them for centered proportional scaling.",
+                    .shortcut = "Shift ratio · Ctrl center · Shift+Ctrl both"};
+            }
+            if (handle == AF_EDITOR_GIZMO_ROTATE) {
+                return (AfEditorTooltip){.id = UINT64_C(0x50003),
+                                         .title = "Rotate",
+                                         .summary = "Rotate around the editable pivot.",
+                                         .details = "Move the gold pivot ring to change the center "
+                                                    "of rotation without moving the artwork.",
+                                         .shortcut = "Shift snaps to 15° increments"};
+            }
+        }
     }
     return tooltip;
 }

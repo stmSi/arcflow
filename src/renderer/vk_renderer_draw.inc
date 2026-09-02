@@ -231,7 +231,7 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
     canvas[0] = (float)renderer->extent.width;
     canvas[1] = (float)renderer->extent.height;
     upload_offset = renderer->frame_index * renderer->upload_slice_size;
-    path_upload_offset = upload_offset + AF_MAX_NODES * sizeof(AfGpuShape);
+    path_upload_offset = upload_offset + AF_MAX_GPU_SHAPES * sizeof(AfGpuShape);
     image_upload_offset =
         path_upload_offset + (VkDeviceSize)AF_MAX_GPU_PATH_VERTICES * sizeof(AfGpuPathVertex);
     af_vk_particles_record(renderer->particles, frame->command_buffer, renderer->frame_index,

@@ -33,7 +33,7 @@ static bool af_editor_gizmo_near(AfVec2 left, AfVec2 right, float radius) {
     return x * x + y * y <= radius * radius;
 }
 
-bool af_editor_gizmo_geometry(const AfSceneNode *node, AfAffine2 camera,
+bool af_editor_gizmo_geometry(const AfSceneNode *node, AfVec2 pivot, AfAffine2 camera,
                               AfEditorGizmoGeometry *out_geometry) {
     AfAffine2 world = {0};
     AfVec2 top = {0};
@@ -52,6 +52,7 @@ bool af_editor_gizmo_geometry(const AfSceneNode *node, AfAffine2 camera,
     out_geometry->origin = out_geometry->corners[0];
     out_geometry->center =
         af_editor_gizmo_midpoint(out_geometry->corners[0], out_geometry->corners[2]);
+    out_geometry->pivot = af_affine_transform_point(world, pivot);
     top = af_editor_gizmo_midpoint(out_geometry->corners[0], out_geometry->corners[1]);
     right = af_editor_gizmo_midpoint(out_geometry->corners[1], out_geometry->corners[2]);
     bottom = af_editor_gizmo_midpoint(out_geometry->corners[2], out_geometry->corners[3]);
@@ -72,6 +73,9 @@ AfEditorGizmoHandle af_editor_gizmo_pick(const AfEditorGizmoGeometry *geometry, 
                                          float radius) {
     if (geometry == NULL || radius <= 0.0F) {
         return AF_EDITOR_GIZMO_NONE;
+    }
+    if (af_editor_gizmo_near(point, geometry->pivot, radius * 0.8F)) {
+        return AF_EDITOR_GIZMO_PIVOT;
     }
     if (af_editor_gizmo_near(point, geometry->rotate, radius)) {
         return AF_EDITOR_GIZMO_ROTATE;
@@ -112,4 +116,61 @@ AfPropertyType af_editor_gizmo_property(AfEditorGizmoHandle handle) {
         return AF_PROPERTY_SKEW;
     }
     return AF_PROPERTY_POSITION;
+}
+
+bool af_editor_gizmo_scale_transform(AfTransform2D start, AfVec2 pivot, AfVec2 bounds,
+                                     AfEditorGizmoHandle handle, AfVec2 pointer, bool proportional,
+                                     bool from_center, AfTransform2D *out_transform) {
+    AfVec2 anchor = {0};
+    AfVec2 handle_point = {0};
+    float x_ratio = 1.0F;
+    float y_ratio = 1.0F;
+    AfAffine2 original;
+    AfTransform2D linear_transform;
+    AfAffine2 linear;
+    AfVec2 fixed;
+    if (out_transform == NULL || bounds.x <= 0.0F || bounds.y <= 0.0F ||
+        (handle != AF_EDITOR_GIZMO_SCALE_X && handle != AF_EDITOR_GIZMO_SCALE_Y &&
+         handle != AF_EDITOR_GIZMO_SCALE_XY)) {
+        return false;
+    }
+    if (handle == AF_EDITOR_GIZMO_SCALE_X) {
+        handle_point = (AfVec2){bounds.x, bounds.y * 0.5F};
+        anchor = from_center ? (AfVec2){bounds.x * 0.5F, bounds.y * 0.5F}
+                             : (AfVec2){0.0F, bounds.y * 0.5F};
+    } else if (handle == AF_EDITOR_GIZMO_SCALE_Y) {
+        handle_point = (AfVec2){bounds.x * 0.5F, bounds.y};
+        anchor = from_center ? (AfVec2){bounds.x * 0.5F, bounds.y * 0.5F}
+                             : (AfVec2){bounds.x * 0.5F, 0.0F};
+    } else {
+        handle_point = bounds;
+        anchor = from_center ? (AfVec2){bounds.x * 0.5F, bounds.y * 0.5F} : (AfVec2){0};
+    }
+    if (fabsf(handle_point.x - anchor.x) > 0.0001F) {
+        x_ratio = (pointer.x - anchor.x) / (handle_point.x - anchor.x);
+    }
+    if (fabsf(handle_point.y - anchor.y) > 0.0001F) {
+        y_ratio = (pointer.y - anchor.y) / (handle_point.y - anchor.y);
+    }
+    if (handle == AF_EDITOR_GIZMO_SCALE_X) {
+        y_ratio = proportional ? x_ratio : 1.0F;
+    } else if (handle == AF_EDITOR_GIZMO_SCALE_Y) {
+        x_ratio = proportional ? y_ratio : 1.0F;
+    } else if (proportional) {
+        const float ratio = fabsf(x_ratio - 1.0F) >= fabsf(y_ratio - 1.0F) ? x_ratio : y_ratio;
+        x_ratio = ratio;
+        y_ratio = ratio;
+    }
+    *out_transform = start;
+    out_transform->scale.x = fmaxf(0.05F, start.scale.x * x_ratio);
+    out_transform->scale.y = fmaxf(0.05F, start.scale.y * y_ratio);
+    original = af_affine_from_transform_pivot(start, pivot);
+    fixed = af_affine_transform_point(original, anchor);
+    linear_transform = *out_transform;
+    linear_transform.position = (AfVec2){0};
+    linear = af_affine_from_transform(linear_transform);
+    out_transform->position = (AfVec2){
+        fixed.x - pivot.x - linear.m00 * (anchor.x - pivot.x) - linear.m01 * (anchor.y - pivot.y),
+        fixed.y - pivot.y - linear.m10 * (anchor.x - pivot.x) - linear.m11 * (anchor.y - pivot.y)};
+    return true;
 }

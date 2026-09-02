@@ -12,7 +12,7 @@ layout(push_constant) uniform Canvas {
 layout(location = 0) out vec2 out_uv;
 layout(location = 1) out vec2 out_bounds;
 layout(location = 2) out vec4 out_color;
-layout(location = 3) out vec3 out_parameters;
+layout(location = 3) out vec4 out_parameters;
 
 const vec2 POSITIONS[6] = vec2[6](
     vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),
@@ -21,16 +21,17 @@ const vec2 POSITIONS[6] = vec2[6](
 
 void main() {
     vec2 uv = POSITIONS[gl_VertexIndex];
-    vec2 local = uv * in_translation_bounds.zw;
+    float outline_margin = max(in_parameters.w, 0.0) * 0.5;
+    vec2 local = uv * (in_translation_bounds.zw + vec2(outline_margin * 2.0)) -
+                 vec2(outline_margin);
     vec2 world = vec2(
         in_matrix.x * local.x + in_matrix.y * local.y + in_translation_bounds.x,
         in_matrix.z * local.x + in_matrix.w * local.y + in_translation_bounds.y
     );
     vec2 ndc = world * 2.0 / canvas.viewport_size - 1.0;
     gl_Position = vec4(ndc, 0.0, 1.0);
-    out_uv = uv;
+    out_uv = local;
     out_bounds = in_translation_bounds.zw;
     out_color = in_color;
-    out_parameters = in_parameters.xyz;
+    out_parameters = in_parameters;
 }
-

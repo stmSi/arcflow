@@ -15,12 +15,14 @@ typedef enum AfEditorGizmoHandle {
     AF_EDITOR_GIZMO_SCALE_XY,
     AF_EDITOR_GIZMO_SKEW_X,
     AF_EDITOR_GIZMO_SKEW_Y,
-    AF_EDITOR_GIZMO_ROTATE
+    AF_EDITOR_GIZMO_ROTATE,
+    AF_EDITOR_GIZMO_PIVOT
 } AfEditorGizmoHandle;
 
 typedef struct AfEditorGizmoGeometry {
     AfVec2 corners[4];
     AfVec2 center;
+    AfVec2 pivot;
     AfVec2 origin;
     AfVec2 move_x;
     AfVec2 move_y;
@@ -32,10 +34,13 @@ typedef struct AfEditorGizmoGeometry {
     AfVec2 rotate;
 } AfEditorGizmoGeometry;
 
-bool af_editor_gizmo_geometry(const AfSceneNode *node, AfAffine2 camera,
+bool af_editor_gizmo_geometry(const AfSceneNode *node, AfVec2 pivot, AfAffine2 camera,
                               AfEditorGizmoGeometry *out_geometry);
 AfEditorGizmoHandle af_editor_gizmo_pick(const AfEditorGizmoGeometry *geometry, AfVec2 point,
                                          float radius);
 AfPropertyType af_editor_gizmo_property(AfEditorGizmoHandle handle);
+bool af_editor_gizmo_scale_transform(AfTransform2D start, AfVec2 pivot, AfVec2 bounds,
+                                     AfEditorGizmoHandle handle, AfVec2 pointer, bool proportional,
+                                     bool from_center, AfTransform2D *out_transform);
 
 #endif

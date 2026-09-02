@@ -244,6 +244,8 @@ add_library(arcflow_editor_core STATIC
     src/editor/editor_commands.c
     src/editor/editor_actions.c
     src/editor/editor_gizmo.c
+    src/editor/editor_inspector.c
+    src/editor/editor_vector_tools.c
     src/editor/editor_preferences.c
     src/editor/editor_recovery.c
     src/editor/editor_workflow.c

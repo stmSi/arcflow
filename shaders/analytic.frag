@@ -3,7 +3,7 @@
 layout(location = 0) in vec2 in_uv;
 layout(location = 1) in vec2 in_bounds;
 layout(location = 2) in vec4 in_color;
-layout(location = 3) in vec3 in_parameters;
+layout(location = 3) in vec4 in_parameters;
 
 layout(location = 0) out vec4 out_color;
 
@@ -30,29 +30,33 @@ vec4 premultiplied_output(vec3 linear_color, float alpha) {
     return vec4(output_color * alpha, alpha);
 }
 
-float rounded_rectangle_coverage(vec2 uv, vec2 size, float radius) {
+float rounded_rectangle_distance(vec2 local, vec2 size, float radius) {
     vec2 half_size = size * 0.5;
     float safe_radius = clamp(radius, 0.0, min(half_size.x, half_size.y));
-    vec2 point = uv * size - half_size;
+    vec2 point = local - half_size;
     vec2 q = abs(point) - (half_size - vec2(safe_radius));
-    float distance = length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - safe_radius;
-    return 1.0 - smoothstep(-fwidth(distance), fwidth(distance), distance);
+    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - safe_radius;
 }
 
-float ellipse_coverage(vec2 uv) {
-    vec2 point = uv * 2.0 - 1.0;
-    float distance = length(point) - 1.0;
-    return 1.0 - smoothstep(-fwidth(distance), fwidth(distance), distance);
+float ellipse_distance(vec2 local, vec2 size) {
+    vec2 radius = max(size * 0.5, vec2(0.0001));
+    vec2 point = local - radius;
+    float normalized = length(point / radius);
+    float gradient = length(point / (radius * radius));
+    return gradient > 0.0001 ? normalized * (normalized - 1.0) / gradient
+                             : -min(radius.x, radius.y);
 }
 
 void main() {
     int kind = int(in_parameters.x + 0.5);
-    float coverage = 1.0;
-    if (kind == 2) {
-        coverage = rounded_rectangle_coverage(in_uv, in_bounds, in_parameters.y);
-    } else if (kind == 3) {
-        coverage = ellipse_coverage(in_uv);
-    }
+    float distance = kind == 3 ? ellipse_distance(in_uv, in_bounds)
+                               : rounded_rectangle_distance(
+                                     in_uv, in_bounds, kind == 2 ? in_parameters.y : 0.0);
+    float antialias = max(fwidth(distance), 0.0001);
+    float coverage = in_parameters.w > 0.0
+                         ? 1.0 - smoothstep(in_parameters.w * 0.5 - antialias,
+                                            in_parameters.w * 0.5 + antialias, abs(distance))
+                         : 1.0 - smoothstep(-antialias, antialias, distance);
     float alpha = clamp(in_color.a * in_parameters.z * coverage, 0.0, 1.0);
     out_color = premultiplied_output(srgb_to_linear(in_color.rgb), alpha);
 }

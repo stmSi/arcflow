@@ -21,6 +21,14 @@ static AfVec2 af_editor_screen_to_project(const AfEditorState *editor, int width
     return af_affine_transform_point(inverse, screen);
 }
 
+static AfVec2 af_editor_node_pivot(const AfEditorState *editor, const AfSceneNode *node) {
+    const AfLayoutNode *layout =
+        node == NULL ? NULL : af_layout_find_const(&editor->project.layout_data, node->id);
+    return layout == NULL ? (AfVec2){0}
+                          : (AfVec2){node->resolved_bounds.x * layout->pivot.x,
+                                     node->resolved_bounds.y * layout->pivot.y};
+}
+
 static void af_editor_update_preview(AfEditorState *editor) {
     const AfPath *selected_path =
         af_path_find_node_const(&editor->project.path_data, editor->selected_id);
@@ -29,6 +37,7 @@ static void af_editor_update_preview(AfEditorState *editor) {
     } else if (selected_path != NULL &&
                editor->selected_path_command >= selected_path->command_count) {
         editor->selected_path_command = 0U;
+        af_editor_path_selection_only(editor, editor->selected_path_command);
     }
     editor->preview_scene.count = editor->project.scene.count;
     af_editor_prepare_render_paths(editor);
@@ -49,20 +58,70 @@ static void af_editor_update_preview(AfEditorState *editor) {
     }
 }
 
-static bool af_editor_point_in_node(const AfSceneNode *node, AfVec2 project_point) {
+static float af_editor_point_segment_distance_squared(AfVec2 point, AfVec2 first, AfVec2 second) {
+    const AfVec2 delta = {second.x - first.x, second.y - first.y};
+    const float length_squared = delta.x * delta.x + delta.y * delta.y;
+    float amount = 0.0F;
+    if (length_squared > 0.000001F) {
+        amount = af_editor_clamp(((point.x - first.x) * delta.x + (point.y - first.y) * delta.y) /
+                                     length_squared,
+                                 0.0F, 1.0F);
+    }
+    {
+        const float x = point.x - (first.x + delta.x * amount);
+        const float y = point.y - (first.y + delta.y * amount);
+        return x * x + y * y;
+    }
+}
+
+static bool af_editor_point_on_path_outline(const AfPathData *paths, const AfPath *path,
+                                            AfVec2 point, float radius,
+                                            AfPathTessellationScratch *scratch) {
+    AfFlattenedPath flattened = {.points = scratch->points,
+                                 .point_capacity = AF_MAX_PATH_FLATTENED_POINTS,
+                                 .contours = scratch->contours,
+                                 .contour_capacity = AF_MAX_PATH_CONTOURS};
+    if (radius <= 0.0F || af_path_flatten(paths, path, 0.25F, &flattened) != AF_RESULT_SUCCESS) {
+        return false;
+    }
+    for (uint32_t contour_index = 0U; contour_index < flattened.contour_count; ++contour_index) {
+        const AfPathContour *contour = &flattened.contours[contour_index];
+        if (contour->point_count < 2U) {
+            continue;
+        }
+        const uint32_t segment_count =
+            contour->closed ? contour->point_count : contour->point_count - 1U;
+        for (uint32_t index = 0U; index < segment_count; ++index) {
+            const AfVec2 first = flattened.points[contour->point_start + index];
+            const AfVec2 second =
+                flattened.points[contour->point_start + ((index + 1U) % contour->point_count)];
+            if (af_editor_point_segment_distance_squared(point, first, second) <= radius * radius) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool af_editor_point_in_node(const AfSceneNode *node, AfVec2 project_point,
+                                    float outline_width) {
     AfAffine2 inverse = {0};
     AfVec2 point = {0};
+    const float margin = fmaxf(outline_width, 0.0F) * 0.5F;
+    AfVec2 bounds = {0};
     if (node == NULL || node->type == AF_NODE_GROUP || !node->world_visible ||
         !af_affine_inverse(node->world_transform, &inverse)) {
         return false;
     }
     point = af_affine_transform_point(inverse, project_point);
-    if (point.x < 0.0F || point.y < 0.0F || point.x > node->bounds.x || point.y > node->bounds.y) {
+    bounds = node->resolved_bounds;
+    if (point.x < -margin || point.y < -margin || point.x > bounds.x + margin ||
+        point.y > bounds.y + margin) {
         return false;
     }
-    if (node->type == AF_NODE_ELLIPSE && node->bounds.x > 0.0F && node->bounds.y > 0.0F) {
-        const float x = point.x / node->bounds.x * 2.0F - 1.0F;
-        const float y = point.y / node->bounds.y * 2.0F - 1.0F;
+    if (node->type == AF_NODE_ELLIPSE && bounds.x > 0.0F && bounds.y > 0.0F) {
+        const float x = (point.x - bounds.x * 0.5F) / (bounds.x * 0.5F + margin);
+        const float y = (point.y - bounds.y * 0.5F) / (bounds.y * 0.5F + margin);
         return x * x + y * y <= 1.0F;
     }
     return true;
@@ -74,17 +133,36 @@ static uint64_t af_editor_hit_test(AfEditorState *editor, AfVec2 project_point) 
     uint32_t index = 0U;
     for (index = 0U; index < editor->preview_scene.count; ++index) {
         const AfSceneNode *node = &editor->preview_scene.nodes[index];
+        const AfStyle *source_style =
+            af_style_find_node_const(&editor->project.style_data, node->id);
+        AfStyle resolved_style = {0};
+        const AfStyle *style = NULL;
+        float outline_width = 0.0F;
         bool contains = false;
+        if (source_style != NULL && af_style_resolve(&editor->project.style_data, source_style,
+                                                     &resolved_style) == AF_RESULT_SUCCESS) {
+            style = &resolved_style;
+            if (node->type >= AF_NODE_RECTANGLE && node->type <= AF_NODE_PATH &&
+                style->stroke.enabled && style->stroke_opacity > 0.0F) {
+                outline_width = fmaxf(style->stroke.width, style->stroke.end_width);
+            }
+        }
         if (node->type == AF_NODE_PATH) {
             AfAffine2 inverse = {0};
             const AfPath *path = af_path_find_node_const(&editor->render_path_data, node->id);
-            contains = path != NULL && editor->path_scratch != NULL &&
-                       af_affine_inverse(node->world_transform, &inverse) &&
-                       af_path_hit_test(&editor->render_path_data, path,
-                                        af_affine_transform_point(inverse, project_point), 0.25F,
-                                        editor->path_scratch);
+            if (path != NULL && editor->path_scratch != NULL &&
+                af_affine_inverse(node->world_transform, &inverse)) {
+                const AfVec2 local = af_affine_transform_point(inverse, project_point);
+                contains = af_path_hit_test(&editor->render_path_data, path, local, 0.25F,
+                                            editor->path_scratch) ||
+                           (outline_width > 0.0F &&
+                            af_editor_point_on_path_outline(&editor->render_path_data, path, local,
+                                                            outline_width * 0.5F +
+                                                                4.0F / fmaxf(editor->zoom, 0.01F),
+                                                            editor->path_scratch));
+            }
         } else {
-            contains = af_editor_point_in_node(node, project_point);
+            contains = af_editor_point_in_node(node, project_point, outline_width);
         }
         if (contains && node->layer_order >= hit_layer) {
             hit = node->id;

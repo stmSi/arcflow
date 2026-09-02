@@ -594,6 +594,17 @@ static bool af_test_responsive_layout(void) {
     CHECK_NEAR(nodes[2].world_transform.tx, 135.0F, 0.0001F);
     CHECK_NEAR(nodes[2].resolved_bounds.x, 160.0F, 0.0001F);
     CHECK_NEAR(nodes[2].resolved_bounds.y, 80.0F, 0.0001F);
+    layouts[1].pivot = (AfVec2){0.5F, 0.5F};
+    nodes[1].local_transform.rotation = 1.57079632679F;
+    CHECK(af_scene_evaluate_world(&scene) == AF_RESULT_SUCCESS);
+    {
+        const AfVec2 world_pivot =
+            af_affine_transform_point(nodes[1].world_transform, (AfVec2){50.0F, 25.0F});
+        CHECK_NEAR(world_pivot.x, 83.0F, 0.0001F);
+        CHECK_NEAR(world_pivot.y, 64.0F, 0.0001F);
+    }
+    layouts[1].pivot = (AfVec2){0};
+    nodes[1].local_transform.rotation = 0.0F;
     nodes[1].local_transform.position.x = 13.0F;
     CHECK(af_scene_evaluate_world(&scene) == AF_RESULT_SUCCESS);
     CHECK_NEAR(nodes[1].world_transform.tx, 43.0F, 0.0001F);

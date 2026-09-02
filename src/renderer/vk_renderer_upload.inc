@@ -320,15 +320,31 @@ static AfResult af_vk_emit_image_node(const AfSceneNode *node, const AfImageData
     return AF_RESULT_SUCCESS;
 }
 
+static AfResult af_vk_sample_node_fill(const AfSceneNode *node, const AfStyle *style, AfVec2 point,
+                                       AfColor *out_color) {
+    if (node == NULL || out_color == NULL) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    *out_color = node->fill;
+    if (style == NULL) {
+        return AF_RESULT_SUCCESS;
+    }
+    if (style->fill.type == AF_PAINT_SOLID) {
+        out_color->a *= style->fill_opacity;
+        return AF_RESULT_SUCCESS;
+    }
+    return af_paint_sample(&style->fill, point, style->fill_opacity, out_color);
+}
+
 static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                                    uint32_t *out_shape_count, uint32_t *out_path_vertex_count,
                                    uint32_t *out_image_vertex_count, uint32_t *out_item_count) {
     uint8_t *slice = renderer->upload_mapping + renderer->frame_index * renderer->upload_slice_size;
     AfGpuShape *shapes = (AfGpuShape *)(void *)slice;
     AfGpuPathVertex *path_vertices =
-        (AfGpuPathVertex *)(void *)(slice + AF_MAX_NODES * sizeof(AfGpuShape));
+        (AfGpuPathVertex *)(void *)(slice + AF_MAX_GPU_SHAPES * sizeof(AfGpuShape));
     AfGpuImageVertex *image_vertices =
-        (AfGpuImageVertex *)(void *)(slice + AF_MAX_NODES * sizeof(AfGpuShape) +
+        (AfGpuImageVertex *)(void *)(slice + AF_MAX_GPU_SHAPES * sizeof(AfGpuShape) +
                                      (size_t)AF_MAX_GPU_PATH_VERTICES * sizeof(AfGpuPathVertex));
     uint32_t shape_count = 0U;
     uint32_t path_vertex_count = 0U;
@@ -377,17 +393,14 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
             }
             for (uint32_t vertex_index = 0U; vertex_index < cache->vertex_count; ++vertex_index) {
                 AfColor color = node->fill;
-                const AfVec2 world =
-                    af_affine_transform_point(node->world_transform, cache->vertices[vertex_index]);
-                if (style != NULL && af_paint_sample(&style->fill, cache->vertices[vertex_index],
-                                                     style->fill_opacity * node->world_opacity,
-                                                     &color) != AF_RESULT_SUCCESS) {
+                const AfVec2 local = cache->vertices[vertex_index];
+                const AfVec2 world = af_affine_transform_point(node->world_transform, local);
+                if (af_vk_sample_node_fill(node, style, local, &color) != AF_RESULT_SUCCESS) {
                     return AF_RESULT_INVALID_ARGUMENT;
                 }
                 path_vertices[path_vertex_count++] = (AfGpuPathVertex){
                     .position = {world.x, world.y},
-                    .color = {color.r, color.g, color.b,
-                              style == NULL ? color.a * node->world_opacity : color.a}};
+                    .color = {color.r, color.g, color.b, color.a * node->world_opacity}};
             }
             if (cache->vertex_count != 0U) {
                 af_vk_insert_render_item(renderer, &item_count,
@@ -447,15 +460,17 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                                                           .atlas_index = atlas_index});
             }
         } else {
-            if (node->type > AF_NODE_ELLIPSE || shape_count >= AF_MAX_NODES) {
+            const bool stroke_visible = style != NULL && style->stroke.enabled &&
+                                        style->stroke.width > 0.0F && style->stroke_opacity > 0.0F;
+            if (node->type > AF_NODE_ELLIPSE ||
+                shape_count > AF_MAX_GPU_SHAPES - (stroke_visible ? 2U : 1U)) {
                 return AF_RESULT_INVALID_ARGUMENT;
             }
             AfColor color = node->fill;
-            if (style != NULL &&
-                af_paint_sample(
-                    &style->fill,
+            if (af_vk_sample_node_fill(
+                    node, style,
                     (AfVec2){node->resolved_bounds.x * 0.5F, node->resolved_bounds.y * 0.5F},
-                    style->fill_opacity, &color) != AF_RESULT_SUCCESS) {
+                    &color) != AF_RESULT_SUCCESS) {
                 return AF_RESULT_INVALID_ARGUMENT;
             }
             shapes[shape_count] = (AfGpuShape){
@@ -472,6 +487,30 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                                                       .first = shape_count,
                                                       .count = 1U});
             ++shape_count;
+            if (stroke_visible) {
+                AfColor stroke_color;
+                if (af_paint_sample(
+                        &style->stroke_paint,
+                        (AfVec2){node->resolved_bounds.x * 0.5F, node->resolved_bounds.y * 0.5F},
+                        style->stroke_opacity, &stroke_color) != AF_RESULT_SUCCESS) {
+                    return AF_RESULT_INVALID_ARGUMENT;
+                }
+                shapes[shape_count] = (AfGpuShape){
+                    .matrix = {node->world_transform.m00, node->world_transform.m01,
+                               node->world_transform.m10, node->world_transform.m11},
+                    .translation_bounds = {node->world_transform.tx, node->world_transform.ty,
+                                           node->resolved_bounds.x, node->resolved_bounds.y},
+                    .color = {stroke_color.r, stroke_color.g, stroke_color.b, stroke_color.a},
+                    .parameters = {(float)node->type, node->corner_radius, node->world_opacity,
+                                   style->stroke.width},
+                    .layer_order = node->layer_order};
+                af_vk_insert_render_item(renderer, &item_count,
+                                         (AfVkRenderItem){.type = AF_VK_RENDER_ANALYTIC,
+                                                          .layer_order = node->layer_order,
+                                                          .first = shape_count,
+                                                          .count = 1U});
+                ++shape_count;
+            }
         }
     }
     for (index = 0U; index < AF_MAX_PATHS; ++index) {

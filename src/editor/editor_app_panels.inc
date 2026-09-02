@@ -215,73 +215,123 @@ static void af_editor_render_image_inspector(AfEditorState *editor, int width,
 static void af_editor_render_toolbar(AfEditorState *editor) {
     const float start = editor->left_width + 14.0F;
     const float top = AF_EDITOR_MENU_HEIGHT;
-    const AfColor button = {0.18F, 0.2F, 0.25F, 1.0F};
-    af_editor_add_button_rect(editor, start, top + 6.0F, 34.0F, 32.0F, button, 100110);
-    af_editor_add_rect(editor, start + 8.0F, top + 13.0F, 18.0F, 17.0F,
-                       (AfColor){0.22F, 0.58F, 0.96F, 1.0F}, 100120);
-    af_editor_add_button_rect(editor, start + 42.0F, top + 6.0F, 34.0F, 32.0F, button, 100110);
-    af_editor_add_shape(
-        editor, AF_NODE_ROUNDED_RECTANGLE,
-        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = start + 50.0F, .ty = top + 13.0F},
-        (AfVec2){18.0F, 17.0F}, (AfColor){0.94F, 0.35F, 0.27F, 1.0F}, 5.0F, 100120);
-    af_editor_add_button_rect(editor, start + 84.0F, top + 6.0F, 34.0F, 32.0F, button, 100110);
-    af_editor_add_shape(
-        editor, AF_NODE_ELLIPSE,
-        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = start + 92.0F, .ty = top + 13.0F},
-        (AfVec2){18.0F, 17.0F}, (AfColor){0.32F, 0.86F, 0.54F, 1.0F}, 0.0F, 100120);
-    af_editor_add_button_rect(editor, start + 126.0F, top + 6.0F, 34.0F, 32.0F, button, 100110);
-    af_editor_add_line(editor, (AfVec2){start + 133.0F, top + 28.0F},
-                       (AfVec2){start + 141.0F, top + 14.0F}, 3.0F,
-                       (AfColor){0.78F, 0.42F, 0.96F, 1.0F}, 100120);
-    af_editor_add_line(editor, (AfVec2){start + 141.0F, top + 14.0F},
-                       (AfVec2){start + 153.0F, top + 26.0F}, 3.0F,
-                       (AfColor){0.78F, 0.42F, 0.96F, 1.0F}, 100120);
-    af_editor_add_text(editor, start + 5.0F, top + 30.0F, "RECT", 0.65F, 26.0F,
-                       (AfColor){0.8F, 0.82F, 0.88F, 1.0F}, 100135);
-    af_editor_add_text(editor, start + 45.0F, top + 30.0F, "ROUND", 0.58F, 28.0F,
-                       (AfColor){0.8F, 0.82F, 0.88F, 1.0F}, 100135);
-    af_editor_add_text(editor, start + 89.0F, top + 30.0F, "OVAL", 0.65F, 26.0F,
-                       (AfColor){0.8F, 0.82F, 0.88F, 1.0F}, 100135);
-    af_editor_add_text(editor, start + 130.0F, top + 30.0F, "PATH", 0.65F, 27.0F,
-                       (AfColor){0.8F, 0.82F, 0.88F, 1.0F}, 100135);
-    af_editor_add_button_rect(editor, start + 172.0F, top + 3.0F, 88.0F, 18.0F,
+    const float tool_step = 42.0F;
+    const float grid_x = start + (float)AF_EDITOR_TOOL_COUNT * tool_step + 8.0F;
+    for (uint32_t index = 0U; index < AF_EDITOR_TOOL_COUNT; ++index) {
+        const float x = start + (float)index * tool_step;
+        const bool active = editor->active_tool == (AfEditorVectorTool)index;
+        const bool hovered = af_editor_hovered_rect(editor, x, top + 5.0F, 38.0F, 34.0F);
+        const AfColor button = active    ? (AfColor){0.15F, 0.48F, 0.78F, 1.0F}
+                               : hovered ? (AfColor){0.25F, 0.31F, 0.41F, 1.0F}
+                                         : (AfColor){0.18F, 0.2F, 0.25F, 1.0F};
+        af_editor_add_button_rect(editor, x, top + 5.0F, 38.0F, 34.0F, button, 100110);
+        af_editor_add_rect(editor, x + 5.0F, top + 9.0F, 28.0F, 3.0F,
+                           active ? (AfColor){0.68F, 0.9F, 1.0F, 1.0F}
+                                  : (AfColor){0.38F, 0.56F, 0.78F, 1.0F},
+                           100125);
+        af_editor_add_text(
+            editor, x + 3.0F, top + 19.0F, af_editor_vector_tool_label((AfEditorVectorTool)index),
+            index == AF_EDITOR_TOOL_PENCIL || index == AF_EDITOR_TOOL_SPIRAL ? 0.45F : 0.53F, 32.0F,
+            (AfColor){0.9F, 0.92F, 0.97F, 1.0F}, 100135);
+    }
+    af_editor_add_button_rect(editor, grid_x, top + 3.0F, 88.0F, 18.0F,
                               (AfColor){0.18F, 0.2F, 0.25F, 1.0F}, 100110);
-    af_editor_add_button_rect(editor, start + 172.0F, top + 22.0F, 88.0F, 20.0F,
+    af_editor_add_button_rect(editor, grid_x, top + 22.0F, 88.0F, 20.0F,
                               (AfColor){0.18F, 0.2F, 0.25F, 1.0F}, 100110);
-    af_editor_add_rect(editor, start + 178.0F, top + 8.0F, 7.0F, 9.0F,
+    af_editor_add_rect(editor, grid_x + 6.0F, top + 8.0F, 7.0F, 9.0F,
                        editor->grid_visible ? (AfColor){0.35F, 0.7F, 0.98F, 1.0F}
                                             : (AfColor){0.4F, 0.42F, 0.48F, 1.0F},
                        100125);
-    af_editor_add_rect(editor, start + 178.0F, top + 27.0F, 7.0F, 9.0F,
+    af_editor_add_rect(editor, grid_x + 6.0F, top + 27.0F, 7.0F, 9.0F,
                        editor->snapping ? (AfColor){0.96F, 0.55F, 0.25F, 1.0F}
                                         : (AfColor){0.4F, 0.42F, 0.48F, 1.0F},
                        100125);
-    af_editor_add_text(editor, start + 191.0F, top + 8.0F,
+    af_editor_add_text(editor, grid_x + 19.0F, top + 8.0F,
                        editor->grid_visible ? "GRID ON" : "GRID OFF", 0.65F, 62.0F,
                        (AfColor){0.76F, 0.79F, 0.86F, 1.0F}, 100130);
-    af_editor_add_text(editor, start + 191.0F, top + 27.0F,
+    af_editor_add_text(editor, grid_x + 19.0F, top + 27.0F,
                        editor->snapping ? "SNAP ON" : "SNAP OFF", 0.65F, 62.0F,
                        (AfColor){0.76F, 0.79F, 0.86F, 1.0F}, 100130);
 }
 
+static void af_editor_render_inspector_field(AfEditorState *editor, float x, float y, float width,
+                                             const char *label, const char *value,
+                                             AfEditorInspectorField field) {
+    const bool editing = editor->inspector_field == field;
+    const bool scrubbing = editor->drag_mode == AF_EDITOR_DRAG_INSPECTOR_SCRUB &&
+                           editor->inspector_scrub_field == field;
+    const bool active = editing || scrubbing;
+    const bool steppers = field >= AF_EDITOR_INSPECTOR_POSITION_X;
+    const bool hovered =
+        af_editor_hovered_rect(editor, x, y, width, AF_EDITOR_INSPECTOR_FIELD_HEIGHT);
+    char display[64];
+    (void)snprintf(display, sizeof(display), "%s  %s", label,
+                   editing ? editor->inspector_buffer : value);
+    af_editor_add_button_rect(editor, x, y, width, AF_EDITOR_INSPECTOR_FIELD_HEIGHT,
+                              active ? (AfColor){0.16F, 0.43F, 0.72F, 1.0F}
+                                     : (hovered ? (AfColor){0.2F, 0.23F, 0.29F, 1.0F}
+                                                : (AfColor){0.135F, 0.15F, 0.19F, 1.0F}),
+                              100120);
+    af_editor_add_text(
+        editor, x + 7.0F, y + 8.0F, display, 0.68F, width - (steppers ? 52.0F : 12.0F),
+        active ? (AfColor){0.96F, 0.98F, 1.0F, 1.0F} : (AfColor){0.74F, 0.78F, 0.87F, 1.0F},
+        100135);
+    if (steppers) {
+        const float minus_x = x + width - 40.0F;
+        const float plus_x = x + width - 19.0F;
+        const AfColor idle = {0.22F, 0.25F, 0.32F, 1.0F};
+        const AfColor hover = {0.3F, 0.42F, 0.58F, 1.0F};
+        af_editor_add_button_rect(
+            editor, minus_x, y + 2.0F, 19.0F, AF_EDITOR_INSPECTOR_FIELD_HEIGHT - 4.0F,
+            af_editor_hovered_rect(editor, minus_x, y, 19.0F, AF_EDITOR_INSPECTOR_FIELD_HEIGHT)
+                ? hover
+                : idle,
+            100140);
+        af_editor_add_button_rect(
+            editor, plus_x, y + 2.0F, 19.0F, AF_EDITOR_INSPECTOR_FIELD_HEIGHT - 4.0F,
+            af_editor_hovered_rect(editor, plus_x, y, 19.0F, AF_EDITOR_INSPECTOR_FIELD_HEIGHT)
+                ? hover
+                : idle,
+            100140);
+        af_editor_add_text(editor, minus_x + 6.0F, y + 8.0F, "-", 0.72F, 9.0F,
+                           (AfColor){0.9F, 0.93F, 0.98F, 1.0F}, 100145);
+        af_editor_add_text(editor, plus_x + 5.0F, y + 8.0F, "+", 0.72F, 10.0F,
+                           (AfColor){0.9F, 0.93F, 0.98F, 1.0F}, 100145);
+    }
+    if (active) {
+        af_editor_add_rect(editor, x + 3.0F, y + AF_EDITOR_INSPECTOR_FIELD_HEIGHT - 3.0F,
+                           width - (steppers ? 46.0F : 6.0F), 2.0F,
+                           (AfColor){0.48F, 0.82F, 1.0F, 1.0F}, 100140);
+    }
+}
+
 static void af_editor_render_color_picker(AfEditorState *editor, float x,
                                           const AfSceneNode *selected) {
-    const AfColor color = selected == NULL ? (AfColor){0.5F, 0.5F, 0.5F, 1.0F} : selected->fill;
+    const AfColor color = af_editor_inspector_color(editor, selected);
     float hue = editor->color_hue;
     float saturation = 0.0F;
     float value = 0.0F;
-    char first_values[32];
-    char second_values[32];
+    char hexadecimal[16];
     af_editor_color_hsv(color, &hue, &saturation, &value);
     if (saturation > 0.0001F) {
         editor->color_hue = hue;
     } else {
         hue = editor->color_hue;
     }
-    af_editor_add_text(editor, x, 58.0F, "COLOR PICKER", 0.9F, 100.0F,
-                       (AfColor){0.61F, 0.65F, 0.73F, 1.0F}, 100125);
-    af_editor_add_text(editor, x + 106.0F, 59.0F, "SV / HUE / ALPHA", 0.55F, 118.0F,
-                       (AfColor){0.46F, 0.5F, 0.58F, 1.0F}, 100125);
+    af_editor_add_button_rect(editor, x, AF_EDITOR_COLOR_TARGET_Y, 72.0F,
+                              AF_EDITOR_COLOR_TARGET_HEIGHT,
+                              editor->color_target_outline ? (AfColor){0.18F, 0.2F, 0.25F, 1.0F}
+                                                           : (AfColor){0.18F, 0.46F, 0.74F, 1.0F},
+                              100120);
+    af_editor_add_button_rect(editor, x + 78.0F, AF_EDITOR_COLOR_TARGET_Y, 96.0F,
+                              AF_EDITOR_COLOR_TARGET_HEIGHT,
+                              editor->color_target_outline ? (AfColor){0.18F, 0.46F, 0.74F, 1.0F}
+                                                           : (AfColor){0.18F, 0.2F, 0.25F, 1.0F},
+                              100120);
+    af_editor_add_text(editor, x + 19.0F, AF_EDITOR_COLOR_TARGET_Y + 6.0F, "FILL", 0.62F, 40.0F,
+                       (AfColor){0.88F, 0.91F, 0.97F, 1.0F}, 100130);
+    af_editor_add_text(editor, x + 88.0F, AF_EDITOR_COLOR_TARGET_Y + 6.0F, "OUTLINE", 0.62F, 74.0F,
+                       (AfColor){0.88F, 0.91F, 0.97F, 1.0F}, 100130);
     for (uint32_t row = 0U; row < 8U; ++row) {
         for (uint32_t column = 0U; column < 12U; ++column) {
             const float cell_width = AF_EDITOR_COLOR_SV_WIDTH / 12.0F;
@@ -334,16 +384,27 @@ static void af_editor_render_color_picker(AfEditorState *editor, float x,
                        (AfColor){0.16F, 0.17F, 0.2F, 1.0F}, 100120);
     af_editor_add_rect(editor, x + 180.0F, AF_EDITOR_COLOR_SV_Y + 4.0F, 40.0F, 28.0F, color,
                        100130);
-    (void)snprintf(first_values, sizeof(first_values), "R%03u G%03u",
-                   (uint32_t)roundf(color.r * 255.0F), (uint32_t)roundf(color.g * 255.0F));
-    (void)snprintf(second_values, sizeof(second_values), "B%03u A%03u",
-                   (uint32_t)roundf(color.b * 255.0F), (uint32_t)roundf(color.a * 255.0F));
-    af_editor_add_text(editor, x + 176.0F, 121.0F, first_values, 0.58F, 56.0F,
-                       (AfColor){0.69F, 0.72F, 0.8F, 1.0F}, 100130);
-    af_editor_add_text(editor, x + 176.0F, 140.0F, second_values, 0.58F, 56.0F,
-                       (AfColor){0.69F, 0.72F, 0.8F, 1.0F}, 100130);
-    af_editor_add_text(editor, x + 176.0F, 173.0F, "DRAG", 0.58F, 48.0F,
-                       (AfColor){0.46F, 0.5F, 0.58F, 1.0F}, 100130);
+    af_editor_inspector_format_hex_color(color, hexadecimal, sizeof(hexadecimal));
+    af_editor_render_inspector_field(editor, x, AF_EDITOR_COLOR_HEX_Y, editor->right_width - 36.0F,
+                                     "HEX", hexadecimal, AF_EDITOR_INSPECTOR_COLOR_HEX);
+    {
+        const float available = editor->right_width - 36.0F;
+        const float field_width = (available - 12.0F) * 0.25F;
+        char values[4][16];
+        const char *labels[4] = {"R", "G", "B", "A"};
+        const AfEditorInspectorField fields[4] = {
+            AF_EDITOR_INSPECTOR_COLOR_R, AF_EDITOR_INSPECTOR_COLOR_G, AF_EDITOR_INSPECTOR_COLOR_B,
+            AF_EDITOR_INSPECTOR_COLOR_A};
+        (void)snprintf(values[0], sizeof(values[0]), "%u", (uint32_t)roundf(color.r * 255.0F));
+        (void)snprintf(values[1], sizeof(values[1]), "%u", (uint32_t)roundf(color.g * 255.0F));
+        (void)snprintf(values[2], sizeof(values[2]), "%u", (uint32_t)roundf(color.b * 255.0F));
+        (void)snprintf(values[3], sizeof(values[3]), "%u", (uint32_t)roundf(color.a * 255.0F));
+        for (uint32_t component = 0U; component < 4U; ++component) {
+            af_editor_render_inspector_field(
+                editor, x + (float)component * (field_width + 4.0F), AF_EDITOR_COLOR_COMPONENT_Y,
+                field_width, labels[component], values[component], fields[component]);
+        }
+    }
 }
 
 static void af_editor_particle_labels(const AfEditorState *editor, const AfParticleEmitter *emitter,
@@ -446,51 +507,83 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
         return;
     }
     af_editor_render_color_picker(editor, x, selected);
-    for (index = 0U; index < 4U; ++index) {
-        const float y =
-            AF_EDITOR_INSPECTOR_SCALAR_Y + (float)index * AF_EDITOR_INSPECTOR_SCALAR_STEP;
-        char value[64];
-        af_editor_add_button_rect(editor, x, y, 34.0F, 28.0F, (AfColor){0.24F, 0.26F, 0.32F, 1.0F},
-                                  100120);
-        af_editor_add_button_rect(editor, x + 38.0F, y, 34.0F, 28.0F,
-                                  (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
-        af_editor_add_rect(editor, x + 8.0F, y + 12.0F, 14.0F, 2.0F,
-                           (AfColor){0.75F, 0.78F, 0.84F, 1.0F}, 100130);
-        af_editor_add_rect(editor, x + 48.0F, y + 12.0F, 14.0F, 2.0F,
-                           (AfColor){0.75F, 0.78F, 0.84F, 1.0F}, 100130);
-        af_editor_add_rect(editor, x + 54.0F, y + 6.0F, 2.0F, 14.0F,
-                           (AfColor){0.75F, 0.78F, 0.84F, 1.0F}, 100130);
-        if (selected == NULL) {
-            (void)snprintf(value, sizeof(value), "%s",
-                           index == 0U   ? "OPACITY"
-                           : index == 1U ? "RADIUS"
-                           : index == 2U ? "LAYER"
-                                         : "ROTATION");
-        } else if (index == 0U) {
-            (void)snprintf(value, sizeof(value), "OPACITY %.0f%%",
-                           (double)(selected->opacity * 100.0F));
-        } else if (index == 1U) {
-            (void)snprintf(value, sizeof(value), "RADIUS %.1f", (double)selected->corner_radius);
-        } else if (index == 2U) {
-            (void)snprintf(value, sizeof(value), "LAYER %d", selected->layer_order);
-        } else {
-            (void)snprintf(value, sizeof(value), "ROTATION %.2f",
-                           (double)selected->local_transform.rotation);
+    af_editor_add_text(editor, x, AF_EDITOR_INSPECTOR_LABEL_Y, "TRANSFORM & GEOMETRY", 0.62F,
+                       editor->right_width - 36.0F, (AfColor){0.48F, 0.55F, 0.68F, 1.0F}, 100125);
+    {
+        const float ratio_width = 76.0F;
+        const float ratio_x = x + editor->right_width - 36.0F - ratio_width;
+        const bool hovered = af_editor_hovered_rect(
+            editor, ratio_x, AF_EDITOR_INSPECTOR_LABEL_Y - 4.0F, ratio_width, 17.0F);
+        af_editor_add_button_rect(
+            editor, ratio_x, AF_EDITOR_INSPECTOR_LABEL_Y - 4.0F, ratio_width, 17.0F,
+            editor->inspector_ratio_locked ? (AfColor){0.16F, 0.48F, 0.78F, 1.0F}
+                                           : (hovered ? (AfColor){0.22F, 0.27F, 0.35F, 1.0F}
+                                                      : (AfColor){0.16F, 0.18F, 0.23F, 1.0F}),
+            100130);
+        af_editor_add_text(editor, ratio_x + 7.0F, AF_EDITOR_INSPECTOR_LABEL_Y + 1.0F,
+                           editor->inspector_ratio_locked ? "RATIO ON" : "RATIO OFF", 0.55F,
+                           ratio_width - 12.0F, (AfColor){0.82F, 0.88F, 0.97F, 1.0F}, 100140);
+    }
+    {
+        static const char *const labels[5][2] = {
+            {"X", "Y"}, {"W", "H"}, {"SX", "SY"}, {"ROT", "OP%"}, {"RAD", "LAYER"}};
+        static const AfEditorInspectorField fields[5][2] = {
+            {AF_EDITOR_INSPECTOR_POSITION_X, AF_EDITOR_INSPECTOR_POSITION_Y},
+            {AF_EDITOR_INSPECTOR_WIDTH, AF_EDITOR_INSPECTOR_HEIGHT},
+            {AF_EDITOR_INSPECTOR_SCALE_X, AF_EDITOR_INSPECTOR_SCALE_Y},
+            {AF_EDITOR_INSPECTOR_ROTATION, AF_EDITOR_INSPECTOR_OPACITY},
+            {AF_EDITOR_INSPECTOR_RADIUS, AF_EDITOR_INSPECTOR_LAYER}};
+        const float available = editor->right_width - 36.0F;
+        const float field_width = (available - 6.0F) * 0.5F;
+        char values[5][2][24];
+        for (uint32_t row = 0U; row < 5U; ++row) {
+            for (uint32_t column = 0U; column < 2U; ++column) {
+                (void)snprintf(values[row][column], sizeof(values[row][column]), "--");
+            }
         }
-        af_editor_add_text(editor, x + 82.0F, y + 8.0F, value, 1.0F, editor->right_width - 118.0F,
-                           (AfColor){0.7F, 0.73F, 0.81F, 1.0F}, 100130);
+        if (selected != NULL) {
+            (void)snprintf(values[0][0], sizeof(values[0][0]), "%.2f",
+                           (double)selected->local_transform.position.x);
+            (void)snprintf(values[0][1], sizeof(values[0][1]), "%.2f",
+                           (double)selected->local_transform.position.y);
+            (void)snprintf(values[1][0], sizeof(values[1][0]), "%.2f",
+                           (double)selected->resolved_bounds.x);
+            (void)snprintf(values[1][1], sizeof(values[1][1]), "%.2f",
+                           (double)selected->resolved_bounds.y);
+            (void)snprintf(values[2][0], sizeof(values[2][0]), "%.3f",
+                           (double)selected->local_transform.scale.x);
+            (void)snprintf(values[2][1], sizeof(values[2][1]), "%.3f",
+                           (double)selected->local_transform.scale.y);
+            (void)snprintf(values[3][0], sizeof(values[3][0]), "%.2f",
+                           (double)(selected->local_transform.rotation * 57.2957795131F));
+            (void)snprintf(values[3][1], sizeof(values[3][1]), "%.1f",
+                           (double)(selected->opacity * 100.0F));
+            (void)snprintf(values[4][0], sizeof(values[4][0]), "%.2f",
+                           (double)selected->corner_radius);
+            (void)snprintf(values[4][1], sizeof(values[4][1]), "%d", selected->layer_order);
+        }
+        for (uint32_t row = 0U; row < 5U; ++row) {
+            const float y =
+                AF_EDITOR_INSPECTOR_FIELD_Y + (float)row * AF_EDITOR_INSPECTOR_FIELD_STEP;
+            for (uint32_t column = 0U; column < 2U; ++column) {
+                af_editor_render_inspector_field(editor, x + (float)column * (field_width + 6.0F),
+                                                 y, field_width, labels[row][column],
+                                                 values[row][column], fields[row][column]);
+            }
+        }
     }
     if (selected != NULL) {
         const AfStyle *style = af_style_find_node_const(&editor->project.style_data, selected->id);
         const AfParticleEmitter *emitter =
             af_project_find_node_emitter(&editor->project, selected->id);
-        af_editor_add_rect(editor, x, AF_EDITOR_STYLE_BAR_Y, editor->right_width - 36.0F, 12.0F,
-                           (AfColor){0.18F, 0.2F, 0.24F, 1.0F}, 100120);
-        af_editor_add_rect(editor, x, AF_EDITOR_STYLE_BAR_Y,
-                           (editor->right_width - 36.0F) * selected->opacity, 12.0F, selected->fill,
-                           100130);
+        char outline_width[32];
+        (void)snprintf(outline_width, sizeof(outline_width), style == NULL ? "--" : "%.2f PX",
+                       style == NULL ? 0.0 : (double)style->stroke.width);
+        af_editor_render_inspector_field(editor, x, AF_EDITOR_STYLE_BAR_Y,
+                                         editor->right_width - 36.0F, "STROKE", outline_width,
+                                         AF_EDITOR_INSPECTOR_OUTLINE_WIDTH);
         for (index = 0U; index < 6U; ++index) {
-            static const char *const style_labels[] = {"ON", "-W", "+W", "FILL", "CAP", "JOIN"};
+            static const char *const style_labels[] = {"OUT", "-", "+", "FILL", "CAP", "JOIN"};
             static const char *const layout_labels[] = {"ANCH", "WIDTH", "HEIGHT",
                                                         "FLOW", "ALIGN", "ASPECT"};
             AfColor button = {0.24F, 0.26F, 0.32F, 1.0F};
@@ -509,11 +602,6 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
                                AF_EDITOR_LAYOUT_ROW_Y + 9.0F, layout_labels[index], 0.58F, 27.0F,
                                (AfColor){0.82F, 0.84F, 0.9F, 1.0F}, 100135);
         }
-        af_editor_add_text(editor, x, AF_EDITOR_STYLE_LABEL_Y, "STYLE", 0.8F, 48.0F,
-                           (AfColor){0.55F, 0.59F, 0.68F, 1.0F}, 100125);
-        af_editor_add_text(editor, x + 62.0F, AF_EDITOR_STYLE_LABEL_Y, "LAYOUT CONTROLS BELOW",
-                           0.55F, editor->right_width - 98.0F, (AfColor){0.45F, 0.49F, 0.58F, 1.0F},
-                           100125);
         af_editor_add_text(editor, x, AF_EDITOR_PARTICLE_LABEL_Y, "PARTICLE EMITTER", 0.85F,
                            editor->right_width - 36.0F,
                            emitter == NULL ? (AfColor){0.45F, 0.49F, 0.58F, 1.0F}

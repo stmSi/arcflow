@@ -194,21 +194,27 @@ static AfResult af_editor_add_keyframe(AfEditorState *editor) {
     return result;
 }
 
-static int32_t af_editor_transform_drag_key_index(const AfEditorState *editor, uint64_t node_id) {
+static int32_t af_editor_transform_drag_key_property_index(const AfEditorState *editor,
+                                                           uint64_t node_id,
+                                                           AfPropertyType property) {
     for (uint32_t index = 0U; index < editor->transform_drag_key_count; ++index) {
-        if (editor->transform_drag_node_ids[index] == node_id) {
+        if (editor->transform_drag_node_ids[index] == node_id &&
+            editor->transform_drag_key_properties[index] == property) {
             return (int32_t)index;
         }
     }
     return -1;
 }
 
-static void af_editor_begin_transform_key_drag(AfEditorState *editor, AfPropertyType property) {
+static int32_t af_editor_transform_drag_key_index(const AfEditorState *editor, uint64_t node_id) {
+    return af_editor_transform_drag_key_property_index(editor, node_id,
+                                                       editor->transform_drag_property);
+}
+
+static void af_editor_append_transform_key_drag(AfEditorState *editor, AfPropertyType property) {
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
     float key_time = editor->playhead;
-    editor->transform_drag_key_count = 0U;
-    editor->transform_drag_property = property;
     if (clip == NULL) {
         return;
     }
@@ -255,10 +261,17 @@ static void af_editor_begin_transform_key_drag(AfEditorState *editor, AfProperty
         }
         editor->transform_drag_node_ids[drag_index] = node_id;
         editor->transform_drag_key_ids[drag_index] = key->id;
+        editor->transform_drag_key_properties[drag_index] = property;
         memcpy(editor->transform_drag_key_starts[drag_index], value, sizeof(value));
         editor->transform_drag_key_created[drag_index] = created;
         ++editor->transform_drag_key_count;
     }
+}
+
+static void af_editor_begin_transform_key_drag(AfEditorState *editor, AfPropertyType property) {
+    editor->transform_drag_key_count = 0U;
+    editor->transform_drag_property = property;
+    af_editor_append_transform_key_drag(editor, property);
     if (editor->transform_drag_key_count != 0U) {
         editor->preview_playing = false;
         af_editor_status(editor, "Auto-key active at playhead");
@@ -266,8 +279,13 @@ static void af_editor_begin_transform_key_drag(AfEditorState *editor, AfProperty
 }
 
 static bool af_editor_transform_key_drag_covers_selection(const AfEditorState *editor) {
-    return editor->selection_drag_count != 0U &&
-           editor->transform_drag_key_count == editor->selection_drag_count;
+    uint32_t covered = 0U;
+    for (uint32_t index = 0U; index < editor->transform_drag_key_count; ++index) {
+        if (editor->transform_drag_key_properties[index] == editor->transform_drag_property) {
+            ++covered;
+        }
+    }
+    return editor->selection_drag_count != 0U && covered == editor->selection_drag_count;
 }
 
 static AfResult af_editor_commit_transform_key_drag(AfEditorState *editor, bool allow_merge) {

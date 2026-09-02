@@ -60,6 +60,10 @@ static bool af_editor_selection_contains(const AfEditorState *editor, uint64_t i
 }
 
 static void af_editor_select_only(AfEditorState *editor, uint64_t id) {
+    if (editor->selected_id != id) {
+        editor->path_command_selection_node_id = id;
+        editor->selected_path_command_count = 0U;
+    }
     editor->selected_count = id == 0U ? 0U : 1U;
     editor->selected_id = id;
     if (id != 0U) {
@@ -74,6 +78,8 @@ static void af_editor_selection_add(AfEditorState *editor, uint64_t id) {
     if (editor->selected_count < AF_EDITOR_COMMAND_MAX_SNAPSHOTS) {
         editor->selected_ids[editor->selected_count++] = id;
         editor->selected_id = id;
+        editor->path_command_selection_node_id = id;
+        editor->selected_path_command_count = 0U;
     }
 }
 
@@ -87,10 +93,74 @@ static void af_editor_selection_toggle(AfEditorState *editor, uint64_t id) {
             editor->selected_id = editor->selected_count == 0U
                                       ? 0U
                                       : editor->selected_ids[editor->selected_count - 1U];
+            editor->path_command_selection_node_id = editor->selected_id;
+            editor->selected_path_command_count = 0U;
             return;
         }
     }
     af_editor_selection_add(editor, id);
+}
+
+static void af_editor_path_selection_clear(AfEditorState *editor) {
+    editor->path_command_selection_node_id = editor->selected_id;
+    editor->selected_path_command_count = 0U;
+}
+
+static bool af_editor_path_selection_contains(const AfEditorState *editor, uint32_t command) {
+    if (editor->path_command_selection_node_id != editor->selected_id) {
+        return false;
+    }
+    for (uint32_t index = 0U; index < editor->selected_path_command_count; ++index) {
+        if (editor->selected_path_commands[index] == command) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool af_editor_path_selection_add(AfEditorState *editor, uint32_t command) {
+    if (editor->path_command_selection_node_id != editor->selected_id) {
+        af_editor_path_selection_clear(editor);
+    }
+    if (af_editor_path_selection_contains(editor, command)) {
+        editor->selected_path_command = command;
+        return true;
+    }
+    if (editor->selected_path_command_count >= AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY) {
+        return false;
+    }
+    editor->selected_path_commands[editor->selected_path_command_count++] = command;
+    editor->selected_path_command = command;
+    return true;
+}
+
+static void af_editor_path_selection_only(AfEditorState *editor, uint32_t command) {
+    af_editor_path_selection_clear(editor);
+    (void)af_editor_path_selection_add(editor, command);
+}
+
+static void af_editor_path_selection_toggle(AfEditorState *editor, uint32_t command) {
+    if (editor->path_command_selection_node_id != editor->selected_id) {
+        af_editor_path_selection_clear(editor);
+    }
+    for (uint32_t index = 0U; index < editor->selected_path_command_count; ++index) {
+        if (editor->selected_path_commands[index] == command) {
+            const bool removed_primary = editor->selected_path_command == command;
+            memmove(&editor->selected_path_commands[index],
+                    &editor->selected_path_commands[index + 1U],
+                    (size_t)(editor->selected_path_command_count - index - 1U) *
+                        sizeof(editor->selected_path_commands[0]));
+            --editor->selected_path_command_count;
+            if (editor->selected_path_command_count == 0U) {
+                editor->selected_path_command = UINT32_MAX;
+            } else if (removed_primary) {
+                editor->selected_path_command =
+                    editor->selected_path_commands[editor->selected_path_command_count - 1U];
+            }
+            return;
+        }
+    }
+    (void)af_editor_path_selection_add(editor, command);
 }
 
 static bool af_editor_selection_has_selected_ancestor(const AfEditorState *editor, uint64_t id) {
@@ -177,6 +247,13 @@ static AfSceneNode af_editor_default_node(AfNodeType type, uint64_t id, AfVec2 p
                          .visible = true};
 }
 
+static AfLayoutNode af_editor_centered_pivot_layout(const AfSceneNode *node) {
+    AfLayoutNode layout = af_layout_node_default(node->id);
+    layout.pivot = (AfVec2){0.5F, 0.5F};
+    layout.offset = (AfVec2){node->bounds.x * 0.5F, node->bounds.y * 0.5F};
+    return layout;
+}
+
 static AfResult af_editor_default_project(AfEditorState *editor) {
     AfSceneNode root = {.id = 1U,
                         .parent_id = AF_INVALID_NODE_ID,
@@ -212,6 +289,18 @@ static AfResult af_editor_default_project(AfEditorState *editor) {
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_project_add_node(&editor->project, &ellipse, "Ellipse");
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        const AfLayoutNode layout = af_editor_centered_pivot_layout(&rectangle);
+        result = af_project_set_layout(&editor->project, &layout);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        const AfLayoutNode layout = af_editor_centered_pivot_layout(&rounded);
+        result = af_project_set_layout(&editor->project, &layout);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        const AfLayoutNode layout = af_editor_centered_pivot_layout(&ellipse);
+        result = af_project_set_layout(&editor->project, &layout);
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_project_add_clip(&editor->project, &clip);
@@ -256,9 +345,8 @@ static AfResult af_editor_save(AfEditorState *editor) {
                                      : "Project changed on disk; reload or use Save As");
         return AF_RESULT_STALE_HANDLE;
     }
-    if (editor->dirty &&
-        af_project_metadata_record(&editor->project.metadata, "local", "editor-save") !=
-            AF_RESULT_SUCCESS) {
+    if (editor->dirty && af_project_metadata_record(&editor->project.metadata, "local",
+                                                    "editor-save") != AF_RESULT_SUCCESS) {
         return AF_RESULT_LIMIT_EXCEEDED;
     }
     if (editor->project_path[0] != '\0') {

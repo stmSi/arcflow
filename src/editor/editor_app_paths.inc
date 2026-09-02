@@ -9,6 +9,437 @@ static AfVec2 af_editor_visible_center(const AfEditorState *editor, int width, i
         (AfVec2){canvas_x + canvas_width * 0.5F, canvas_y + canvas_height * 0.5F});
 }
 
+static AfVec2 af_editor_tool_snap_point(const AfEditorState *editor, AfVec2 point) {
+    if (editor->snapping && editor->grid_step > 0.0001F) {
+        point.x = roundf(point.x / editor->grid_step) * editor->grid_step;
+        point.y = roundf(point.y / editor->grid_step) * editor->grid_step;
+    }
+    return point;
+}
+
+static void af_editor_cancel_vector_tool(AfEditorState *editor, const char *status) {
+    editor->tool_point_count = 0U;
+    editor->tool_command_count = 0U;
+    editor->tool_pen_has_outgoing = false;
+    if (editor->drag_mode == AF_EDITOR_DRAG_TOOL_CREATE) {
+        editor->drag_mode = AF_EDITOR_DRAG_NONE;
+    }
+    if (status != NULL) {
+        af_editor_status(editor, status);
+    }
+}
+
+static void af_editor_set_vector_tool(AfEditorState *editor, AfEditorVectorTool tool) {
+    char status[96];
+    if (tool >= AF_EDITOR_TOOL_COUNT) {
+        return;
+    }
+    if (tool != editor->active_tool && editor->active_tool == AF_EDITOR_TOOL_PEN &&
+        editor->tool_command_count != 0U) {
+        af_editor_cancel_vector_tool(editor, NULL);
+    }
+    editor->active_tool = tool;
+    editor->drag_mode = AF_EDITOR_DRAG_NONE;
+    (void)snprintf(status, sizeof(status), "%s tool · %s", af_editor_vector_tool_name(tool),
+                   af_editor_vector_tool_is_construction(tool)
+                       ? "draw directly on the canvas"
+                       : (tool == AF_EDITOR_TOOL_NODE
+                              ? "edit animated path nodes"
+                              : (tool == AF_EDITOR_TOOL_SCISSORS
+                                     ? "click a selected path segment to cut it"
+                                     : (tool == AF_EDITOR_TOOL_SEGMENT_DELETE
+                                            ? "click a selected path segment to remove it"
+                                            : "select and transform objects"))));
+    af_editor_status(editor, status);
+}
+
+static AfResult af_editor_create_primitive_at(AfEditorState *editor, AfNodeType type,
+                                              AfEditorToolRect rect) {
+    AfProjectNodeSnapshot snapshot = {0};
+    AfEditorCommand command = {0};
+    uint64_t id = 0U;
+    const char *name = type == AF_NODE_RECTANGLE
+                           ? "Rectangle"
+                           : (type == AF_NODE_ROUNDED_RECTANGLE ? "Rounded Rectangle" : "Ellipse");
+    AfResult result = AF_RESULT_INVALID_ARGUMENT;
+    if (rect.size.x < 0.1F || rect.size.y < 0.1F) {
+        return result;
+    }
+    result = af_project_allocate_id(&editor->project, &id);
+    if (result != AF_RESULT_SUCCESS) {
+        return result;
+    }
+    snapshot = (AfProjectNodeSnapshot){.node = af_editor_default_node(type, id, rect.position),
+                                       .index = editor->project.scene.count};
+    snapshot.node.bounds = rect.size;
+    if (type == AF_NODE_ROUNDED_RECTANGLE) {
+        snapshot.node.corner_radius = fminf(rect.size.x, rect.size.y) * 0.18F;
+    }
+    snapshot.layout = af_editor_centered_pivot_layout(&snapshot.node);
+    snapshot.has_layout = true;
+    (void)snprintf(snapshot.name, sizeof(snapshot.name), "%s %llu", name, (unsigned long long)id);
+    result = af_editor_command_create(&snapshot, &command);
+    if (result == AF_RESULT_SUCCESS) {
+        result =
+            af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        af_editor_select_only(editor, id);
+        editor->selected_path_command = UINT32_MAX;
+        af_editor_mark_dirty(editor);
+        af_editor_status(editor, "Shape drawn · transform and appearance are animatable");
+    }
+    return result;
+}
+
+static AfResult af_editor_create_path_geometry(AfEditorState *editor, AfVec2 position, AfVec2 size,
+                                               const AfPathCommand *commands,
+                                               uint32_t command_count, const char *name,
+                                               bool closed) {
+    AfProjectNodeSnapshot snapshot = {0};
+    AfEditorCommand command = {0};
+    uint64_t id = 0U;
+    AfResult result = AF_RESULT_INVALID_ARGUMENT;
+    if (commands == NULL || command_count < 2U ||
+        command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS || size.x <= 0.0F || size.y <= 0.0F) {
+        return result;
+    }
+    result = af_project_allocate_id(&editor->project, &id);
+    if (result != AF_RESULT_SUCCESS) {
+        return result;
+    }
+    snapshot = (AfProjectNodeSnapshot){.node = af_editor_default_node(AF_NODE_PATH, id, position),
+                                       .index = editor->project.scene.count};
+    snapshot.node.bounds = size;
+    snapshot.node.fill =
+        closed ? (AfColor){0.58F, 0.34F, 0.94F, 1.0F} : (AfColor){0.25F, 0.72F, 1.0F, 0.0F};
+    snapshot.style = af_style_default(id, id, snapshot.node.fill);
+    if (!closed) {
+        snapshot.style.stroke.enabled = true;
+        snapshot.style.stroke.width = 3.0F;
+        snapshot.style.stroke.end_width = 3.0F;
+        snapshot.style.stroke.cap = AF_STROKE_CAP_ROUND;
+        snapshot.style.stroke.join = AF_STROKE_JOIN_ROUND;
+        snapshot.style.stroke_paint = af_paint_solid((AfColor){0.25F, 0.72F, 1.0F, 1.0F});
+    }
+    snapshot.layout = af_editor_centered_pivot_layout(&snapshot.node);
+    snapshot.has_layout = true;
+    (void)snprintf(snapshot.name, sizeof(snapshot.name), "%s %llu", name, (unsigned long long)id);
+    result = af_editor_command_create(&snapshot, &command);
+    if (result == AF_RESULT_SUCCESS) {
+        command.path_after_count = 1U;
+        command.path_command_after_count = command_count;
+        command.path_after[0] = (AfProjectPathSnapshot){
+            .path = {.id = id,
+                     .node_id = id,
+                     .command_start = editor->project.path_data.command_count,
+                     .command_count = command_count,
+                     .fill_rule = AF_PATH_FILL_EVEN_ODD,
+                     .geometry_generation = 1U},
+            .index = editor->project.path_data.path_count};
+        memcpy(command.path_command_after, commands, (size_t)command_count * sizeof(*commands));
+        result =
+            af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
+    }
+    if (result == AF_RESULT_SUCCESS) {
+        af_editor_select_only(editor, id);
+        editor->selected_path_command = command_count > 1U ? command_count - 1U : 0U;
+        if (commands[editor->selected_path_command].type == AF_PATH_CLOSE) {
+            --editor->selected_path_command;
+        }
+        af_editor_path_selection_only(editor, editor->selected_path_command);
+        af_editor_mark_dirty(editor);
+        af_editor_status(editor, "Editable path drawn · nodes and handles can be animated");
+    }
+    return result;
+}
+
+static AfResult af_editor_create_path_points(AfEditorState *editor, const AfVec2 *points,
+                                             uint32_t point_count, bool closed, const char *name) {
+    AfPathCommand commands[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U];
+    AfVec2 minimum = points == NULL || point_count == 0U ? (AfVec2){0} : points[0];
+    AfVec2 maximum = minimum;
+    if (points == NULL || point_count < 2U ||
+        point_count + (closed ? 1U : 0U) > AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    for (uint32_t index = 1U; index < point_count; ++index) {
+        minimum.x = fminf(minimum.x, points[index].x);
+        minimum.y = fminf(minimum.y, points[index].y);
+        maximum.x = fmaxf(maximum.x, points[index].x);
+        maximum.y = fmaxf(maximum.y, points[index].y);
+    }
+    for (uint32_t index = 0U; index < point_count; ++index) {
+        commands[index] =
+            (AfPathCommand){.type = index == 0U ? AF_PATH_MOVE : AF_PATH_LINE,
+                            .point = {points[index].x - minimum.x, points[index].y - minimum.y}};
+    }
+    if (closed) {
+        commands[point_count] = (AfPathCommand){.type = AF_PATH_CLOSE};
+    }
+    return af_editor_create_path_geometry(
+        editor, minimum,
+        (AfVec2){fmaxf(0.1F, maximum.x - minimum.x), fmaxf(0.1F, maximum.y - minimum.y)}, commands,
+        point_count + (closed ? 1U : 0U), name, closed);
+}
+
+static AfResult af_editor_create_path_commands(AfEditorState *editor, const AfPathCommand *source,
+                                               uint32_t command_count, bool closed,
+                                               const char *name) {
+    AfPathCommand commands[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U];
+    AfVec2 minimum = source == NULL || command_count == 0U ? (AfVec2){0} : source[0].point;
+    AfVec2 maximum = minimum;
+    if (source == NULL || command_count < 2U ||
+        command_count + (closed ? 1U : 0U) > AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    for (uint32_t index = 0U; index < command_count; ++index) {
+        const AfPathCommand *command = &source[index];
+        minimum.x = fminf(minimum.x, command->point.x);
+        minimum.y = fminf(minimum.y, command->point.y);
+        maximum.x = fmaxf(maximum.x, command->point.x);
+        maximum.y = fmaxf(maximum.y, command->point.y);
+        if (command->type == AF_PATH_CUBIC) {
+            minimum.x = fminf(minimum.x, fminf(command->control1.x, command->control2.x));
+            minimum.y = fminf(minimum.y, fminf(command->control1.y, command->control2.y));
+            maximum.x = fmaxf(maximum.x, fmaxf(command->control1.x, command->control2.x));
+            maximum.y = fmaxf(maximum.y, fmaxf(command->control1.y, command->control2.y));
+        }
+    }
+    for (uint32_t index = 0U; index < command_count; ++index) {
+        commands[index] = source[index];
+        commands[index].point.x -= minimum.x;
+        commands[index].point.y -= minimum.y;
+        if (commands[index].type == AF_PATH_CUBIC) {
+            commands[index].control1.x -= minimum.x;
+            commands[index].control1.y -= minimum.y;
+            commands[index].control2.x -= minimum.x;
+            commands[index].control2.y -= minimum.y;
+        }
+    }
+    if (closed) {
+        commands[command_count] = (AfPathCommand){.type = AF_PATH_CLOSE};
+    }
+    return af_editor_create_path_geometry(
+        editor, minimum,
+        (AfVec2){fmaxf(0.1F, maximum.x - minimum.x), fmaxf(0.1F, maximum.y - minimum.y)}, commands,
+        command_count + (closed ? 1U : 0U), name, closed);
+}
+
+static AfVec2 af_editor_tool_line_end(AfVec2 start, AfVec2 end, SDL_Keymod modifiers) {
+    if ((modifiers & SDL_KMOD_SHIFT) != 0U) {
+        const float dx = end.x - start.x;
+        const float dy = end.y - start.y;
+        const float length = sqrtf(dx * dx + dy * dy);
+        const float step = 0.261799387799F;
+        const float angle = roundf(atan2f(dy, dx) / step) * step;
+        end = (AfVec2){start.x + cosf(angle) * length, start.y + sinf(angle) * length};
+    }
+    return end;
+}
+
+static bool af_editor_vector_tool_mouse_down(AfEditorState *editor, int width, int height,
+                                             const SDL_MouseButtonEvent *event) {
+    const AfVec2 raw_point =
+        af_editor_screen_to_project(editor, width, height, (AfVec2){event->x, event->y});
+    AfVec2 point = editor->active_tool == AF_EDITOR_TOOL_PENCIL
+                       ? raw_point
+                       : af_editor_tool_snap_point(editor, raw_point);
+    if (!af_editor_vector_tool_is_construction(editor->active_tool)) {
+        return false;
+    }
+    if (editor->active_tool == AF_EDITOR_TOOL_PEN) {
+        bool close_path = false;
+        if (editor->tool_command_count >= 3U) {
+            const AfVec2 first_screen = af_affine_transform_point(
+                af_editor_camera(editor, width, height), editor->tool_commands[0].point);
+            const float dx = event->x - first_screen.x;
+            const float dy = event->y - first_screen.y;
+            close_path = dx * dx + dy * dy <= 100.0F;
+        }
+        if (close_path) {
+            (void)af_editor_create_path_commands(editor, editor->tool_commands,
+                                                 editor->tool_command_count, true, "Pen");
+            editor->tool_command_count = 0U;
+            editor->tool_pen_has_outgoing = false;
+            editor->drag_mode = AF_EDITOR_DRAG_NONE;
+        } else {
+            bool append = editor->tool_command_count == 0U;
+            if (!append) {
+                const AfVec2 previous =
+                    editor->tool_commands[editor->tool_command_count - 1U].point;
+                const float dx = point.x - previous.x;
+                const float dy = point.y - previous.y;
+                append = dx * dx + dy * dy > 0.01F;
+            }
+            if (append && editor->tool_command_count < AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY) {
+                const uint32_t index = editor->tool_command_count++;
+                if (index == 0U) {
+                    editor->tool_commands[index] =
+                        (AfPathCommand){.type = AF_PATH_MOVE, .point = point};
+                } else {
+                    const AfVec2 previous = editor->tool_commands[index - 1U].point;
+                    editor->tool_commands[index] = (AfPathCommand){
+                        .type = editor->tool_pen_has_outgoing ? AF_PATH_CUBIC : AF_PATH_LINE,
+                        .point = point,
+                        .control1 =
+                            editor->tool_pen_has_outgoing ? editor->tool_pen_outgoing : previous,
+                        .control2 = point};
+                }
+                editor->tool_pen_has_outgoing = false;
+            }
+            if (event->clicks >= 2U && editor->tool_command_count >= 2U) {
+                (void)af_editor_create_path_commands(editor, editor->tool_commands,
+                                                     editor->tool_command_count, false, "Pen");
+                editor->tool_command_count = 0U;
+                editor->tool_pen_has_outgoing = false;
+                editor->drag_mode = AF_EDITOR_DRAG_NONE;
+            } else {
+                editor->tool_start = point;
+                editor->tool_current = point;
+                editor->drag_mode = AF_EDITOR_DRAG_TOOL_CREATE;
+                af_editor_status(editor, editor->tool_command_count == 1U
+                                             ? "Pen started · click or drag nodes · Enter finishes"
+                                             : "Pen node added · drag for symmetric handles");
+            }
+        }
+        return true;
+    }
+    editor->tool_start = point;
+    editor->tool_current = point;
+    editor->tool_point_count = 0U;
+    if (editor->active_tool == AF_EDITOR_TOOL_PENCIL) {
+        editor->tool_points[editor->tool_point_count++] = point;
+    }
+    editor->drag_mode = AF_EDITOR_DRAG_TOOL_CREATE;
+    af_editor_status(editor, "Drawing · Shift constrains · Ctrl draws from center · Esc cancels");
+    return true;
+}
+
+static void af_editor_vector_tool_mouse_motion(AfEditorState *editor, int width, int height,
+                                               AfVec2 screen) {
+    const AfVec2 raw_point = af_editor_screen_to_project(editor, width, height, screen);
+    AfVec2 point =
+        editor->active_tool == AF_EDITOR_TOOL_PENCIL || editor->active_tool == AF_EDITOR_TOOL_PEN
+            ? raw_point
+            : af_editor_tool_snap_point(editor, raw_point);
+    editor->tool_current = point;
+    if (editor->active_tool == AF_EDITOR_TOOL_PEN && editor->tool_command_count != 0U) {
+        const float dx = point.x - editor->tool_start.x;
+        const float dy = point.y - editor->tool_start.y;
+        if ((dx * dx + dy * dy) * editor->zoom * editor->zoom >= 9.0F) {
+            const uint32_t index = editor->tool_command_count - 1U;
+            if (index != 0U) {
+                AfPathCommand *command = &editor->tool_commands[index];
+                if (command->type == AF_PATH_LINE) {
+                    command->type = AF_PATH_CUBIC;
+                    command->control1 = editor->tool_commands[index - 1U].point;
+                }
+                command->control2 = (AfVec2){editor->tool_start.x - dx, editor->tool_start.y - dy};
+            }
+            editor->tool_pen_outgoing =
+                (AfVec2){editor->tool_start.x + dx, editor->tool_start.y + dy};
+            editor->tool_pen_has_outgoing = true;
+        }
+    } else if (editor->active_tool == AF_EDITOR_TOOL_PENCIL &&
+               editor->tool_point_count < AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY) {
+        const AfVec2 previous = editor->tool_points[editor->tool_point_count - 1U];
+        const float dx = point.x - previous.x;
+        const float dy = point.y - previous.y;
+        const float minimum = 2.0F / fmaxf(editor->zoom, 0.1F);
+        if (dx * dx + dy * dy >= minimum * minimum) {
+            editor->tool_points[editor->tool_point_count++] = point;
+        }
+    }
+}
+
+static void af_editor_finish_vector_tool_drag(AfEditorState *editor) {
+    const SDL_Keymod modifiers = SDL_GetModState();
+    AfEditorToolRect rect = {0};
+    AfPathCommand commands[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U];
+    uint32_t command_count = 0U;
+    if (editor->active_tool == AF_EDITOR_TOOL_PEN) {
+        return;
+    }
+    if (editor->active_tool == AF_EDITOR_TOOL_PENCIL) {
+        AfVec2 simplified[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY];
+        const uint32_t count = af_editor_vector_tool_simplify(
+            editor->tool_points, editor->tool_point_count, 1.5F / fmaxf(editor->zoom, 0.1F),
+            simplified, AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY);
+        if (count >= 2U) {
+            (void)af_editor_create_path_points(editor, simplified, count, false, "Pencil");
+        } else {
+            af_editor_status(editor, "Pencil stroke was too short");
+        }
+        editor->tool_point_count = 0U;
+        return;
+    }
+    if (editor->active_tool == AF_EDITOR_TOOL_LINE) {
+        AfVec2 points[2] = {
+            editor->tool_start,
+            af_editor_tool_line_end(editor->tool_start, editor->tool_current, modifiers)};
+        const float dx = points[1].x - points[0].x;
+        const float dy = points[1].y - points[0].y;
+        if (dx * dx + dy * dy < 0.25F) {
+            af_editor_status(editor, "Draw cancelled · line was too short");
+            return;
+        }
+        (void)af_editor_create_path_points(editor, points, 2U, false, "Line");
+        return;
+    }
+    if (!af_editor_vector_tool_rect(editor->tool_start, editor->tool_current,
+                                    (modifiers & SDL_KMOD_CTRL) != 0U,
+                                    (modifiers & SDL_KMOD_SHIFT) != 0U, &rect) ||
+        rect.size.x < 0.5F || rect.size.y < 0.5F) {
+        af_editor_status(editor, "Draw cancelled · shape was too small");
+        return;
+    }
+    if (editor->active_tool == AF_EDITOR_TOOL_RECTANGLE ||
+        editor->active_tool == AF_EDITOR_TOOL_ROUNDED_RECTANGLE ||
+        editor->active_tool == AF_EDITOR_TOOL_ELLIPSE) {
+        const AfNodeType type = editor->active_tool == AF_EDITOR_TOOL_RECTANGLE ? AF_NODE_RECTANGLE
+                                : editor->active_tool == AF_EDITOR_TOOL_ROUNDED_RECTANGLE
+                                    ? AF_NODE_ROUNDED_RECTANGLE
+                                    : AF_NODE_ELLIPSE;
+        (void)af_editor_create_primitive_at(editor, type, rect);
+        return;
+    }
+    if (editor->active_tool == AF_EDITOR_TOOL_POLYGON) {
+        command_count = af_editor_vector_tool_polygon(rect.size, 6U, 0.0F, commands,
+                                                      AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U);
+    } else if (editor->active_tool == AF_EDITOR_TOOL_STAR) {
+        command_count = af_editor_vector_tool_polygon(rect.size, 5U, 0.45F, commands,
+                                                      AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U);
+    } else if (editor->active_tool == AF_EDITOR_TOOL_ARC) {
+        command_count = af_editor_vector_tool_arc(rect.size, commands,
+                                                  AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U);
+    } else if (editor->active_tool == AF_EDITOR_TOOL_SPIRAL) {
+        command_count = af_editor_vector_tool_spiral(rect.size, 3U, commands,
+                                                     AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U);
+    }
+    if (command_count >= 2U) {
+        const bool closed = editor->active_tool == AF_EDITOR_TOOL_POLYGON ||
+                            editor->active_tool == AF_EDITOR_TOOL_STAR;
+        (void)af_editor_create_path_geometry(
+            editor, rect.position, rect.size, commands, command_count,
+            af_editor_vector_tool_name(editor->active_tool), closed);
+    }
+}
+
+static bool af_editor_finish_pen_path(AfEditorState *editor) {
+    if (editor->active_tool != AF_EDITOR_TOOL_PEN || editor->tool_command_count < 2U) {
+        if (editor->active_tool == AF_EDITOR_TOOL_PEN && editor->tool_command_count != 0U) {
+            af_editor_status(editor, "Pen needs at least two points · Esc cancels");
+        }
+        return false;
+    }
+    (void)af_editor_create_path_commands(editor, editor->tool_commands, editor->tool_command_count,
+                                         false, "Pen");
+    editor->tool_command_count = 0U;
+    editor->tool_pen_has_outgoing = false;
+    return true;
+}
+
 static AfResult af_editor_create_primitive(AfEditorState *editor, AfNodeType type, int width,
                                            int height) {
     AfProjectNodeSnapshot snapshot = {0};
@@ -24,6 +455,8 @@ static AfResult af_editor_create_primitive(AfEditorState *editor, AfNodeType typ
     snapshot = (AfProjectNodeSnapshot){
         .node = af_editor_default_node(type, id, af_editor_visible_center(editor, width, height)),
         .index = editor->project.scene.count};
+    snapshot.layout = af_editor_centered_pivot_layout(&snapshot.node);
+    snapshot.has_layout = true;
     (void)snprintf(snapshot.name, sizeof(snapshot.name), "%s %llu", name, (unsigned long long)id);
     result = af_editor_command_create(&snapshot, &command);
     if (result == AF_RESULT_SUCCESS) {
@@ -89,6 +522,8 @@ static AfResult af_editor_create_path(AfEditorState *editor, int width, int heig
         .index = editor->project.scene.count};
     snapshot.node.bounds = (AfVec2){220.0F, 180.0F};
     snapshot.node.fill = (AfColor){0.78F, 0.42F, 0.96F, 1.0F};
+    snapshot.layout = af_editor_centered_pivot_layout(&snapshot.node);
+    snapshot.has_layout = true;
     (void)snprintf(snapshot.name, sizeof(snapshot.name), "Path %llu", (unsigned long long)id);
     result = af_editor_command_create(&snapshot, &command);
     if (result == AF_RESULT_SUCCESS) {
@@ -109,6 +544,7 @@ static AfResult af_editor_create_path(AfEditorState *editor, int width, int heig
     if (result == AF_RESULT_SUCCESS) {
         af_editor_select_only(editor, id);
         editor->selected_path_command = 1U;
+        af_editor_path_selection_only(editor, editor->selected_path_command);
         af_editor_mark_dirty(editor);
         af_editor_status(editor, "Editable path created");
     }
@@ -173,6 +609,7 @@ static AfResult af_editor_prepare_vector_animation_smoke(AfEditorState *editor, 
                                                   command->control2, (AfVec2){140.0F, 145.0F});
     }
     editor->selected_path_command = 1U;
+    af_editor_path_selection_only(editor, editor->selected_path_command);
     return result;
 }
 
@@ -252,6 +689,195 @@ static AfVec2 af_editor_vec_midpoint(AfVec2 first, AfVec2 second) {
     return (AfVec2){(first.x + second.x) * 0.5F, (first.y + second.y) * 0.5F};
 }
 
+static AfVec2 af_editor_vec_lerp(AfVec2 first, AfVec2 second, float amount) {
+    return (AfVec2){first.x + (second.x - first.x) * amount,
+                    first.y + (second.y - first.y) * amount};
+}
+
+static AfVec2 af_editor_path_clamp_point(AfVec2 point) {
+    point.x = af_editor_clamp(point.x, -1000000.0F, 1000000.0F);
+    point.y = af_editor_clamp(point.y, -1000000.0F, 1000000.0F);
+    return point;
+}
+
+static void af_editor_path_shift_anchor(AfPathCommand *commands, uint32_t command_count,
+                                        uint32_t index, AfVec2 delta) {
+    AfPathCommand *command = NULL;
+    if (commands == NULL || index >= command_count || commands[index].type == AF_PATH_CLOSE) {
+        return;
+    }
+    command = &commands[index];
+    command->point = af_editor_path_clamp_point(
+        (AfVec2){command->point.x + delta.x, command->point.y + delta.y});
+    if (command->type == AF_PATH_CUBIC) {
+        command->control2 = af_editor_path_clamp_point(
+            (AfVec2){command->control2.x + delta.x, command->control2.y + delta.y});
+    }
+    if (index + 1U < command_count && commands[index + 1U].type == AF_PATH_CUBIC) {
+        commands[index + 1U].control1 = af_editor_path_clamp_point((AfVec2){
+            commands[index + 1U].control1.x + delta.x, commands[index + 1U].control1.y + delta.y});
+    }
+}
+
+static AfResult af_editor_arrange_path_points(AfEditorState *editor, bool horizontal,
+                                              bool distribute) {
+    AfPath *path = af_editor_selected_path(editor);
+    AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    uint32_t ordered[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY];
+    const uint32_t required = distribute ? 3U : 2U;
+    float target = 0.0F;
+    if (path == NULL || path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS ||
+        editor->path_command_selection_node_id != editor->selected_id ||
+        editor->selected_path_command_count < required) {
+        af_editor_status(editor, distribute ? "Select at least three nodes to distribute"
+                                            : "Select at least two nodes to align");
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    if (af_editor_selected_path_has_animation(editor)) {
+        af_editor_status(editor, "Multi-node geometry edits require a static path");
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    memcpy(commands, &editor->project.path_data.commands[path->command_start],
+           (size_t)path->command_count * sizeof(*commands));
+    for (uint32_t selection = 0U; selection < editor->selected_path_command_count; ++selection) {
+        const uint32_t command_index = editor->selected_path_commands[selection];
+        if (command_index >= path->command_count || commands[command_index].type == AF_PATH_CLOSE) {
+            af_editor_status(editor, "Node selection changed; select the nodes again");
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
+        ordered[selection] = command_index;
+        target += horizontal ? commands[command_index].point.x : commands[command_index].point.y;
+    }
+    if (!distribute) {
+        target /= (float)editor->selected_path_command_count;
+        for (uint32_t selection = 0U; selection < editor->selected_path_command_count;
+             ++selection) {
+            const uint32_t command_index = ordered[selection];
+            const AfVec2 point = commands[command_index].point;
+            const AfVec2 delta =
+                horizontal ? (AfVec2){target - point.x, 0.0F} : (AfVec2){0.0F, target - point.y};
+            af_editor_path_shift_anchor(commands, path->command_count, command_index, delta);
+        }
+    } else {
+        for (uint32_t selection = 1U; selection < editor->selected_path_command_count;
+             ++selection) {
+            const uint32_t value = ordered[selection];
+            const float coordinate = horizontal ? commands[value].point.x : commands[value].point.y;
+            uint32_t insert = selection;
+            while (insert > 0U) {
+                const float previous = horizontal ? commands[ordered[insert - 1U]].point.x
+                                                  : commands[ordered[insert - 1U]].point.y;
+                if (previous <= coordinate) {
+                    break;
+                }
+                ordered[insert] = ordered[insert - 1U];
+                --insert;
+            }
+            ordered[insert] = value;
+        }
+        {
+            const float first =
+                horizontal ? commands[ordered[0]].point.x : commands[ordered[0]].point.y;
+            const float last =
+                horizontal ? commands[ordered[editor->selected_path_command_count - 1U]].point.x
+                           : commands[ordered[editor->selected_path_command_count - 1U]].point.y;
+            const float step = (last - first) / (float)(editor->selected_path_command_count - 1U);
+            for (uint32_t selection = 1U; selection + 1U < editor->selected_path_command_count;
+                 ++selection) {
+                const uint32_t command_index = ordered[selection];
+                const float coordinate =
+                    horizontal ? commands[command_index].point.x : commands[command_index].point.y;
+                target = first + step * (float)selection;
+                af_editor_path_shift_anchor(commands, path->command_count, command_index,
+                                            horizontal ? (AfVec2){target - coordinate, 0.0F}
+                                                       : (AfVec2){0.0F, target - coordinate});
+            }
+        }
+    }
+    return af_editor_apply_path_edit(
+        editor, commands, path->command_count, path->fill_rule,
+        distribute
+            ? (horizontal ? "Nodes distributed horizontally" : "Nodes distributed vertically")
+            : (horizontal ? "Nodes aligned horizontally" : "Nodes aligned vertically"));
+}
+
+static AfResult af_editor_smooth_path_points(AfEditorState *editor, bool symmetric) {
+    AfPath *path = af_editor_selected_path(editor);
+    AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    uint32_t changed = 0U;
+    if (path == NULL || path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS ||
+        editor->selected_path_command >= path->command_count) {
+        return AF_RESULT_NOT_FOUND;
+    }
+    if (af_editor_selected_path_has_animation(editor)) {
+        af_editor_status(editor, "Handle smoothing requires a static path");
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    memcpy(commands, &editor->project.path_data.commands[path->command_start],
+           (size_t)path->command_count * sizeof(*commands));
+    for (uint32_t selection = 0U;
+         selection <
+         (editor->selected_path_command_count == 0U ? 1U : editor->selected_path_command_count);
+         ++selection) {
+        const uint32_t index = editor->selected_path_command_count == 0U
+                                   ? editor->selected_path_command
+                                   : editor->selected_path_commands[selection];
+        AfVec2 direction = {0};
+        float incoming_length = 0.0F;
+        float outgoing_length = 0.0F;
+        float direction_length = 0.0F;
+        if (index >= path->command_count || index + 1U >= path->command_count ||
+            commands[index].type != AF_PATH_CUBIC || commands[index + 1U].type != AF_PATH_CUBIC) {
+            continue;
+        }
+        {
+            const AfVec2 anchor = commands[index].point;
+            const AfVec2 incoming = {anchor.x - commands[index].control2.x,
+                                     anchor.y - commands[index].control2.y};
+            const AfVec2 outgoing = {commands[index + 1U].control1.x - anchor.x,
+                                     commands[index + 1U].control1.y - anchor.y};
+            incoming_length = sqrtf(incoming.x * incoming.x + incoming.y * incoming.y);
+            outgoing_length = sqrtf(outgoing.x * outgoing.x + outgoing.y * outgoing.y);
+            if (incoming_length > 0.0001F) {
+                direction.x += incoming.x / incoming_length;
+                direction.y += incoming.y / incoming_length;
+            }
+            if (outgoing_length > 0.0001F) {
+                direction.x += outgoing.x / outgoing_length;
+                direction.y += outgoing.y / outgoing_length;
+            }
+            direction_length = sqrtf(direction.x * direction.x + direction.y * direction.y);
+            if (direction_length <= 0.0001F) {
+                direction = (AfVec2){commands[index + 1U].point.x - commands[index - 1U].point.x,
+                                     commands[index + 1U].point.y - commands[index - 1U].point.y};
+                direction_length = sqrtf(direction.x * direction.x + direction.y * direction.y);
+            }
+            if (direction_length <= 0.0001F) {
+                continue;
+            }
+            direction.x /= direction_length;
+            direction.y /= direction_length;
+            if (symmetric) {
+                incoming_length = outgoing_length = (incoming_length + outgoing_length) * 0.5F;
+            }
+            commands[index].control2 =
+                af_editor_path_clamp_point((AfVec2){anchor.x - direction.x * incoming_length,
+                                                    anchor.y - direction.y * incoming_length});
+            commands[index + 1U].control1 =
+                af_editor_path_clamp_point((AfVec2){anchor.x + direction.x * outgoing_length,
+                                                    anchor.y + direction.y * outgoing_length});
+            ++changed;
+        }
+    }
+    if (changed == 0U) {
+        af_editor_status(editor, "Select a node with incoming and outgoing curve handles");
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    return af_editor_apply_path_edit(editor, commands, path->command_count, path->fill_rule,
+                                     symmetric ? "Selected handles made symmetric"
+                                               : "Selected handles smoothed");
+}
+
 static AfResult af_editor_insert_path_point(AfEditorState *editor) {
     AfPath *path = af_editor_selected_path(editor);
     AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
@@ -290,6 +916,127 @@ static AfResult af_editor_insert_path_point(AfEditorState *editor) {
     if (af_editor_apply_path_edit(editor, commands, path->command_count + 1U, path->fill_rule,
                                   "Path point inserted") == AF_RESULT_SUCCESS) {
         editor->selected_path_command = selected;
+        af_editor_path_selection_only(editor, editor->selected_path_command);
+        return AF_RESULT_SUCCESS;
+    }
+    return AF_RESULT_INVALID_ARGUMENT;
+}
+
+static AfResult af_editor_cut_path_segment(AfEditorState *editor, uint32_t selected, float amount) {
+    AfPath *path = af_editor_selected_path(editor);
+    AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    AfPathCommand cut[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    uint32_t start = 0U;
+    uint32_t end = 0U;
+    uint32_t write = 0U;
+    uint32_t cut_node = 0U;
+    if (!af_editor_require_static_path_topology(editor) || path == NULL || selected == 0U ||
+        selected >= path->command_count ||
+        path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS - 2U) {
+        return AF_RESULT_LIMIT_EXCEEDED;
+    }
+    memcpy(commands, &editor->project.path_data.commands[path->command_start],
+           (size_t)path->command_count * sizeof(*commands));
+    if ((commands[selected].type != AF_PATH_LINE && commands[selected].type != AF_PATH_CUBIC) ||
+        !af_editor_path_contour(commands, path->command_count, selected, &start, &end)) {
+        af_editor_status(editor, "Click a visible line or curve segment to cut it");
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    amount = af_editor_clamp(amount, 0.02F, 0.98F);
+    for (uint32_t index = 0U; index < path->command_count; ++index) {
+        if (index == selected) {
+            const AfVec2 segment_start = commands[index - 1U].point;
+            AfPathCommand left = commands[index];
+            AfPathCommand right = commands[index];
+            AfVec2 point = {0};
+            if (commands[index].type == AF_PATH_CUBIC) {
+                const AfVec2 first =
+                    af_editor_vec_lerp(segment_start, commands[index].control1, amount);
+                const AfVec2 middle =
+                    af_editor_vec_lerp(commands[index].control1, commands[index].control2, amount);
+                const AfVec2 last =
+                    af_editor_vec_lerp(commands[index].control2, commands[index].point, amount);
+                const AfVec2 left_control = af_editor_vec_lerp(first, middle, amount);
+                const AfVec2 right_control = af_editor_vec_lerp(middle, last, amount);
+                point = af_editor_vec_lerp(left_control, right_control, amount);
+                left.point = point;
+                left.control1 = first;
+                left.control2 = left_control;
+                right.control1 = right_control;
+                right.control2 = last;
+            } else {
+                point = af_editor_vec_lerp(segment_start, commands[index].point, amount);
+                left.point = point;
+            }
+            cut_node = write;
+            cut[write++] = left;
+            cut[write++] = (AfPathCommand){.type = AF_PATH_MOVE, .point = point};
+            cut[write++] = right;
+        } else if (index == end - 1U && commands[index].type == AF_PATH_CLOSE) {
+            cut[write++] = (AfPathCommand){.type = AF_PATH_LINE, .point = commands[start].point};
+        } else {
+            cut[write++] = commands[index];
+        }
+    }
+    if (af_editor_apply_path_edit(editor, cut, write, path->fill_rule,
+                                  "Path cut into editable contours") == AF_RESULT_SUCCESS) {
+        editor->selected_path_command = cut_node;
+        af_editor_path_selection_only(editor, editor->selected_path_command);
+        return AF_RESULT_SUCCESS;
+    }
+    return AF_RESULT_INVALID_ARGUMENT;
+}
+
+static AfResult af_editor_remove_path_segment(AfEditorState *editor, uint32_t selected) {
+    AfPath *path = af_editor_selected_path(editor);
+    AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    AfPathCommand compacted[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    uint32_t start = 0U;
+    uint32_t end = 0U;
+    uint32_t segment_count = 0U;
+    uint32_t write = 0U;
+    if (!af_editor_require_static_path_topology(editor) || path == NULL || selected == 0U ||
+        selected >= path->command_count ||
+        path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS) {
+        return AF_RESULT_LIMIT_EXCEEDED;
+    }
+    memcpy(commands, &editor->project.path_data.commands[path->command_start],
+           (size_t)path->command_count * sizeof(*commands));
+    if ((commands[selected].type != AF_PATH_LINE && commands[selected].type != AF_PATH_CUBIC) ||
+        !af_editor_path_contour(commands, path->command_count, selected, &start, &end)) {
+        af_editor_status(editor, "Click a line or curve segment to remove it");
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    for (uint32_t index = start + 1U; index < end; ++index) {
+        segment_count +=
+            commands[index].type == AF_PATH_LINE || commands[index].type == AF_PATH_CUBIC;
+    }
+    if (segment_count <= 1U) {
+        af_editor_status(editor, "A contour must retain at least one segment");
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    commands[selected].type = AF_PATH_MOVE;
+    commands[selected].control1 = (AfVec2){0};
+    commands[selected].control2 = (AfVec2){0};
+    if (end > start && commands[end - 1U].type == AF_PATH_CLOSE) {
+        commands[end - 1U] = (AfPathCommand){.type = AF_PATH_LINE, .point = commands[start].point};
+    }
+    for (uint32_t index = 0U; index < path->command_count; ++index) {
+        if (commands[index].type == AF_PATH_MOVE &&
+            (index + 1U >= path->command_count || commands[index + 1U].type == AF_PATH_MOVE ||
+             commands[index + 1U].type == AF_PATH_CLOSE)) {
+            continue;
+        }
+        compacted[write++] = commands[index];
+    }
+    if (write < 2U || compacted[0].type != AF_PATH_MOVE) {
+        af_editor_status(editor, "Segment removal would create an invalid contour");
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    if (af_editor_apply_path_edit(editor, compacted, write, path->fill_rule,
+                                  "Virtual segment removed") == AF_RESULT_SUCCESS) {
+        editor->selected_path_command = 0U;
+        af_editor_path_selection_only(editor, editor->selected_path_command);
         return AF_RESULT_SUCCESS;
     }
     return AF_RESULT_INVALID_ARGUMENT;
@@ -298,6 +1045,7 @@ static AfResult af_editor_insert_path_point(AfEditorState *editor) {
 static AfResult af_editor_delete_path_point(AfEditorState *editor) {
     AfPath *path = af_editor_selected_path(editor);
     AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    AfPathCommand compacted[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
     uint32_t start = 0U;
     uint32_t end = 0U;
     uint32_t segments = 0U;
@@ -309,6 +1057,67 @@ static AfResult af_editor_delete_path_point(AfEditorState *editor) {
     }
     memcpy(commands, &editor->project.path_data.commands[path->command_start],
            (size_t)path->command_count * sizeof(*commands));
+    if (editor->selected_path_command_count > 1U) {
+        uint32_t deleted = 0U;
+        uint32_t write = 0U;
+        uint32_t fallback = 0U;
+        uint32_t fallback_after = 0U;
+        for (uint32_t contour = 0U; contour < path->command_count;) {
+            uint32_t contour_end = contour + 1U;
+            uint32_t contour_segments = 0U;
+            uint32_t removed_segments = 0U;
+            while (contour_end < path->command_count &&
+                   commands[contour_end].type != AF_PATH_MOVE) {
+                ++contour_end;
+            }
+            for (uint32_t index = contour + 1U; index < contour_end; ++index) {
+                if (commands[index].type == AF_PATH_LINE || commands[index].type == AF_PATH_CUBIC) {
+                    ++contour_segments;
+                    if (af_editor_path_selection_contains(editor, index)) {
+                        ++removed_segments;
+                    }
+                }
+            }
+            if (removed_segments != 0U && contour_segments <= removed_segments) {
+                af_editor_status(editor, "Each contour must retain at least one segment");
+                return AF_RESULT_INVALID_ARGUMENT;
+            }
+            contour = contour_end;
+        }
+        for (uint32_t index = selected; index > 0U; --index) {
+            if (commands[index].type == AF_PATH_MOVE) {
+                fallback = index;
+                break;
+            }
+        }
+        for (uint32_t index = 0U; index < path->command_count; ++index) {
+            const bool segment =
+                commands[index].type == AF_PATH_LINE || commands[index].type == AF_PATH_CUBIC;
+            if (segment && af_editor_path_selection_contains(editor, index)) {
+                ++deleted;
+                continue;
+            }
+            if (index == fallback) {
+                fallback_after = write;
+            }
+            compacted[write++] = commands[index];
+        }
+        if (deleted == 0U) {
+            af_editor_status(editor, "Select segment nodes to delete");
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
+        {
+            char status[64];
+            (void)snprintf(status, sizeof(status), "%u path nodes deleted", deleted);
+            if (af_editor_apply_path_edit(editor, compacted, write, path->fill_rule, status) ==
+                AF_RESULT_SUCCESS) {
+                editor->selected_path_command = fallback_after;
+                af_editor_path_selection_only(editor, editor->selected_path_command);
+                return AF_RESULT_SUCCESS;
+            }
+        }
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
     if ((commands[selected].type != AF_PATH_LINE && commands[selected].type != AF_PATH_CUBIC) ||
         !af_editor_path_contour(commands, path->command_count, selected, &start, &end)) {
         return AF_RESULT_INVALID_ARGUMENT;
@@ -325,6 +1134,7 @@ static AfResult af_editor_delete_path_point(AfEditorState *editor) {
     if (af_editor_apply_path_edit(editor, commands, path->command_count - 1U, path->fill_rule,
                                   "Path point deleted") == AF_RESULT_SUCCESS) {
         editor->selected_path_command = selected > 0U ? selected - 1U : 0U;
+        af_editor_path_selection_only(editor, editor->selected_path_command);
         return AF_RESULT_SUCCESS;
     }
     return AF_RESULT_INVALID_ARGUMENT;
@@ -334,6 +1144,10 @@ static AfResult af_editor_convert_path_point(AfEditorState *editor) {
     AfPath *path = af_editor_selected_path(editor);
     AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
     const uint32_t selected = editor->selected_path_command;
+    if (editor->selected_path_command_count > 1U) {
+        af_editor_status(editor, "Convert one segment at a time");
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
     if (!af_editor_require_static_path_topology(editor) || path == NULL ||
         path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS || selected == 0U ||
         selected >= path->command_count) {
@@ -376,11 +1190,16 @@ static AfResult af_editor_toggle_path_closed(AfEditorState *editor) {
     memcpy(commands, &editor->project.path_data.commands[path->command_start],
            (size_t)path->command_count * sizeof(*commands));
     if (end > start && commands[end - 1U].type == AF_PATH_CLOSE) {
+        AfResult result = AF_RESULT_INVALID_ARGUMENT;
         memmove(&commands[end - 1U], &commands[end],
                 (size_t)(path->command_count - end) * sizeof(*commands));
         editor->selected_path_command = end > start + 1U ? end - 2U : start;
-        return af_editor_apply_path_edit(editor, commands, path->command_count - 1U,
-                                         path->fill_rule, "Path contour opened");
+        result = af_editor_apply_path_edit(editor, commands, path->command_count - 1U,
+                                           path->fill_rule, "Path contour opened");
+        if (result == AF_RESULT_SUCCESS) {
+            af_editor_path_selection_only(editor, editor->selected_path_command);
+        }
+        return result;
     }
     if (path->command_count >= AF_EDITOR_COMMAND_MAX_PATH_COMMANDS) {
         return AF_RESULT_LIMIT_EXCEEDED;
@@ -389,8 +1208,14 @@ static AfResult af_editor_toggle_path_closed(AfEditorState *editor) {
             (size_t)(path->command_count - end) * sizeof(*commands));
     commands[end] = (AfPathCommand){.type = AF_PATH_CLOSE};
     editor->selected_path_command = end > start + 1U ? end - 1U : start;
-    return af_editor_apply_path_edit(editor, commands, path->command_count + 1U, path->fill_rule,
-                                     "Path contour closed");
+    {
+        const AfResult result = af_editor_apply_path_edit(
+            editor, commands, path->command_count + 1U, path->fill_rule, "Path contour closed");
+        if (result == AF_RESULT_SUCCESS) {
+            af_editor_path_selection_only(editor, editor->selected_path_command);
+        }
+        return result;
+    }
 }
 
 static AfResult af_editor_reverse_path_contour(AfEditorState *editor) {
@@ -435,8 +1260,14 @@ static AfResult af_editor_reverse_path_contour(AfEditorState *editor) {
     }
     memcpy(&commands[start], reversed, (size_t)write * sizeof(*reversed));
     editor->selected_path_command = start + (write > 1U ? 1U : 0U);
-    return af_editor_apply_path_edit(editor, commands, path->command_count, path->fill_rule,
-                                     "Path contour reversed");
+    {
+        const AfResult result = af_editor_apply_path_edit(editor, commands, path->command_count,
+                                                          path->fill_rule, "Path contour reversed");
+        if (result == AF_RESULT_SUCCESS) {
+            af_editor_path_selection_only(editor, editor->selected_path_command);
+        }
+        return result;
+    }
 }
 
 static AfResult af_editor_add_path_contour(AfEditorState *editor) {
@@ -456,6 +1287,7 @@ static AfResult af_editor_add_path_contour(AfEditorState *editor) {
     if (af_editor_apply_path_edit(editor, commands, count + 3U, path->fill_rule,
                                   "Open contour added") == AF_RESULT_SUCCESS) {
         editor->selected_path_command = count + 1U;
+        af_editor_path_selection_only(editor, editor->selected_path_command);
         return AF_RESULT_SUCCESS;
     }
     return AF_RESULT_INVALID_ARGUMENT;
@@ -526,11 +1358,36 @@ static void af_editor_reconcile_selection(AfEditorState *editor) {
             af_path_find_node_const(&editor->project.path_data, editor->selected_id);
         if (path == NULL) {
             editor->selected_path_command = UINT32_MAX;
-        } else if (editor->selected_path_command >= path->command_count) {
-            editor->selected_path_command = 0U;
+            af_editor_path_selection_clear(editor);
+        } else {
+            uint32_t path_selection_write = 0U;
+            if (editor->selected_path_command >= path->command_count ||
+                editor->project.path_data
+                        .commands[path->command_start + editor->selected_path_command]
+                        .type == AF_PATH_CLOSE) {
+                editor->selected_path_command = 0U;
+            }
+            if (editor->path_command_selection_node_id != editor->selected_id) {
+                af_editor_path_selection_clear(editor);
+            }
+            for (uint32_t index = 0U; index < editor->selected_path_command_count; ++index) {
+                const uint32_t command_index = editor->selected_path_commands[index];
+                if (command_index < path->command_count &&
+                    editor->project.path_data.commands[path->command_start + command_index].type !=
+                        AF_PATH_CLOSE) {
+                    editor->selected_path_commands[path_selection_write++] = command_index;
+                }
+            }
+            editor->selected_path_command_count = path_selection_write;
+            if (!af_editor_path_selection_contains(editor, editor->selected_path_command)) {
+                const uint32_t primary = editor->selected_path_command;
+                (void)af_editor_path_selection_add(editor, primary);
+                editor->selected_path_command = primary;
+            }
         }
     } else {
         editor->selected_path_command = UINT32_MAX;
+        af_editor_path_selection_clear(editor);
     }
     if (clip == NULL) {
         editor->selected_clip_id =

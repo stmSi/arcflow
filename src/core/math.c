@@ -5,18 +5,23 @@
 
 AfAffine2 af_affine_identity(void) { return (AfAffine2){.m00 = 1.0F, .m11 = 1.0F}; }
 
-AfAffine2 af_affine_from_transform(AfTransform2D transform) {
+AfAffine2 af_affine_from_transform_pivot(AfTransform2D transform, AfVec2 pivot) {
     const float cosine = cosf(transform.rotation);
     const float sine = sinf(transform.rotation);
     const float skew_x = tanf(transform.skew.x);
     const float skew_y = tanf(transform.skew.y);
     const float skew_xy = skew_x * skew_y;
-    return (AfAffine2){.m00 = (cosine * (1.0F + skew_xy) - sine * skew_y) * transform.scale.x,
-                       .m01 = (cosine * skew_x - sine) * transform.scale.y,
-                       .m10 = (sine * (1.0F + skew_xy) + cosine * skew_y) * transform.scale.x,
-                       .m11 = (sine * skew_x + cosine) * transform.scale.y,
-                       .tx = transform.position.x,
-                       .ty = transform.position.y};
+    AfAffine2 result = {.m00 = (cosine * (1.0F + skew_xy) - sine * skew_y) * transform.scale.x,
+                        .m01 = (cosine * skew_x - sine) * transform.scale.y,
+                        .m10 = (sine * (1.0F + skew_xy) + cosine * skew_y) * transform.scale.x,
+                        .m11 = (sine * skew_x + cosine) * transform.scale.y};
+    result.tx = transform.position.x + pivot.x - result.m00 * pivot.x - result.m01 * pivot.y;
+    result.ty = transform.position.y + pivot.y - result.m10 * pivot.x - result.m11 * pivot.y;
+    return result;
+}
+
+AfAffine2 af_affine_from_transform(AfTransform2D transform) {
+    return af_affine_from_transform_pivot(transform, (AfVec2){0});
 }
 
 AfAffine2 af_affine_multiply(AfAffine2 parent, AfAffine2 child) {

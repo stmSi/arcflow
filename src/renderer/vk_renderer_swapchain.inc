@@ -178,11 +178,11 @@ static AfResult af_vk_create_pipeline(AfVkRenderer *renderer) {
     const uint32_t output_is_srgb = af_vk_format_is_srgb(renderer->swapchain_format) ? 1U : 0U;
     const VkSpecializationMapEntry fragment_specialization_entry = {
         .constantID = 0U, .offset = 0U, .size = sizeof(output_is_srgb)};
-    const VkSpecializationInfo fragment_specialization = {
-        .mapEntryCount = 1U,
-        .pMapEntries = &fragment_specialization_entry,
-        .dataSize = sizeof(output_is_srgb),
-        .pData = &output_is_srgb};
+    const VkSpecializationInfo fragment_specialization = {.mapEntryCount = 1U,
+                                                          .pMapEntries =
+                                                              &fragment_specialization_entry,
+                                                          .dataSize = sizeof(output_is_srgb),
+                                                          .pData = &output_is_srgb};
     VkVertexInputBindingDescription binding = {
         .binding = 0U, .stride = sizeof(AfGpuShape), .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE};
     VkVertexInputAttributeDescription attributes[4] = {
@@ -317,11 +317,11 @@ static AfResult af_vk_create_path_pipeline(AfVkRenderer *renderer) {
     const uint32_t output_is_srgb = af_vk_format_is_srgb(renderer->swapchain_format) ? 1U : 0U;
     const VkSpecializationMapEntry fragment_specialization_entry = {
         .constantID = 0U, .offset = 0U, .size = sizeof(output_is_srgb)};
-    const VkSpecializationInfo fragment_specialization = {
-        .mapEntryCount = 1U,
-        .pMapEntries = &fragment_specialization_entry,
-        .dataSize = sizeof(output_is_srgb),
-        .pData = &output_is_srgb};
+    const VkSpecializationInfo fragment_specialization = {.mapEntryCount = 1U,
+                                                          .pMapEntries =
+                                                              &fragment_specialization_entry,
+                                                          .dataSize = sizeof(output_is_srgb),
+                                                          .pData = &output_is_srgb};
     const VkVertexInputBindingDescription binding = {
         .binding = 0U, .stride = sizeof(AfGpuPathVertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
     const VkVertexInputAttributeDescription attributes[2] = {
@@ -442,7 +442,7 @@ static AfResult af_vk_create_path_pipeline(AfVkRenderer *renderer) {
 
 static AfResult af_vk_create_upload_ring(AfVkRenderer *renderer) {
     const VkDeviceSize slice_size =
-        AF_MAX_NODES * sizeof(AfGpuShape) +
+        AF_MAX_GPU_SHAPES * sizeof(AfGpuShape) +
         (VkDeviceSize)AF_MAX_GPU_PATH_VERTICES * sizeof(AfGpuPathVertex) +
         (VkDeviceSize)AF_MAX_GPU_IMAGE_VERTICES * sizeof(AfGpuImageVertex);
     VkBufferCreateInfo buffer_info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,

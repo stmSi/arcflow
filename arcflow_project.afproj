@@ -1,0 +1,98 @@
+arcflow_project 9
+canvas 1280 720
+next_id 6
+next_animation_id 3
+next_asset_id 2
+layout_canvas 1280 720 1280 720 1 0 0 0 0
+vfx_lod 65536 1 1 1000 5000 1
+node
+id 1
+parent none
+type group
+name Scene
+position 0 0
+rotation 0
+scale 1 1
+bounds 0 0
+fill 0 0 0 0
+opacity 1
+corner_radius 0
+layer 0
+visible 1
+end
+node
+id 2
+parent 1
+type rectangle
+name Rectangle
+position 160 200
+rotation 0
+scale 1 1
+bounds 180 110
+fill 0.180000007 0.560000002 0.959999979 1
+opacity 1
+corner_radius 0
+layer 0
+visible 1
+end
+node
+id 3
+parent 1
+type rounded_rectangle
+name Rounded Rectangle
+position 580 100
+rotation 0
+scale 1 1
+bounds 180 110
+fill 0.939999998 0.349999994 0.270000011 1
+opacity 1
+corner_radius 24
+layer 1
+visible 1
+end
+node
+id 4
+parent 1
+type ellipse
+name Ellipse
+position 920 60
+rotation 0
+scale 1 1
+bounds 120 120
+fill 0.319999993 0.860000014 0.540000081 1
+opacity 1
+corner_radius 0
+layer 2
+visible 1
+end
+node
+id 5
+parent none
+type image
+name signature
+position 380 -0
+rotation 0
+scale 1 1
+bounds 584 579
+fill 1 1 1 1
+opacity 1
+corner_radius 0
+layer 0
+visible 1
+end
+style 1 1 0 0 1 1 0 1 1 0 0 4 0 0 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 1 0 0
+style 2 2 0 0 1 1 0 1 1 0 0 4 0 0 1 1 0 0 0.180000007 0.560000002 0.959999979 1 0 0 0 0 0 0 0 1 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 1 0 0
+style 3 3 0 0 1 1 0 1 1 0 0 4 0 0 1 1 0 0 0.939999998 0.349999994 0.270000011 1 0 0 0 0 0 0 0 1 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 1 0 0
+style 4 4 0 0 1 1 0 1 1 0 0 4 0 0 173 1 0 0 0.319999993 0.860000014 0.540000081 1 0 0 0 0 0 0 0 1 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 1 0 0
+style 5 5 0 0 1 1 0 1 1 0 0 4 0 0 1 1 0 0 1 1 1 1 0 0 0 0 0 0 0 1 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 1 0 0
+particle 2 4 0 3 3 2048 1 48 0 0.800000012 1.60000002 0 0 0 0 -35 -110 35 -65 0 0 -1 1 8 16 1 4 0.349999994 0.819999993 1 1 0.159999996 0.349999994 1 0 0 45 0 0 0.150000006 1 1 0 1
+vfx_emitter 2 120 0.0199999996 0 0 0 70 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0.5 0.100000001 0 1 0 0 36 6 1 0 0 20 2 0 0 0 0 0 1 0
+image_asset 1 14663076396681683240 0 0 1 584 579 40 55 494 484 0 0 0 0 1 1 assets/image_42d2f96b0d5effe1.png signature
+image_binding 5 1 0 0 0 0 0 0 0 1
+clip
+id 1
+name Main Clip
+duration 4
+loop 1
+loop_region 0 4
+end_clip

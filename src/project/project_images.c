@@ -191,6 +191,15 @@ AfResult af_project_import_image(AfProject *project, const char *project_path,
         result = af_project_add_node(project, &node, asset.name);
     }
     if (result == AF_RESULT_SUCCESS) {
+        AfLayoutNode layout = af_layout_node_default(node.id);
+        layout.pivot = (AfVec2){0.5F, 0.5F};
+        layout.offset = (AfVec2){node.bounds.x * 0.5F, node.bounds.y * 0.5F};
+        result = af_project_set_layout(project, &layout);
+        if (result != AF_RESULT_SUCCESS) {
+            (void)af_project_remove_node_exact(project, node_id);
+        }
+    }
+    if (result == AF_RESULT_SUCCESS) {
         binding = (AfImageBinding){.node_id = node_id,
                                    .asset_id = asset_id,
                                    .display_mode = AF_IMAGE_DISPLAY_STRETCH,

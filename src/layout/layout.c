@@ -309,9 +309,14 @@ static AfResult af_layout_evaluate_node(AfLayoutContext *context, uint32_t index
     {
         const AfLayoutRect rect =
             af_layout_node_rect(context, index, parent_content, parent_layout);
+        const AfLayoutNode *layout = af_layout_find_const(context->data, node->id);
+        const AfVec2 pivot =
+            layout == NULL ? (AfVec2){0}
+                           : (AfVec2){rect.size.x * layout->pivot.x, rect.size.y * layout->pivot.y};
         const AfAffine2 layout_transform = {
             .m00 = 1.0F, .m11 = 1.0F, .tx = rect.position.x, .ty = rect.position.y};
-        const AfAffine2 base_animated = af_affine_from_transform(node->local_transform);
+        const AfAffine2 base_animated =
+            af_affine_from_transform_pivot(node->local_transform, pivot);
         node->resolved_bounds = rect.size;
         node->world_transform =
             af_affine_multiply(parent_world, af_affine_multiply(layout_transform, base_animated));

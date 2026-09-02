@@ -228,6 +228,13 @@ static AfResult af_editor_prepare_image_smoke(AfEditorState *editor) {
         if (result != AF_RESULT_SUCCESS) {
             return result;
         }
+        {
+            const AfLayoutNode layout = af_editor_centered_pivot_layout(&node);
+            result = af_project_set_layout(&editor->project, &layout);
+            if (result != AF_RESULT_SUCCESS) {
+                return result;
+            }
+        }
         binding = (AfImageBinding){.node_id = node.id,
                                    .asset_id = asset_ids[index],
                                    .display_mode = index == 0U ? AF_IMAGE_DISPLAY_STRETCH

@@ -94,6 +94,15 @@ static void af_editor_modify_scalar(AfEditorState *editor, AfEditorMergeKey merg
     (void)af_editor_commit_transform_key_drag(editor, true);
 }
 
+static AfColor af_editor_inspector_color(const AfEditorState *editor, const AfSceneNode *node) {
+    const AfStyle *style =
+        node == NULL ? NULL : af_style_find_node_const(&editor->project.style_data, node->id);
+    if (editor->color_target_outline && style != NULL) {
+        return style->stroke_paint.solid;
+    }
+    return node == NULL ? (AfColor){0.5F, 0.5F, 0.5F, 1.0F} : node->fill;
+}
+
 static void af_editor_apply_fill(AfEditorState *editor, AfColor color) {
     for (uint32_t index = 0U; index < editor->selected_count; ++index) {
         const uint64_t node_id = editor->selected_ids[index];
@@ -107,7 +116,13 @@ static void af_editor_apply_fill(AfEditorState *editor, AfColor color) {
         if (node == NULL) {
             continue;
         }
-        if (key != NULL) {
+        if (editor->color_target_outline) {
+            AfStyle *style = af_project_find_node_style(&editor->project, node->id);
+            if (style != NULL) {
+                style->stroke_paint = af_paint_solid(color);
+                (void)af_style_mark_paint_changed(style);
+            }
+        } else if (key != NULL) {
             key->keyframe.value[0] = color.r;
             key->keyframe.value[1] = color.g;
             key->keyframe.value[2] = color.b;
@@ -127,6 +142,610 @@ static void af_editor_apply_fill(AfEditorState *editor, AfColor color) {
     af_editor_mark_dirty(editor);
 }
 
+static AfEditorInspectorField af_editor_inspector_field_at(const AfEditorState *editor, int width,
+                                                           float x, float y) {
+    const float panel_x = (float)width - editor->right_width + 18.0F;
+    const float available = editor->right_width - 36.0F;
+    const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
+    if (node == NULL || node->type == AF_NODE_IMAGE || x < panel_x || x >= panel_x + available) {
+        return AF_EDITOR_INSPECTOR_NONE;
+    }
+    if (y >= AF_EDITOR_COLOR_HEX_Y &&
+        y < AF_EDITOR_COLOR_HEX_Y + AF_EDITOR_INSPECTOR_FIELD_HEIGHT) {
+        return AF_EDITOR_INSPECTOR_COLOR_HEX;
+    }
+    if (y >= AF_EDITOR_COLOR_COMPONENT_Y &&
+        y < AF_EDITOR_COLOR_COMPONENT_Y + AF_EDITOR_INSPECTOR_FIELD_HEIGHT) {
+        const float field_width = (available - 12.0F) * 0.25F;
+        const uint32_t component = (uint32_t)((x - panel_x) / (field_width + 4.0F));
+        const float component_x = panel_x + (float)component * (field_width + 4.0F);
+        if (component < 4U && x < component_x + field_width) {
+            return (AfEditorInspectorField)(AF_EDITOR_INSPECTOR_COLOR_R + component);
+        }
+        return AF_EDITOR_INSPECTOR_NONE;
+    }
+    if (y >= AF_EDITOR_INSPECTOR_FIELD_Y &&
+        y < AF_EDITOR_INSPECTOR_FIELD_Y + 5.0F * AF_EDITOR_INSPECTOR_FIELD_STEP) {
+        static const AfEditorInspectorField fields[5][2] = {
+            {AF_EDITOR_INSPECTOR_POSITION_X, AF_EDITOR_INSPECTOR_POSITION_Y},
+            {AF_EDITOR_INSPECTOR_WIDTH, AF_EDITOR_INSPECTOR_HEIGHT},
+            {AF_EDITOR_INSPECTOR_SCALE_X, AF_EDITOR_INSPECTOR_SCALE_Y},
+            {AF_EDITOR_INSPECTOR_ROTATION, AF_EDITOR_INSPECTOR_OPACITY},
+            {AF_EDITOR_INSPECTOR_RADIUS, AF_EDITOR_INSPECTOR_LAYER}};
+        const float field_width = (available - 6.0F) * 0.5F;
+        const uint32_t row =
+            (uint32_t)((y - AF_EDITOR_INSPECTOR_FIELD_Y) / AF_EDITOR_INSPECTOR_FIELD_STEP);
+        const float row_y =
+            AF_EDITOR_INSPECTOR_FIELD_Y + (float)row * AF_EDITOR_INSPECTOR_FIELD_STEP;
+        const uint32_t column = x >= panel_x + field_width + 6.0F ? 1U : 0U;
+        const float field_x = panel_x + (float)column * (field_width + 6.0F);
+        if (row < 5U && y < row_y + AF_EDITOR_INSPECTOR_FIELD_HEIGHT && x >= field_x &&
+            x < field_x + field_width) {
+            return fields[row][column];
+        }
+    }
+    if (y >= AF_EDITOR_STYLE_BAR_Y &&
+        y < AF_EDITOR_STYLE_BAR_Y + AF_EDITOR_INSPECTOR_FIELD_HEIGHT) {
+        return AF_EDITOR_INSPECTOR_OUTLINE_WIDTH;
+    }
+    return AF_EDITOR_INSPECTOR_NONE;
+}
+
+static bool af_editor_inspector_field_rect(const AfEditorState *editor, int width,
+                                           AfEditorInspectorField field, float *out_x,
+                                           float *out_width) {
+    const float panel_x = (float)width - editor->right_width + 18.0F;
+    const float available = editor->right_width - 36.0F;
+    if (field >= AF_EDITOR_INSPECTOR_POSITION_X && field <= AF_EDITOR_INSPECTOR_LAYER) {
+        const uint32_t offset = (uint32_t)(field - AF_EDITOR_INSPECTOR_POSITION_X);
+        const uint32_t column = offset % 2U;
+        const float field_width = (available - 6.0F) * 0.5F;
+        if (out_x != NULL) {
+            *out_x = panel_x + (float)column * (field_width + 6.0F);
+        }
+        if (out_width != NULL) {
+            *out_width = field_width;
+        }
+        return true;
+    }
+    if (field == AF_EDITOR_INSPECTOR_OUTLINE_WIDTH) {
+        if (out_x != NULL) {
+            *out_x = panel_x;
+        }
+        if (out_width != NULL) {
+            *out_width = available;
+        }
+        return true;
+    }
+    return false;
+}
+
+static bool af_editor_inspector_ratio_hit(const AfEditorState *editor, int width, float x,
+                                          float y) {
+    const float available = editor->right_width - 36.0F;
+    const float ratio_width = 76.0F;
+    const float ratio_x = (float)width - editor->right_width + 18.0F + available - ratio_width;
+    return x >= ratio_x && x < ratio_x + ratio_width && y >= AF_EDITOR_INSPECTOR_LABEL_Y - 4.0F &&
+           y < AF_EDITOR_INSPECTOR_LABEL_Y + 13.0F;
+}
+
+static int af_editor_inspector_step_at(const AfEditorState *editor, int width,
+                                       AfEditorInspectorField field, float x) {
+    float field_x = 0.0F;
+    float field_width = 0.0F;
+    if (!af_editor_inspector_field_rect(editor, width, field, &field_x, &field_width)) {
+        return 0;
+    }
+    if (x >= field_x + field_width - 40.0F && x < field_x + field_width - 21.0F) {
+        return -1;
+    }
+    return x >= field_x + field_width - 19.0F && x < field_x + field_width ? 1 : 0;
+}
+
+static bool af_editor_inspector_numeric_value(const AfEditorState *editor,
+                                              AfEditorInspectorField field, float *out_value) {
+    const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
+    if (node == NULL || out_value == NULL) {
+        return false;
+    }
+    if (field == AF_EDITOR_INSPECTOR_POSITION_X) {
+        *out_value = node->local_transform.position.x;
+    } else if (field == AF_EDITOR_INSPECTOR_POSITION_Y) {
+        *out_value = node->local_transform.position.y;
+    } else if (field == AF_EDITOR_INSPECTOR_WIDTH) {
+        *out_value = node->resolved_bounds.x;
+    } else if (field == AF_EDITOR_INSPECTOR_HEIGHT) {
+        *out_value = node->resolved_bounds.y;
+    } else if (field == AF_EDITOR_INSPECTOR_SCALE_X) {
+        *out_value = node->local_transform.scale.x;
+    } else if (field == AF_EDITOR_INSPECTOR_SCALE_Y) {
+        *out_value = node->local_transform.scale.y;
+    } else if (field == AF_EDITOR_INSPECTOR_ROTATION) {
+        *out_value = node->local_transform.rotation * 57.2957795131F;
+    } else if (field == AF_EDITOR_INSPECTOR_OPACITY) {
+        *out_value = node->opacity * 100.0F;
+    } else if (field == AF_EDITOR_INSPECTOR_RADIUS) {
+        *out_value = node->corner_radius;
+    } else if (field == AF_EDITOR_INSPECTOR_LAYER) {
+        *out_value = (float)node->layer_order;
+    } else if (field == AF_EDITOR_INSPECTOR_OUTLINE_WIDTH) {
+        const AfStyle *style =
+            af_style_find_node_const(&editor->project.style_data, editor->selected_id);
+        if (style == NULL) {
+            return false;
+        }
+        *out_value = style->stroke.width;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+static float af_editor_inspector_step_size(AfEditorInspectorField field) {
+    if (field == AF_EDITOR_INSPECTOR_SCALE_X || field == AF_EDITOR_INSPECTOR_SCALE_Y) {
+        return 0.05F;
+    }
+    if (field == AF_EDITOR_INSPECTOR_OPACITY) {
+        return 5.0F;
+    }
+    return 1.0F;
+}
+
+static float af_editor_inspector_scrub_sensitivity(AfEditorInspectorField field) {
+    if (field == AF_EDITOR_INSPECTOR_SCALE_X || field == AF_EDITOR_INSPECTOR_SCALE_Y) {
+        return 0.005F;
+    }
+    if (field == AF_EDITOR_INSPECTOR_OPACITY) {
+        return 0.25F;
+    }
+    if (field == AF_EDITOR_INSPECTOR_LAYER) {
+        return 0.2F;
+    }
+    return 0.25F;
+}
+
+static void af_editor_begin_inspector_edit(AfEditorState *editor, AfEditorInspectorField field) {
+    const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
+    const AfColor color = af_editor_inspector_color(editor, node);
+    if (field == AF_EDITOR_INSPECTOR_NONE || node == NULL) {
+        return;
+    }
+    if (editor->rename_active) {
+        af_editor_finish_rename(editor, true);
+    }
+    editor->inspector_field = field;
+    editor->inspector_replace = true;
+    if (field == AF_EDITOR_INSPECTOR_COLOR_HEX) {
+        af_editor_inspector_format_hex_color(color, editor->inspector_buffer,
+                                             sizeof(editor->inspector_buffer));
+    } else if (field >= AF_EDITOR_INSPECTOR_COLOR_R && field <= AF_EDITOR_INSPECTOR_COLOR_A) {
+        const float components[4] = {color.r, color.g, color.b, color.a};
+        (void)snprintf(editor->inspector_buffer, sizeof(editor->inspector_buffer), "%u",
+                       (uint32_t)roundf(components[field - AF_EDITOR_INSPECTOR_COLOR_R] * 255.0F));
+    } else if (field == AF_EDITOR_INSPECTOR_POSITION_X || field == AF_EDITOR_INSPECTOR_POSITION_Y) {
+        const float value = field == AF_EDITOR_INSPECTOR_POSITION_X
+                                ? node->local_transform.position.x
+                                : node->local_transform.position.y;
+        (void)snprintf(editor->inspector_buffer, sizeof(editor->inspector_buffer), "%.6g",
+                       (double)value);
+    } else if (field == AF_EDITOR_INSPECTOR_WIDTH || field == AF_EDITOR_INSPECTOR_HEIGHT) {
+        const float value =
+            field == AF_EDITOR_INSPECTOR_WIDTH ? node->resolved_bounds.x : node->resolved_bounds.y;
+        (void)snprintf(editor->inspector_buffer, sizeof(editor->inspector_buffer), "%.6g",
+                       (double)value);
+    } else if (field == AF_EDITOR_INSPECTOR_SCALE_X || field == AF_EDITOR_INSPECTOR_SCALE_Y) {
+        const float value = field == AF_EDITOR_INSPECTOR_SCALE_X ? node->local_transform.scale.x
+                                                                 : node->local_transform.scale.y;
+        (void)snprintf(editor->inspector_buffer, sizeof(editor->inspector_buffer), "%.6g",
+                       (double)value);
+    } else if (field == AF_EDITOR_INSPECTOR_ROTATION) {
+        (void)snprintf(editor->inspector_buffer, sizeof(editor->inspector_buffer), "%.6g",
+                       (double)(node->local_transform.rotation * 57.2957795131F));
+    } else if (field == AF_EDITOR_INSPECTOR_OPACITY) {
+        (void)snprintf(editor->inspector_buffer, sizeof(editor->inspector_buffer), "%.6g",
+                       (double)(node->opacity * 100.0F));
+    } else if (field == AF_EDITOR_INSPECTOR_RADIUS) {
+        (void)snprintf(editor->inspector_buffer, sizeof(editor->inspector_buffer), "%.6g",
+                       (double)node->corner_radius);
+    } else if (field == AF_EDITOR_INSPECTOR_OUTLINE_WIDTH) {
+        const AfStyle *style =
+            af_style_find_node_const(&editor->project.style_data, editor->selected_id);
+        (void)snprintf(editor->inspector_buffer, sizeof(editor->inspector_buffer), "%.6g",
+                       style == NULL ? 0.0 : (double)style->stroke.width);
+    } else {
+        (void)snprintf(editor->inspector_buffer, sizeof(editor->inspector_buffer), "%d",
+                       node->layer_order);
+    }
+    (void)af_platform_text_input_set(&editor->window, true);
+    af_editor_status(editor, "Type a value · Enter apply · Esc cancel · Tab next");
+}
+
+static bool af_editor_inspector_animation_property(AfEditorInspectorField field,
+                                                   AfPropertyType *out_property) {
+    if (out_property == NULL) {
+        return false;
+    }
+    if (field == AF_EDITOR_INSPECTOR_POSITION_X || field == AF_EDITOR_INSPECTOR_POSITION_Y) {
+        *out_property = AF_PROPERTY_POSITION;
+    } else if (field == AF_EDITOR_INSPECTOR_SCALE_X || field == AF_EDITOR_INSPECTOR_SCALE_Y) {
+        *out_property = AF_PROPERTY_SCALE;
+    } else if (field == AF_EDITOR_INSPECTOR_ROTATION) {
+        *out_property = AF_PROPERTY_ROTATION;
+    } else if (field == AF_EDITOR_INSPECTOR_OPACITY) {
+        *out_property = AF_PROPERTY_OPACITY;
+    } else if (field == AF_EDITOR_INSPECTOR_RADIUS) {
+        *out_property = AF_PROPERTY_CORNER_RADIUS;
+    } else if (field >= AF_EDITOR_INSPECTOR_COLOR_HEX && field <= AF_EDITOR_INSPECTOR_COLOR_A) {
+        *out_property = AF_PROPERTY_FILL_COLOR;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+static AfEditorMergeKey af_editor_inspector_merge_key(AfEditorInspectorField field) {
+    if (field == AF_EDITOR_INSPECTOR_OPACITY) {
+        return AF_EDITOR_MERGE_OPACITY;
+    }
+    if (field == AF_EDITOR_INSPECTOR_RADIUS) {
+        return AF_EDITOR_MERGE_RADIUS;
+    }
+    if (field == AF_EDITOR_INSPECTOR_LAYER) {
+        return AF_EDITOR_MERGE_LAYER;
+    }
+    if (field >= AF_EDITOR_INSPECTOR_COLOR_HEX && field <= AF_EDITOR_INSPECTOR_COLOR_A) {
+        return AF_EDITOR_MERGE_FILL;
+    }
+    if (field == AF_EDITOR_INSPECTOR_OUTLINE_WIDTH) {
+        return AF_EDITOR_MERGE_STYLE;
+    }
+    return AF_EDITOR_MERGE_TRANSFORM;
+}
+
+static bool af_editor_apply_inspector_color(AfEditorState *editor, AfColor color) {
+    const bool animatable = !editor->color_target_outline;
+    if (editor->selected_id == 0U) {
+        return false;
+    }
+    af_editor_begin_selection_modify(editor, false);
+    if (animatable) {
+        editor->selected_property = AF_PROPERTY_FILL_COLOR;
+        af_editor_begin_transform_key_drag(editor, AF_PROPERTY_FILL_COLOR);
+    }
+    af_editor_apply_fill(editor, color);
+    (void)af_scene_evaluate_world(&editor->project.scene);
+    af_editor_update_preview(editor);
+    if (!animatable || !af_editor_transform_key_drag_covers_selection(editor)) {
+        (void)af_editor_commit_selection_modify(
+            editor, editor->color_target_outline ? AF_EDITOR_MERGE_STYLE : AF_EDITOR_MERGE_FILL,
+            false);
+    }
+    if (animatable) {
+        (void)af_editor_commit_transform_key_drag(editor, false);
+    }
+    af_editor_status(editor,
+                     editor->color_target_outline ? "Outline color entered" : "Fill color entered");
+    return true;
+}
+
+static bool af_editor_apply_inspector_number(AfEditorState *editor, AfEditorInspectorField field,
+                                             float value, int32_t integer, bool allow_merge) {
+    AfPropertyType property = AF_PROPERTY_POSITION;
+    const bool animatable =
+        af_editor_inspector_animation_property(field, &property) &&
+        !(field >= AF_EDITOR_INSPECTOR_COLOR_HEX && field <= AF_EDITOR_INSPECTOR_COLOR_A);
+    if (editor->selected_id == 0U) {
+        return false;
+    }
+    af_editor_begin_selection_modify(editor, false);
+    if (animatable) {
+        editor->selected_property = property;
+        af_editor_begin_transform_key_drag(editor, property);
+    }
+    for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
+        const uint64_t node_id = editor->selection_drag_before[index].node.id;
+        AfSceneNode *node = af_scene_find(&editor->project.scene, node_id);
+        const int32_t key_index =
+            animatable ? af_editor_transform_drag_key_index(editor, node_id) : -1;
+        AfProjectKeyframe *key =
+            key_index < 0
+                ? NULL
+                : af_project_find_keyframe(&editor->project,
+                                           editor->transform_drag_key_ids[(uint32_t)key_index]);
+        if (node == NULL) {
+            continue;
+        }
+        if (field == AF_EDITOR_INSPECTOR_POSITION_X || field == AF_EDITOR_INSPECTOR_POSITION_Y) {
+            const uint32_t component = field == AF_EDITOR_INSPECTOR_POSITION_X ? 0U : 1U;
+            if (key != NULL) {
+                key->keyframe.value[component] = value;
+            } else if (component == 0U) {
+                node->local_transform.position.x = value;
+            } else {
+                node->local_transform.position.y = value;
+            }
+        } else if (field == AF_EDITOR_INSPECTOR_SCALE_X || field == AF_EDITOR_INSPECTOR_SCALE_Y) {
+            const uint32_t component = field == AF_EDITOR_INSPECTOR_SCALE_X ? 0U : 1U;
+            const uint32_t other_component = component == 0U ? 1U : 0U;
+            const float scale = fmaxf(0.05F, value);
+            if (key != NULL) {
+                key->keyframe.value[component] = scale;
+                if (editor->inspector_ratio_locked) {
+                    const float current =
+                        editor->transform_drag_key_starts[(uint32_t)key_index][component];
+                    const float other =
+                        editor->transform_drag_key_starts[(uint32_t)key_index][other_component];
+                    const float ratio = scale / fmaxf(fabsf(current), 0.0001F);
+                    key->keyframe.value[other_component] = fmaxf(0.05F, other * ratio);
+                }
+            } else if (component == 0U) {
+                if (editor->inspector_ratio_locked) {
+                    const float ratio =
+                        scale / fmaxf(fabsf(node->local_transform.scale.x), 0.0001F);
+                    node->local_transform.scale.y =
+                        fmaxf(0.05F, node->local_transform.scale.y * ratio);
+                }
+                node->local_transform.scale.x = scale;
+            } else {
+                if (editor->inspector_ratio_locked) {
+                    const float ratio =
+                        scale / fmaxf(fabsf(node->local_transform.scale.y), 0.0001F);
+                    node->local_transform.scale.x =
+                        fmaxf(0.05F, node->local_transform.scale.x * ratio);
+                }
+                node->local_transform.scale.y = scale;
+            }
+        } else if (field == AF_EDITOR_INSPECTOR_ROTATION) {
+            const float radians = value * 0.0174532925199F;
+            if (key != NULL) {
+                key->keyframe.value[0] = radians;
+            } else {
+                node->local_transform.rotation = radians;
+            }
+        } else if (field == AF_EDITOR_INSPECTOR_OPACITY) {
+            const float opacity = af_editor_clamp(value * 0.01F, 0.0F, 1.0F);
+            if (key != NULL) {
+                key->keyframe.value[0] = opacity;
+            } else {
+                node->opacity = opacity;
+            }
+        } else if (field == AF_EDITOR_INSPECTOR_RADIUS) {
+            const float radius = af_editor_clamp(value, 0.0F, 1000000.0F);
+            if (key != NULL) {
+                key->keyframe.value[0] = radius;
+            } else {
+                node->corner_radius = radius;
+            }
+        } else if (field == AF_EDITOR_INSPECTOR_LAYER) {
+            node->layer_order = af_editor_clamp_layer(integer);
+        } else if (field == AF_EDITOR_INSPECTOR_OUTLINE_WIDTH) {
+            AfStyle *style = af_project_find_node_style(&editor->project, node_id);
+            if (style != NULL) {
+                style->stroke.width = af_editor_clamp(value, 0.0F, 1000.0F);
+                style->stroke.end_width = style->stroke.width;
+                (void)af_style_mark_stroke_geometry_changed(style);
+            }
+        } else if (field == AF_EDITOR_INSPECTOR_WIDTH || field == AF_EDITOR_INSPECTOR_HEIGHT) {
+            const bool horizontal = field == AF_EDITOR_INSPECTOR_WIDTH;
+            const float size = af_editor_clamp(value, 0.1F, 1000000.0F);
+            const AfSceneNode *preview_node = af_scene_find_const(&editor->preview_scene, node_id);
+            const float current_width =
+                preview_node == NULL ? node->bounds.x : preview_node->resolved_bounds.x;
+            const float current_height =
+                preview_node == NULL ? node->bounds.y : preview_node->resolved_bounds.y;
+            float other_size = horizontal ? current_height : current_width;
+            const AfLayoutNode *existing =
+                af_layout_find_const(&editor->project.layout_data, node_id);
+            if (editor->inspector_ratio_locked) {
+                const float current = horizontal ? current_width : current_height;
+                other_size = af_editor_clamp(other_size * size / fmaxf(fabsf(current), 0.0001F),
+                                             0.1F, 1000000.0F);
+            }
+            if (horizontal) {
+                node->bounds.x = size;
+                if (editor->inspector_ratio_locked) {
+                    node->bounds.y = other_size;
+                }
+            } else {
+                node->bounds.y = size;
+                if (editor->inspector_ratio_locked) {
+                    node->bounds.x = other_size;
+                }
+            }
+            if (existing != NULL) {
+                AfLayoutNode layout = *existing;
+                AfLayoutValue *dimension = horizontal ? &layout.width : &layout.height;
+                AfLayoutValue *other_dimension = horizontal ? &layout.height : &layout.width;
+                bool layout_changed = false;
+                if (dimension->mode != AF_LAYOUT_VALUE_INTRINSIC) {
+                    *dimension = (AfLayoutValue){.mode = AF_LAYOUT_VALUE_FIXED, .value = size};
+                    layout_changed = true;
+                }
+                if (editor->inspector_ratio_locked &&
+                    other_dimension->mode != AF_LAYOUT_VALUE_INTRINSIC) {
+                    *other_dimension =
+                        (AfLayoutValue){.mode = AF_LAYOUT_VALUE_FIXED, .value = other_size};
+                    layout_changed = true;
+                }
+                if (layout_changed) {
+                    (void)af_project_set_layout(&editor->project, &layout);
+                }
+            }
+        }
+    }
+    (void)af_scene_evaluate_world(&editor->project.scene);
+    af_editor_update_preview(editor);
+    if (!animatable || !af_editor_transform_key_drag_covers_selection(editor)) {
+        (void)af_editor_commit_selection_modify(editor, af_editor_inspector_merge_key(field),
+                                                allow_merge);
+    }
+    if (animatable) {
+        (void)af_editor_commit_transform_key_drag(editor, allow_merge);
+    }
+    af_editor_status(editor, "Inspector value entered");
+    return true;
+}
+
+static bool af_editor_step_inspector_value(AfEditorState *editor, AfEditorInspectorField field,
+                                           int direction) {
+    float value = 0.0F;
+    float multiplier = 1.0F;
+    const SDL_Keymod modifiers = SDL_GetModState();
+    if (direction == 0 || !af_editor_inspector_numeric_value(editor, field, &value)) {
+        return false;
+    }
+    if ((modifiers & SDL_KMOD_SHIFT) != 0U && field != AF_EDITOR_INSPECTOR_LAYER) {
+        multiplier = 0.1F;
+    } else if ((modifiers & SDL_KMOD_CTRL) != 0U) {
+        multiplier = 10.0F;
+    }
+    value += (float)direction * af_editor_inspector_step_size(field) * multiplier;
+    if (field == AF_EDITOR_INSPECTOR_LAYER) {
+        const int32_t integer = (int32_t)roundf(af_editor_clamp(value, -10000.0F, 10000.0F));
+        return af_editor_apply_inspector_number(editor, field, (float)integer, integer, false);
+    }
+    return af_editor_apply_inspector_number(editor, field, value, 0, false);
+}
+
+static void af_editor_begin_inspector_scrub(AfEditorState *editor, AfEditorInspectorField field,
+                                            float x, float y) {
+    float value = 0.0F;
+    if (!af_editor_inspector_numeric_value(editor, field, &value)) {
+        return;
+    }
+    editor->drag_mode = AF_EDITOR_DRAG_INSPECTOR_SCRUB;
+    editor->drag_start_mouse = (AfVec2){x, y};
+    editor->inspector_scrub_field = field;
+    editor->inspector_scrub_start_value = value;
+    editor->inspector_scrub_changed = false;
+    af_editor_status(editor, "Drag horizontally to adjust · click to type");
+}
+
+static void af_editor_update_inspector_scrub(AfEditorState *editor, float x) {
+    const float distance = x - editor->drag_start_mouse.x;
+    float multiplier = 1.0F;
+    float value = 0.0F;
+    const bool allow_merge = editor->inspector_scrub_changed;
+    const SDL_Keymod modifiers = SDL_GetModState();
+    if (!editor->inspector_scrub_changed && fabsf(distance) < 3.0F) {
+        return;
+    }
+    if ((modifiers & SDL_KMOD_SHIFT) != 0U &&
+        editor->inspector_scrub_field != AF_EDITOR_INSPECTOR_LAYER) {
+        multiplier = 0.1F;
+    } else if ((modifiers & SDL_KMOD_CTRL) != 0U) {
+        multiplier = 10.0F;
+    }
+    value = editor->inspector_scrub_start_value +
+            distance * af_editor_inspector_scrub_sensitivity(editor->inspector_scrub_field) *
+                multiplier;
+    if (editor->inspector_scrub_field == AF_EDITOR_INSPECTOR_LAYER) {
+        const int32_t integer = (int32_t)roundf(af_editor_clamp(value, -10000.0F, 10000.0F));
+        (void)af_editor_apply_inspector_number(editor, editor->inspector_scrub_field,
+                                               (float)integer, integer, allow_merge);
+    } else {
+        (void)af_editor_apply_inspector_number(editor, editor->inspector_scrub_field, value, 0,
+                                               allow_merge);
+    }
+    editor->inspector_scrub_changed = true;
+    af_editor_status(editor, "Value scrubbed · Shift fine · Ctrl coarse");
+}
+
+static bool af_editor_finish_inspector_edit(AfEditorState *editor, bool commit) {
+    const AfEditorInspectorField field = editor->inspector_field;
+    bool applied = false;
+    if (field == AF_EDITOR_INSPECTOR_NONE) {
+        return true;
+    }
+    if (!commit) {
+        editor->inspector_field = AF_EDITOR_INSPECTOR_NONE;
+        editor->inspector_buffer[0] = '\0';
+        editor->inspector_replace = false;
+        (void)af_platform_text_input_set(&editor->window, false);
+        af_editor_status(editor, "Inspector edit cancelled");
+        return true;
+    }
+    if (field == AF_EDITOR_INSPECTOR_COLOR_HEX) {
+        AfColor color = {0};
+        if (af_editor_inspector_parse_hex_color(editor->inspector_buffer, &color)) {
+            applied = af_editor_apply_inspector_color(editor, color);
+        }
+    } else if (field >= AF_EDITOR_INSPECTOR_COLOR_R && field <= AF_EDITOR_INSPECTOR_COLOR_A) {
+        float component = 0.0F;
+        if (af_editor_inspector_parse_number(editor->inspector_buffer, &component)) {
+            const AfSceneNode *node =
+                af_scene_find_const(&editor->preview_scene, editor->selected_id);
+            AfColor color = af_editor_inspector_color(editor, node);
+            float *components[4] = {&color.r, &color.g, &color.b, &color.a};
+            *components[field - AF_EDITOR_INSPECTOR_COLOR_R] =
+                af_editor_clamp(component / 255.0F, 0.0F, 1.0F);
+            applied = af_editor_apply_inspector_color(editor, color);
+        }
+    } else if (field == AF_EDITOR_INSPECTOR_LAYER) {
+        int32_t integer = 0;
+        if (af_editor_inspector_parse_integer(editor->inspector_buffer, &integer)) {
+            applied =
+                af_editor_apply_inspector_number(editor, field, (float)integer, integer, false);
+        }
+    } else {
+        float value = 0.0F;
+        if (af_editor_inspector_parse_number(editor->inspector_buffer, &value)) {
+            applied = af_editor_apply_inspector_number(editor, field, value, 0, false);
+        }
+    }
+    if (!applied) {
+        af_editor_status(editor, "Invalid value · correct it or press Esc");
+        return false;
+    }
+    editor->inspector_field = AF_EDITOR_INSPECTOR_NONE;
+    editor->inspector_buffer[0] = '\0';
+    editor->inspector_replace = false;
+    (void)af_platform_text_input_set(&editor->window, false);
+    return true;
+}
+
+static void af_editor_append_inspector_text(AfEditorState *editor, const char *text) {
+    const size_t incoming = text == NULL ? 0U : strlen(text);
+    size_t current = strlen(editor->inspector_buffer);
+    if (editor->inspector_field == AF_EDITOR_INSPECTOR_NONE || incoming == 0U) {
+        return;
+    }
+    if (editor->inspector_replace) {
+        editor->inspector_buffer[0] = '\0';
+        current = 0U;
+        editor->inspector_replace = false;
+    }
+    if (current + incoming >= sizeof(editor->inspector_buffer)) {
+        return;
+    }
+    for (size_t index = 0U; index < incoming; ++index) {
+        const unsigned char character = (unsigned char)text[index];
+        const bool color = editor->inspector_field == AF_EDITOR_INSPECTOR_COLOR_HEX;
+        const bool integer = editor->inspector_field == AF_EDITOR_INSPECTOR_LAYER;
+        const bool accepted = color ? (isxdigit(character) != 0 || character == '#')
+                                    : (isdigit(character) != 0 || character == '-' ||
+                                       character == '+' || (!integer && character == '.') ||
+                                       (!integer && (character == 'e' || character == 'E')));
+        if (!accepted) {
+            return;
+        }
+    }
+    memcpy(editor->inspector_buffer + current, text, incoming + 1U);
+}
+
+static AfEditorInspectorField af_editor_next_inspector_field(AfEditorInspectorField field,
+                                                             bool backwards) {
+    const int first = AF_EDITOR_INSPECTOR_COLOR_HEX;
+    const int last = AF_EDITOR_INSPECTOR_OUTLINE_WIDTH;
+    int next = (int)field + (backwards ? -1 : 1);
+    if (next < first) {
+        next = last;
+    } else if (next > last) {
+        next = first;
+    }
+    return (AfEditorInspectorField)next;
+}
+
 static void af_editor_update_color_picker(AfEditorState *editor, int width, float x, float y) {
     const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
     const float panel_x = (float)width - editor->right_width + 18.0F;
@@ -137,7 +756,7 @@ static void af_editor_update_color_picker(AfEditorState *editor, int width, floa
     if (node == NULL) {
         return;
     }
-    color = node->fill;
+    color = af_editor_inspector_color(editor, node);
     af_editor_color_hsv(color, &hue, &saturation, &value);
     if (saturation <= 0.0001F) {
         hue = editor->color_hue;
@@ -208,7 +827,24 @@ static void af_editor_modify_style(AfEditorState *editor, uint32_t action) {
             af_editor_apply_style_action(node, style, action);
         }
     }
-    (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_STYLE, false);
+    if (af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_STYLE, false) ==
+        AF_RESULT_SUCCESS) {
+        const AfStyle *style =
+            af_style_find_node_const(&editor->project.style_data, editor->selected_id);
+        char status[96];
+        editor->color_target_outline = action != 3U;
+        if (style != NULL && action == 0U) {
+            (void)snprintf(status, sizeof(status), "Outline %s at %.1f px",
+                           style->stroke.enabled ? "enabled" : "disabled",
+                           (double)style->stroke.width);
+        } else if (style != NULL && (action == 1U || action == 2U)) {
+            (void)snprintf(status, sizeof(status), "Outline width %.1f px",
+                           (double)style->stroke.width);
+        } else {
+            (void)snprintf(status, sizeof(status), "Vector style updated");
+        }
+        af_editor_status(editor, status);
+    }
 }
 
 static AfLayoutNode af_editor_next_layout(const AfSceneNode *node, const AfLayoutNode *existing,
@@ -689,8 +1325,44 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
     const float panel_x = (float)width - editor->right_width + 18.0F;
     AfParticleEmitter *emitter =
         af_project_find_node_emitter(&editor->project, editor->selected_id);
+    const AfEditorInspectorField field = af_editor_inspector_field_at(editor, width, x, y);
     if (af_editor_handle_image_inspector(editor, width, x, y)) {
         return;
+    }
+    if (af_editor_inspector_ratio_hit(editor, width, x, y) &&
+        af_scene_find_const(&editor->preview_scene, editor->selected_id) != NULL) {
+        editor->inspector_ratio_locked = !editor->inspector_ratio_locked;
+        af_editor_status(editor, editor->inspector_ratio_locked
+                                     ? "Ratio lock enabled for size and scale"
+                                     : "Ratio lock disabled");
+        return;
+    }
+    if (field != AF_EDITOR_INSPECTOR_NONE) {
+        const int step = af_editor_inspector_step_at(editor, width, field, x);
+        if (step != 0) {
+            if (af_editor_step_inspector_value(editor, field, step)) {
+                af_editor_status(editor, step > 0 ? "Value increased" : "Value decreased");
+            }
+        } else if (field >= AF_EDITOR_INSPECTOR_POSITION_X) {
+            af_editor_begin_inspector_scrub(editor, field, x, y);
+        } else {
+            af_editor_begin_inspector_edit(editor, field);
+        }
+        return;
+    }
+    if (af_scene_find_const(&editor->project.scene, editor->selected_id) != NULL &&
+        y >= AF_EDITOR_COLOR_TARGET_Y &&
+        y <= AF_EDITOR_COLOR_TARGET_Y + AF_EDITOR_COLOR_TARGET_HEIGHT) {
+        if (x >= panel_x && x <= panel_x + 72.0F) {
+            editor->color_target_outline = false;
+            af_editor_status(editor, "Editing fill color");
+            return;
+        }
+        if (x >= panel_x + 78.0F && x <= panel_x + 174.0F) {
+            editor->color_target_outline = true;
+            af_editor_status(editor, "Editing outline color");
+            return;
+        }
     }
     if (af_scene_find_const(&editor->project.scene, editor->selected_id) != NULL &&
         ((x >= panel_x && x <= panel_x + AF_EDITOR_COLOR_SV_WIDTH && y >= AF_EDITOR_COLOR_SV_Y &&
@@ -705,8 +1377,10 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
         if (editor->selection_drag_count == 0U) {
             return;
         }
-        editor->selected_property = AF_PROPERTY_FILL_COLOR;
-        af_editor_begin_transform_key_drag(editor, AF_PROPERTY_FILL_COLOR);
+        if (!editor->color_target_outline) {
+            editor->selected_property = AF_PROPERTY_FILL_COLOR;
+            af_editor_begin_transform_key_drag(editor, AF_PROPERTY_FILL_COLOR);
+        }
         if (y >= AF_EDITOR_COLOR_ALPHA_Y) {
             editor->drag_mode = AF_EDITOR_DRAG_COLOR_ALPHA;
         } else if (x >= panel_x + AF_EDITOR_COLOR_HUE_X) {
@@ -760,28 +1434,6 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
             af_editor_modify_layout(editor, (uint32_t)action);
         }
         return;
-    }
-    for (int row = 0; row < 4; ++row) {
-        const float row_y =
-            AF_EDITOR_INSPECTOR_SCALAR_Y + (float)row * AF_EDITOR_INSPECTOR_SCALAR_STEP;
-        if (y >= row_y && y <= row_y + 28.0F) {
-            const bool decrease = x >= panel_x && x <= panel_x + 34.0F;
-            const bool increase = x >= panel_x + 38.0F && x <= panel_x + 72.0F;
-            const float amount = decrease ? -1.0F : 1.0F;
-            if (!decrease && !increase) {
-                return;
-            }
-            if (row == 0) {
-                af_editor_modify_scalar(editor, AF_EDITOR_MERGE_OPACITY, amount * 0.05F, 0);
-            } else if (row == 1) {
-                af_editor_modify_scalar(editor, AF_EDITOR_MERGE_RADIUS, amount * 2.0F, 1);
-            } else if (row == 2) {
-                af_editor_modify_scalar(editor, AF_EDITOR_MERGE_LAYER, amount, 2);
-            } else {
-                af_editor_modify_scalar(editor, AF_EDITOR_MERGE_TRANSFORM, amount * 0.05F, 3);
-            }
-            return;
-        }
     }
 }
 
@@ -1135,6 +1787,7 @@ static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_
             (void)af_editor_toggle_path_fill_rule(editor);
         } else if (item == 3U) {
             editor->selected_path_command = 0U;
+            af_editor_path_selection_only(editor, editor->selected_path_command);
             af_editor_status(editor, "Path points ready for editing");
         } else if (item == 5U) {
             (void)af_editor_reverse_path_contour(editor);

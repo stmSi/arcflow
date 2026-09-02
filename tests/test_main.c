@@ -16,6 +16,8 @@
 #include "deformation/deformation.h"
 #include "editor/editor_commands.h"
 #include "editor/editor_gizmo.h"
+#include "editor/editor_inspector.h"
+#include "editor/editor_vector_tools.h"
 #include "interaction/interaction.h"
 #include "layout/layout.h"
 #include "particle/particle.h"
@@ -97,6 +99,8 @@ int main(void) {
         {"image asset pipeline", af_test_images},
         {"timeline authoring", af_test_timeline_authoring},
         {"editor transform gizmo", af_test_editor_gizmo},
+        {"editor inspector values", af_test_editor_inspector_values},
+        {"editor vector tools", af_test_editor_vector_tools},
         {"editor commands", af_test_editor_commands},
         {"Vulkan pipeline smoke", af_test_gpu_smoke}};
     size_t index = 0U;

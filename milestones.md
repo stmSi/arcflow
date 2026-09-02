@@ -1485,5 +1485,7 @@ Arcflow 1.0 is ready only when:
 17. The runtime can load and render that project inside a host Vulkan application.
 18. The final release contains no placeholder implementations for advertised features.
 
-After Arcflow 1.0, use semantic versioning and plan later features through separate product roadmaps rather than extending this initial milestone list indefinitely.
+After Arcflow 1.0, use semantic versioning and plan later features through separate product roadmaps
+rather than extending this initial milestone list indefinitely.
 
+The post-1.0 plan for a full vector-design and motion-authoring product is maintained in

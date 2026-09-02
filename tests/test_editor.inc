@@ -207,7 +207,7 @@ static bool af_test_editor_gizmo(void) {
                         .world_visible = true};
     AfEditorGizmoGeometry geometry = {0};
     node.world_transform = af_affine_from_transform(node.local_transform);
-    CHECK(af_editor_gizmo_geometry(&node, af_affine_identity(), &geometry));
+    CHECK(af_editor_gizmo_geometry(&node, (AfVec2){50.0F, 25.0F}, af_affine_identity(), &geometry));
     CHECK_NEAR(geometry.corners[0].x, 10.0F, 0.0001F);
     CHECK_NEAR(geometry.corners[2].y, 70.0F, 0.0001F);
     CHECK_NEAR(geometry.scale_x.x, 110.0F, 0.0001F);
@@ -216,6 +216,9 @@ static bool af_test_editor_gizmo(void) {
     CHECK_NEAR(geometry.skew_y.x, 128.0F, 0.0001F);
     CHECK_NEAR(geometry.rotate.x, 60.0F, 0.0001F);
     CHECK_NEAR(geometry.rotate.y, -12.0F, 0.0001F);
+    CHECK_NEAR(geometry.pivot.x, 60.0F, 0.0001F);
+    CHECK_NEAR(geometry.pivot.y, 45.0F, 0.0001F);
+    CHECK(af_editor_gizmo_pick(&geometry, geometry.pivot, 8.0F) == AF_EDITOR_GIZMO_PIVOT);
     CHECK(af_editor_gizmo_pick(&geometry, geometry.move_x, 8.0F) == AF_EDITOR_GIZMO_MOVE_X);
     CHECK(af_editor_gizmo_pick(&geometry, geometry.move_y, 8.0F) == AF_EDITOR_GIZMO_MOVE_Y);
     CHECK(af_editor_gizmo_pick(&geometry, geometry.scale_x, 8.0F) == AF_EDITOR_GIZMO_SCALE_X);
@@ -233,11 +236,122 @@ static bool af_test_editor_gizmo(void) {
     CHECK(af_editor_gizmo_property(AF_EDITOR_GIZMO_SKEW_X) == AF_PROPERTY_SKEW);
     CHECK(af_editor_gizmo_property(AF_EDITOR_GIZMO_SKEW_Y) == AF_PROPERTY_SKEW);
     CHECK(af_editor_gizmo_property(AF_EDITOR_GIZMO_ROTATE) == AF_PROPERTY_ROTATION);
+    {
+        const AfTransform2D transform = {
+            .position = {10.0F, 20.0F}, .rotation = 1.57079632679F, .scale = {1.0F, 1.0F}};
+        const AfVec2 pivot = {50.0F, 25.0F};
+        const AfAffine2 affine = af_affine_from_transform_pivot(transform, pivot);
+        const AfVec2 fixed = af_affine_transform_point(affine, pivot);
+        CHECK_NEAR(fixed.x, 60.0F, 0.0001F);
+        CHECK_NEAR(fixed.y, 45.0F, 0.0001F);
+        CHECK_NEAR(affine.tx, 85.0F, 0.0001F);
+        CHECK_NEAR(affine.ty, -5.0F, 0.0001F);
+    }
+    {
+        const AfTransform2D start = {
+            .position = {10.0F, 20.0F}, .rotation = 0.35F, .scale = {1.0F, 1.0F}};
+        const AfVec2 pivot = {50.0F, 25.0F};
+        const AfVec2 bounds = {100.0F, 50.0F};
+        AfTransform2D scaled = {0};
+        AfVec2 anchor = {0.0F, 25.0F};
+        AfVec2 before =
+            af_affine_transform_point(af_affine_from_transform_pivot(start, pivot), anchor);
+        AfVec2 after = {0};
+        CHECK(af_editor_gizmo_scale_transform(start, pivot, bounds, AF_EDITOR_GIZMO_SCALE_X,
+                                              (AfVec2){150.0F, 25.0F}, true, false, &scaled));
+        CHECK_NEAR(scaled.scale.x, 1.5F, 0.0001F);
+        CHECK_NEAR(scaled.scale.y, 1.5F, 0.0001F);
+        after = af_affine_transform_point(af_affine_from_transform_pivot(scaled, pivot), anchor);
+        CHECK_NEAR(after.x, before.x, 0.0001F);
+        CHECK_NEAR(after.y, before.y, 0.0001F);
+
+        anchor = pivot;
+        before = af_affine_transform_point(af_affine_from_transform_pivot(start, pivot), anchor);
+        CHECK(af_editor_gizmo_scale_transform(start, pivot, bounds, AF_EDITOR_GIZMO_SCALE_XY,
+                                              (AfVec2){125.0F, 62.5F}, true, true, &scaled));
+        CHECK_NEAR(scaled.scale.x, 1.5F, 0.0001F);
+        CHECK_NEAR(scaled.scale.y, 1.5F, 0.0001F);
+        after = af_affine_transform_point(af_affine_from_transform_pivot(scaled, pivot), anchor);
+        CHECK_NEAR(after.x, before.x, 0.0001F);
+        CHECK_NEAR(after.y, before.y, 0.0001F);
+    }
     node.local_transform.skew = (AfVec2){AF_TRANSFORM_MAX_SKEW_RADIANS + 0.01F, 0.0F};
     {
         AfScene scene = {.nodes = &node, .count = 1U, .capacity = 1U};
         CHECK(af_scene_validate(&scene) == AF_RESULT_INVALID_ARGUMENT);
     }
+    return true;
+}
+
+static bool af_test_editor_inspector_values(void) {
+    float number = 0.0F;
+    int32_t integer = 0;
+    AfColor color = {0};
+    char hex[16];
+    CHECK(af_editor_inspector_parse_number(" -12.75 ", &number));
+    CHECK_NEAR(number, -12.75F, 0.0001F);
+    CHECK(!af_editor_inspector_parse_number("12px", &number));
+    CHECK(!af_editor_inspector_parse_number("nan", &number));
+    CHECK(af_editor_inspector_parse_integer("-42", &integer));
+    CHECK(integer == -42);
+    CHECK(!af_editor_inspector_parse_integer("1.5", &integer));
+    CHECK(af_editor_inspector_parse_hex_color("#2E8FF5CC", &color));
+    CHECK_NEAR(color.r, 46.0F / 255.0F, 0.0001F);
+    CHECK_NEAR(color.g, 143.0F / 255.0F, 0.0001F);
+    CHECK_NEAR(color.b, 245.0F / 255.0F, 0.0001F);
+    CHECK_NEAR(color.a, 204.0F / 255.0F, 0.0001F);
+    CHECK(af_editor_inspector_parse_hex_color("3A7", &color));
+    CHECK_NEAR(color.r, 51.0F / 255.0F, 0.0001F);
+    CHECK_NEAR(color.g, 170.0F / 255.0F, 0.0001F);
+    CHECK_NEAR(color.b, 119.0F / 255.0F, 0.0001F);
+    CHECK_NEAR(color.a, 1.0F, 0.0001F);
+    CHECK(!af_editor_inspector_parse_hex_color("#12GG00", &color));
+    af_editor_inspector_format_hex_color((AfColor){1.0F, 0.5F, 0.0F, 1.0F}, hex, sizeof(hex));
+    CHECK(strcmp(hex, "#FF8000FF") == 0);
+    return true;
+}
+
+static bool af_test_editor_vector_tools(void) {
+    AfEditorToolRect rect = {0};
+    AfPathCommand commands[128] = {0};
+    AfVec2 points[8] = {{0.0F, 0.0F}, {1.0F, 0.02F}, {2.0F, -0.01F}, {3.0F, 0.01F},
+                        {4.0F, 0.0F}, {5.0F, 0.02F}, {6.0F, 0.0F},   {7.0F, 0.0F}};
+    AfVec2 simplified[8] = {0};
+    uint32_t count = 0U;
+    CHECK(strcmp(af_editor_vector_tool_name(AF_EDITOR_TOOL_PEN), "Pen") == 0);
+    CHECK(strcmp(af_editor_vector_tool_name(AF_EDITOR_TOOL_SCISSORS), "Scissors") == 0);
+    CHECK(strcmp(af_editor_vector_tool_label(AF_EDITOR_TOOL_SEGMENT_DELETE), "VDEL") == 0);
+    CHECK(strcmp(af_editor_vector_tool_label(AF_EDITOR_TOOL_POLYGON), "POLY") == 0);
+    CHECK(!af_editor_vector_tool_is_construction(AF_EDITOR_TOOL_SELECT));
+    CHECK(!af_editor_vector_tool_is_construction(AF_EDITOR_TOOL_SCISSORS));
+    CHECK(!af_editor_vector_tool_is_construction(AF_EDITOR_TOOL_SEGMENT_DELETE));
+    CHECK(af_editor_vector_tool_is_construction(AF_EDITOR_TOOL_SPIRAL));
+    CHECK(af_editor_vector_tool_rect((AfVec2){10.0F, 20.0F}, (AfVec2){40.0F, 60.0F}, false, false,
+                                     &rect));
+    CHECK_NEAR(rect.position.x, 10.0F, 0.0001F);
+    CHECK_NEAR(rect.position.y, 20.0F, 0.0001F);
+    CHECK_NEAR(rect.size.x, 30.0F, 0.0001F);
+    CHECK_NEAR(rect.size.y, 40.0F, 0.0001F);
+    CHECK(af_editor_vector_tool_rect((AfVec2){10.0F, 20.0F}, (AfVec2){40.0F, 60.0F}, true, true,
+                                     &rect));
+    CHECK_NEAR(rect.position.x, -30.0F, 0.0001F);
+    CHECK_NEAR(rect.position.y, -20.0F, 0.0001F);
+    CHECK_NEAR(rect.size.x, 80.0F, 0.0001F);
+    CHECK_NEAR(rect.size.y, 80.0F, 0.0001F);
+    count = af_editor_vector_tool_polygon((AfVec2){100.0F, 80.0F}, 6U, 0.0F, commands, 128U);
+    CHECK(count == 7U && commands[0].type == AF_PATH_MOVE &&
+          commands[count - 1U].type == AF_PATH_CLOSE);
+    count = af_editor_vector_tool_polygon((AfVec2){100.0F, 80.0F}, 5U, 0.45F, commands, 128U);
+    CHECK(count == 11U && commands[1].type == AF_PATH_LINE);
+    count = af_editor_vector_tool_arc((AfVec2){100.0F, 80.0F}, commands, 128U);
+    CHECK(count == 4U && commands[0].type == AF_PATH_MOVE && commands[3].type == AF_PATH_CUBIC);
+    count = af_editor_vector_tool_spiral((AfVec2){100.0F, 80.0F}, 3U, commands, 128U);
+    CHECK(count == 61U && commands[0].type == AF_PATH_MOVE && commands[60].type == AF_PATH_LINE);
+    count = af_editor_vector_tool_simplify(points, 8U, 0.1F, simplified, 8U);
+    CHECK(count == 2U);
+    CHECK_NEAR(simplified[0].x, 0.0F, 0.0001F);
+    CHECK_NEAR(simplified[1].x, 7.0F, 0.0001F);
+    CHECK(af_editor_vector_tool_simplify(points, 8U, 0.0F, simplified, 2U) == 0U);
     return true;
 }
 
