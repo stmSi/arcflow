@@ -10,6 +10,7 @@
 #include "core/file_io.h"
 #include "core/handles.h"
 #include "core/hash.h"
+#include "core/id_index.h"
 #include "core/math.h"
 #include "core/png.h"
 #include "core/safe_math.h"
@@ -24,6 +25,7 @@
 #include "path/path.h"
 #include "project/image_import.h"
 #include "project/project.h"
+#include "renderer/render_items.h"
 #include "rigging/rigging.h"
 #include "runtime/runtime_internal.h"
 #include "scene/scene.h"
@@ -63,6 +65,7 @@ typedef struct AfTestFixture {
 
 // clang-format off
 #include "test_core.inc"
+#include "test_hotpaths.inc"
 #include "test_file_io_atomic.inc"
 #include "test_systems.inc"
 #include "test_rigging.inc"
@@ -70,11 +73,17 @@ typedef struct AfTestFixture {
 #include "test_project.inc"
 #include "test_images.inc"
 #include "test_editor.inc"
+#include "test_editor_knife.inc"
+#include "test_editor_conversion.inc"
 #include "test_gpu.inc"
 // clang-format on
 int main(void) {
     static const AfTestCase tests[] = {
         {"core", af_test_core},
+        {"transient ID index", af_test_id_index},
+        {"hierarchy hotpaths", af_test_hierarchy_hotpaths},
+        {"animation hotpaths", af_test_animation_hotpaths},
+        {"stable render batches", af_test_render_batches},
         {"file limits", af_test_file_limit},
         {"atomic project files", af_test_atomic_file_io},
         {"PNG image export", af_test_png_writer},
@@ -100,6 +109,12 @@ int main(void) {
         {"timeline authoring", af_test_timeline_authoring},
         {"editor transform gizmo", af_test_editor_gizmo},
         {"editor inspector values", af_test_editor_inspector_values},
+        {"knife geometry", af_test_editor_knife_geometry},
+        {"shape conversion", af_test_editor_conversion},
+        {"shape settings and hierarchy", af_test_editor_shape_settings_and_hierarchy},
+        {"hierarchy reparent", af_test_editor_reparent},
+        {"knife limits", af_test_editor_knife_limits},
+        {"knife persistence", af_test_editor_knife_persistence},
         {"editor vector tools", af_test_editor_vector_tools},
         {"editor commands", af_test_editor_commands},
         {"Vulkan pipeline smoke", af_test_gpu_smoke}};

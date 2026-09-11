@@ -105,7 +105,7 @@ static void af_editor_render_guided_tour(AfEditorState *editor, int width, int h
     const float box_width = 430.0F;
     const float box_height = 230.0F;
     const float x = (float)width - editor->right_width - box_width - 14.0F;
-    const float y = AF_EDITOR_TOOLBAR_HEIGHT + 14.0F;
+    const float y = editor->toolbar_height + 14.0F;
     char progress[64];
     (void)height;
     if (!editor->guided_tour_visible || guide == NULL || editor->guided_step >= guide->step_count) {
@@ -340,7 +340,7 @@ static bool af_editor_onboarding_mouse_down(AfEditorState *editor, int width, in
     if (editor->guided_tour_visible) {
         const AfOnboardingGuide *guide = af_onboarding_guide(AF_ONBOARDING_QUICK_START);
         const float box_x = (float)width - editor->right_width - 430.0F - 14.0F;
-        const float box_y = AF_EDITOR_TOOLBAR_HEIGHT + 14.0F;
+        const float box_y = editor->toolbar_height + 14.0F;
         if (x < box_x || x >= box_x + 430.0F || y < box_y || y >= box_y + 230.0F) {
             return false;
         }

@@ -23,11 +23,18 @@ argument. `--frames N` is available for automated smoke runs.
 Add `--resize-smoke` to force swapchain recreation during that run.
 
 The editor provides resizable docked panels, persistent vector tools, transform gizmos, a dope
-sheet, and a curve editor. The toolbar includes Pick, Node, Scissors, Segment Delete, Rectangle,
-Rounded Rectangle, Ellipse, Line, Pen, Pencil, Polygon, Star, Arc, and Spiral tools. Construction happens directly on the
-canvas; `Shift` constrains shapes/angles, `Ctrl` draws shapes from their center, Pen finishes with a
-double-click or `Enter`, and `Esc` cancels an active construction. Pencil strokes are bounded and
-simplified into editable paths. Generated path points and Bézier handles use the same animation
+sheet, and a curve editor. The toolbar includes Pick, Node, Scissors, Segment Delete, Knife,
+Rectangle, Rounded Rectangle, Ellipse, Line, Pen, Pencil, Polygon, Star, Arc, and Spiral tools.
+Tool buttons have vector icons; scroll over the toolbar to reveal tools in a narrow workspace.
+Canvas rulers follow the visible world, including negative coordinates, with zoom-dependent ticks.
+Dock edges, the hierarchy/assets divider, toolbar/status boundaries, and timeline label divider
+highlight on hover and show resize cursors. Drag them to resize their sections.
+Construction happens directly on the canvas with live geometry previews; `Shift` constrains
+shapes/angles, `Ctrl` draws shapes from their center, and Pen previews its Bézier curves and handles
+while dragging and moving to the next snapped point. Hovering over the first Pen node highlights
+the closing segment. Pen finishes with a double-click or `Enter`, and `Esc` cancels an active
+construction. Pencil strokes are bounded and simplified into editable paths. Generated path points
+and Bézier handles use the same animation
 workflow as other vector paths. A selected shape exposes red/green move axes, blue axis/corner
 scale handles, magenta
 X/Y skew handles, an amber rotation handle, and a draggable gold pivot. `Shift` preserves the scale
@@ -41,7 +48,10 @@ and can be clicked to select their target. Drag or box-select keys; use
 `Shift+R` to edit timing. `S`, `L`, and `B` choose step, linear, and cubic interpolation; `F7`–`F9`
 apply easing presets; `F6` toggles curves; Space plays; and the ruler scrubs or edits the loop range.
 The red playhead can also be grabbed and dragged from anywhere along its full vertical line.
-Tool shortcuts are `V` Pick, `F10` Node, `X` Scissors, `D` Segment Delete, `R` Rectangle,
+In narrow workspaces, timeline controls fit the available width and the active clip tab cycles
+through clips when clicked. Wheel zoom follows fractional trackpad input and stays anchored to
+the pointer. F10 opens the live profiler with CPU upload and GPU frame timings.
+Tool shortcuts are `V` Pick, `Shift+V` Node, `X` Scissors, `D` Segment Delete, `J` Knife, `R` Rectangle,
 `Shift+R` Rounded Rectangle, `O` Ellipse, `L` Line, `P` Pen, `B` Pencil, `Y` Polygon, `A` Star,
 `C` Arc, and `I` Spiral. In Node mode, the
 existing `C`, `O`, `I`, `F`, `Shift+R`, and `Shift+M` path-editing shortcuts keep their contextual
@@ -53,6 +63,24 @@ accept `#RGB`, `#RGBA`, `#RRGGBB`, and `#RRGGBBAA`; RGBA component fields use 0�
 Drag a numeric field horizontally to scrub it (`Shift` for fine control, `Ctrl` for coarse control),
 or use its embedded `−`/`+` buttons for quick steps. `RATIO` links width/height and scale X/Y while
 typing, scrubbing, or stepping.
+New stars and polygons retain their point-count and inner-radius settings in the inspector.
+Choose **Convert to path** to turn a rectangle, rounded rectangle, ellipse, star, or polygon into
+individually editable vector points and Bézier handles. Conversion keeps the object's identity,
+transform, and paint, and one undo restores its shape settings. Ellipses and rounded corners use
+cubic Bézier approximations. Remove corner-radius animation before converting a primitive.
+Older stars/polygons remain raw paths. **Edit vector points**, or double-clicking a raw path with
+the Pick tool, enters Node mode; double-clicking a primitive does not convert it automatically.
+Select sibling objects and click **Group** or press `Ctrl+G` to group them (up to 63 at once).
+Drag a hierarchy row above or below a sibling; the insertion line previews the new drawing order.
+Drop on the label of Scene or another group to move an object inside it. Only the thin top and
+bottom edges of a group row act as reorder targets. A blue outline marks a
+valid group target; red marks an invalid move, including hierarchy cycles. Dropping a child onto
+its current group keeps it in place and reports that it is already inside, without adding an undo step. Drag near the top or
+bottom of the hierarchy to scroll. Parenting preserves the current canvas placement and supports
+undo/redo; responsive object dimensions are fixed at their current size during the move.
+Ctrl+D or Edit > Duplicate copies the selection, including group children, vector geometry and
+image/flipbook bindings. The hierarchy scrolls to the selected copy; failed copies report an error.
+Grouping and reordering both support undo/redo.
 Timeline edits share bounded `Ctrl+Z`/`Ctrl+Y` history with scene edits. Scene shortcuts include
 `1`–`4`, `F2`, arrows, `Q`/`E`, `-`/`+`, brackets, `U`, `Ctrl+S`, and `F5`. `4` creates an editable
 path. Selecting a point opens a canvas action bar for point keys, line/curve conversion, insertion,
@@ -62,7 +90,12 @@ Drag a selected node to move the whole node selection. Drag directly on a line o
 the segment; Shift-dragging a Bézier handle preserves a smooth tangent and Ctrl-dragging makes the
 opposite handle symmetric. `S` smooths selected handles and `Shift+S` makes them symmetric. Scissors
 cuts the clicked line or cubic into editable contours with one undo; Segment Delete removes only the
-clicked segment and preserves the surrounding open contours. The same
+clicked segment and preserves the surrounding open contours; Knife splits crossed lines, cubics,
+and implicit closing edges in a single undoable drag.
+Points and handles highlight on hover. Hovering a segment shows the editing/cutting target;
+dragging Knife highlights crossed segments and marks cut positions with crosses and a cut count.
+Closed contours open at the actual cuts and keep their original start point connected. Knife
+applies at most one cut per source segment and skips intersections near existing endpoints. The same
 actions have keyboard shortcuts: `I` inserts, `Delete` removes, `C` converts line/cubic points, `O`
 opens or closes a contour, `Shift+R` reverses it, `Shift+M` adds an open contour, and `F` switches
 non-zero/even-odd filling. Use `Shift+Delete` to remove the path node.

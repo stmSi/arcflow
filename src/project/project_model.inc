@@ -279,6 +279,13 @@ AfResult af_project_validate(const AfProject *project) {
             af_path_find_node_const(&project->path_data, node->id) == NULL) {
             return AF_RESULT_INVALID_ARGUMENT;
         }
+        if (!isfinite(node->polygon_inset) ||
+            (node->polygon_sides == 0U && node->polygon_inset != 0.0F) ||
+            (node->polygon_sides != 0U &&
+             (node->type != AF_NODE_PATH || node->polygon_sides < 3U || node->polygon_sides > 64U ||
+              node->polygon_inset < 0.0F || node->polygon_inset > 0.95F))) {
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
     }
     for (index = 0U; index < project->image_data.binding_count; ++index) {
         const AfImageBinding *binding = &project->image_data.bindings[index];

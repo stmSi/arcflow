@@ -481,6 +481,13 @@ static AfResult af_vk_create_upload_ring(AfVkRenderer *renderer) {
 
 static AfResult af_vk_create_frames(AfVkRenderer *renderer) {
     uint32_t index = 0U;
+    if (renderer->timestamp_valid_bits != 0U) {
+        const VkQueryPoolCreateInfo queries = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+            .queryType = VK_QUERY_TYPE_TIMESTAMP, .queryCount = AF_FRAME_COUNT * 2U};
+        /* Profiling is optional: unavailable queries must not prevent rendering. */
+        if (vkCreateQueryPool(renderer->device, &queries, NULL, &renderer->timestamp_pool) != VK_SUCCESS)
+            renderer->timestamp_pool = VK_NULL_HANDLE;
+    }
     for (index = 0U; index < AF_FRAME_COUNT; ++index) {
         AfVkFrame *frame = &renderer->frames[index];
         VkCommandPoolCreateInfo pool_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,

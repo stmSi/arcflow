@@ -16,7 +16,7 @@ static void af_editor_render_search(AfEditorState *editor) {
 static void af_editor_render_profiler(AfEditorState *editor, int width) {
     char line[128];
     const float x = (float)width - editor->right_width - AF_EDITOR_WORKFLOW_PANEL_WIDTH - 12.0F;
-    const float y = AF_EDITOR_TOOLBAR_HEIGHT + 12.0F;
+    const float y = editor->toolbar_height + 12.0F;
     if (!editor->profiler_visible) {
         return;
     }
@@ -48,7 +48,12 @@ static void af_editor_render_profiler(AfEditorState *editor, int width) {
                    (unsigned long long)editor->allocator.total_allocations);
     af_editor_add_text(editor, x + 16.0F, y + 160.0F, line, 0.82F, 300.0F,
                        (AfColor){0.7F, 0.75F, 0.84F, 1.0F}, 202010);
-    af_editor_add_text(editor, x + 16.0F, y + 188.0F, "CLICK PANEL TO CLOSE", 0.65F, 300.0F,
+    const AfVkFrameMetrics frame = af_vk_renderer_frame_metrics(editor->renderer);
+    if (frame.gpu_valid)
+        (void)snprintf(line, sizeof(line), "GPU %.2f MS   UPLOAD %.2f MS", frame.gpu_ms, frame.upload_ms);
+    else
+        (void)snprintf(line, sizeof(line), "GPU N/A   UPLOAD %.2f MS", frame.upload_ms);
+    af_editor_add_text(editor, x + 16.0F, y + 188.0F, line, 0.65F, 300.0F,
                        (AfColor){0.45F, 0.51F, 0.61F, 1.0F}, 202010);
 }
 
@@ -78,15 +83,15 @@ static uint32_t af_editor_missing_asset_count(const AfEditorState *editor, uint6
 }
 
 static void af_editor_render_validation(AfEditorState *editor) {
+    if (!editor->validation_visible) {
+        return;
+    }
     char line[128];
     uint64_t affected_id = 0U;
     const uint32_t missing = af_editor_missing_asset_count(editor, &affected_id);
     const AfResult validation = af_project_validate(&editor->project);
     const float x = editor->left_width + 12.0F;
-    const float y = AF_EDITOR_TOOLBAR_HEIGHT + 12.0F;
-    if (!editor->validation_visible) {
-        return;
-    }
+    const float y = editor->toolbar_height + 12.0F;
     af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
                         (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = y},
                         (AfVec2){AF_EDITOR_WORKFLOW_PANEL_WIDTH, AF_EDITOR_WORKFLOW_PANEL_HEIGHT},
@@ -619,22 +624,58 @@ static void af_editor_render_canvas_workflow(AfEditorState *editor, int width, i
                            (AfColor){0.09F, 0.1F, 0.125F, 0.96F}, 90030);
         af_editor_add_rect(editor, canvas_x, canvas_y, 20.0F, canvas_height,
                            (AfColor){0.09F, 0.1F, 0.125F, 0.96F}, 90030);
-        for (float value = 0.0F; value <= editor->project.canvas_size.x; value += 100.0F) {
-            const AfVec2 point = af_affine_transform_point(camera, (AfVec2){value, 0.0F});
-            char label[24];
-            if (point.x >= canvas_x + 20.0F && point.x < canvas_x + canvas_width) {
-                af_editor_add_rect(editor, point.x, canvas_y + 13.0F, 1.0F, 7.0F,
-                                   (AfColor){0.42F, 0.48F, 0.58F, 1.0F}, 90040);
-                (void)snprintf(label, sizeof(label), "%.0f", value);
-                af_editor_add_text(editor, point.x + 3.0F, canvas_y + 4.0F, label, 0.52F, 38.0F,
-                                   (AfColor){0.48F, 0.54F, 0.64F, 1.0F}, 90040);
+        /* Derive ticks from the visible world interval, including negative coordinates.
+         * A 1/2/5 progression keeps labels readable at every zoom. Indexing ticks (rather
+         * than repeatedly adding a float) also avoids stalled loops after distant pans. */
+        for (uint32_t axis = 0U; axis < 2U; ++axis) {
+            const double scale = axis == 0U ? camera.m00 : camera.m11;
+            const double offset = axis == 0U ? camera.tx : camera.ty;
+            const double low = (axis == 0U ? canvas_x : canvas_y) + 20.0;
+            const double high = axis == 0U ? canvas_x + canvas_width : canvas_y + canvas_height;
+            if (scale <= 0.0 || high <= low) {
+                continue;
             }
-        }
-        for (float value = 0.0F; value <= editor->project.canvas_size.y; value += 100.0F) {
-            const AfVec2 point = af_affine_transform_point(camera, (AfVec2){0.0F, value});
-            if (point.y >= canvas_y + 20.0F && point.y < canvas_y + canvas_height) {
-                af_editor_add_rect(editor, canvas_x + 13.0F, point.y, 7.0F, 1.0F,
+            const double target = 90.0 / scale;
+            const double decade = pow(10.0, floor(log10(target)));
+            const double ratio = target / decade;
+            const double major = decade * (ratio <= 1.0   ? 1.0
+                                           : ratio <= 2.0 ? 2.0
+                                           : ratio <= 5.0 ? 5.0
+                                                          : 10.0);
+            const double minor = major / 5.0;
+            const double first = ceil((low - offset) / scale / minor);
+            for (uint32_t tick = 0U; tick < 512U; ++tick) {
+                const double ordinal = first + (double)tick;
+                const double value = ordinal * minor;
+                const float pixel = (float)(value * scale + offset);
+                if ((double)pixel >= high) {
+                    break;
+                }
+                const bool labeled = fabs(remainder(ordinal, 5.0)) < 0.01;
+                const float length = labeled ? 8.0F : 4.0F;
+                af_editor_add_rect(editor, axis == 0U ? pixel : canvas_x + 20.0F - length,
+                                   axis == 0U ? canvas_y + 20.0F - length : pixel,
+                                   axis == 0U ? 1.0F : length, axis == 0U ? length : 1.0F,
                                    (AfColor){0.42F, 0.48F, 0.58F, 1.0F}, 90040);
+                if (labeled) {
+                    char label[32];
+                    (void)snprintf(label, sizeof(label), "%.6g", value == 0.0 ? 0.0 : value);
+                    if (axis == 0U) {
+                        af_editor_add_text(editor, pixel + 3.0F, canvas_y + 3.0F, label, 0.48F,
+                                           fminf(80.0F, canvas_x + canvas_width - pixel - 3.0F),
+                                           (AfColor){0.58F, 0.64F, 0.74F, 1.0F}, 90040);
+                    } else {
+                        for (uint32_t character = 0U;
+                             label[character] != '\0' && pixel + 3.0F + (float)character * 10.0F <
+                                                             canvas_y + canvas_height - 10.0F;
+                             ++character) {
+                            const char digit[] = {label[character], '\0'};
+                            af_editor_add_text(
+                                editor, canvas_x + 3.0F, pixel + 3.0F + (float)character * 10.0F,
+                                digit, 0.48F, 14.0F, (AfColor){0.58F, 0.64F, 0.74F, 1}, 90040);
+                        }
+                    }
+                }
             }
         }
     }

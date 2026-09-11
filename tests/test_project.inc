@@ -188,7 +188,7 @@ static bool af_test_project(void) {
         style->stroke.dash_count = 2U;
     }
     CHECK(af_project_serialize(&project, &allocator, &text) == AF_RESULT_SUCCESS);
-    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 12"));
+    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 13"));
     CHECK(af_test_project_contains(text.data, text.size, "skew 0.119999997 -0.0799999982"));
     CHECK(af_test_project_contains(text.data, text.size, "property path_control_in"));
     CHECK(af_test_project_contains(text.data, text.size, "element 1"));
@@ -348,9 +348,9 @@ static bool af_test_project(void) {
     CHECK(af_project_deserialize(with_unknown, (size_t)written, &allocator, &reopened) ==
           AF_RESULT_INVALID_PACKAGE);
     written =
-        snprintf(with_unknown, sizeof(with_unknown), "arcflow_project 12\nunknown_field 7\n%.*s",
-                 (int)(text.size - strlen("arcflow_project 12\n")),
-                 (const char *)text.data + strlen("arcflow_project 12\n"));
+        snprintf(with_unknown, sizeof(with_unknown), "arcflow_project 13\nunknown_field 7\n%.*s",
+                 (int)(text.size - strlen("arcflow_project 13\n")),
+                 (const char *)text.data + strlen("arcflow_project 13\n"));
     CHECK(written > 0 && (size_t)written < sizeof(with_unknown));
     CHECK(af_project_deserialize(with_unknown, (size_t)written, &allocator, &reopened) ==
           AF_RESULT_SUCCESS);

@@ -2,21 +2,105 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <string.h>
 
 #define AF_EDITOR_TOOL_PI 3.14159265358979323846F
 
+uint32_t af_editor_vector_primitive_path(AfNodeType type, AfVec2 size, float radius,
+                                         AfPathCommand *out_commands, uint32_t capacity) {
+    AfPathCommand commands[10] = {0};
+    uint32_t count = 0U;
+    const float w = size.x;
+    const float h = size.y;
+    const float k = 0.5522847498307936F;
+    if (out_commands == NULL || !isfinite(w) || !isfinite(h) || w <= 0.0F || h <= 0.0F ||
+        !isfinite(radius)) {
+        return 0U;
+    }
+    if (type == AF_NODE_ELLIPSE) {
+        const float x = w * 0.5F, y = h * 0.5F;
+        commands[count++] = (AfPathCommand){.type = AF_PATH_MOVE, .point = {x, 0.0F}};
+        commands[count++] = (AfPathCommand){.type = AF_PATH_CUBIC,
+                                            .point = {w, y},
+                                            .control1 = {x + k * x, 0.0F},
+                                            .control2 = {w, y - k * y}};
+        commands[count++] = (AfPathCommand){.type = AF_PATH_CUBIC,
+                                            .point = {x, h},
+                                            .control1 = {w, y + k * y},
+                                            .control2 = {x + k * x, h}};
+        commands[count++] = (AfPathCommand){.type = AF_PATH_CUBIC,
+                                            .point = {0.0F, y},
+                                            .control1 = {x - k * x, h},
+                                            .control2 = {0.0F, y + k * y}};
+        commands[count++] = (AfPathCommand){.type = AF_PATH_CUBIC,
+                                            .point = {x, 0.0F},
+                                            .control1 = {0.0F, y - k * y},
+                                            .control2 = {x - k * x, 0.0F}};
+    } else if (type == AF_NODE_RECTANGLE || type == AF_NODE_ROUNDED_RECTANGLE) {
+        const float r =
+            type == AF_NODE_RECTANGLE ? 0.0F : fminf(fmaxf(radius, 0.0F), fminf(w, h) * 0.5F);
+        if (r == 0.0F) {
+            commands[count++] = (AfPathCommand){.type = AF_PATH_MOVE, .point = {0.0F, 0.0F}};
+            commands[count++] = (AfPathCommand){.type = AF_PATH_LINE, .point = {w, 0.0F}};
+            commands[count++] = (AfPathCommand){.type = AF_PATH_LINE, .point = {w, h}};
+            commands[count++] = (AfPathCommand){.type = AF_PATH_LINE, .point = {0.0F, h}};
+        } else {
+            commands[count++] = (AfPathCommand){.type = AF_PATH_MOVE, .point = {r, 0.0F}};
+            commands[count++] = (AfPathCommand){.type = AF_PATH_LINE, .point = {w - r, 0.0F}};
+            commands[count++] = (AfPathCommand){.type = AF_PATH_CUBIC,
+                                                .point = {w, r},
+                                                .control1 = {w - r + k * r, 0.0F},
+                                                .control2 = {w, r - k * r}};
+            commands[count++] = (AfPathCommand){.type = AF_PATH_LINE, .point = {w, h - r}};
+            commands[count++] = (AfPathCommand){.type = AF_PATH_CUBIC,
+                                                .point = {w - r, h},
+                                                .control1 = {w, h - r + k * r},
+                                                .control2 = {w - r + k * r, h}};
+            commands[count++] = (AfPathCommand){.type = AF_PATH_LINE, .point = {r, h}};
+            commands[count++] = (AfPathCommand){.type = AF_PATH_CUBIC,
+                                                .point = {0.0F, h - r},
+                                                .control1 = {r - k * r, h},
+                                                .control2 = {0.0F, h - r + k * r}};
+            commands[count++] = (AfPathCommand){.type = AF_PATH_LINE, .point = {0.0F, r}};
+            commands[count++] = (AfPathCommand){.type = AF_PATH_CUBIC,
+                                                .point = {r, 0.0F},
+                                                .control1 = {0.0F, r - k * r},
+                                                .control2 = {r - k * r, 0.0F}};
+        }
+    } else {
+        return 0U;
+    }
+    commands[count++] = (AfPathCommand){.type = AF_PATH_CLOSE};
+    if (count > capacity) {
+        return 0U;
+    }
+    memcpy(out_commands, commands, (size_t)count * sizeof(*commands));
+    return count;
+}
+
 const char *af_editor_vector_tool_name(AfEditorVectorTool tool) {
-    static const char *const names[AF_EDITOR_TOOL_COUNT] = {
-        "Pick",    "Node",  "Scissors", "Segment Delete", "Rectangle", "Rounded Rectangle",
-        "Ellipse", "Line",  "Pen",      "Pencil",         "Polygon",   "Star",
-        "Arc",     "Spiral"};
+    static const char *const names[AF_EDITOR_TOOL_COUNT] = {"Pick",
+                                                            "Node",
+                                                            "Scissors",
+                                                            "Segment Delete",
+                                                            "Knife",
+                                                            "Rectangle",
+                                                            "Rounded Rectangle",
+                                                            "Ellipse",
+                                                            "Line",
+                                                            "Pen",
+                                                            "Pencil",
+                                                            "Polygon",
+                                                            "Star",
+                                                            "Arc",
+                                                            "Spiral"};
     return tool < AF_EDITOR_TOOL_COUNT ? names[tool] : "Unknown";
 }
 
 const char *af_editor_vector_tool_label(AfEditorVectorTool tool) {
     static const char *const labels[AF_EDITOR_TOOL_COUNT] = {
-        "PICK", "NODE", "CUT",    "VDEL", "RECT", "ROUND", "OVAL",
-        "LINE", "PEN",  "PENCIL", "POLY", "STAR", "ARC",   "SPIRAL"};
+        "PICK", "NODE", "CUT",    "VDEL", "KNIFE", "RECT", "ROUND", "OVAL",
+        "LINE", "PEN",  "PENCIL", "POLY", "STAR",  "ARC",  "SPIRAL"};
     return tool < AF_EDITOR_TOOL_COUNT ? labels[tool] : "?";
 }
 
@@ -184,4 +268,225 @@ uint32_t af_editor_vector_tool_simplify(const AfVec2 *points, uint32_t point_cou
         }
     }
     return write;
+}
+
+static AfVec2 af_editor_tool_lerp(AfVec2 first, AfVec2 second, float amount) {
+    return (AfVec2){first.x + (second.x - first.x) * amount,
+                    first.y + (second.y - first.y) * amount};
+}
+
+static AfVec2 af_editor_tool_curve_at(AfVec2 start, const AfPathCommand *command, float amount) {
+    const AfVec2 first = af_editor_tool_lerp(start, command->control1, amount);
+    const AfVec2 middle = af_editor_tool_lerp(command->control1, command->control2, amount);
+    const AfVec2 last = af_editor_tool_lerp(command->control2, command->point, amount);
+    return af_editor_tool_lerp(af_editor_tool_lerp(first, middle, amount),
+                               af_editor_tool_lerp(middle, last, amount), amount);
+}
+
+static double af_editor_tool_cross(AfVec2 first, AfVec2 second) {
+    return (double)first.x * second.y - (double)first.y * second.x;
+}
+
+static bool af_editor_tool_intersection(AfVec2 first_start, AfVec2 first_end, AfVec2 second_start,
+                                        AfVec2 second_end, float *out_amount) {
+    const AfVec2 first = {first_end.x - first_start.x, first_end.y - first_start.y};
+    const AfVec2 second = {second_end.x - second_start.x, second_end.y - second_start.y};
+    const AfVec2 offset = {second_start.x - first_start.x, second_start.y - first_start.y};
+    const double denominator = af_editor_tool_cross(first, second);
+    if (fabs(denominator) <= 1.0e-7) {
+        return false;
+    }
+    const double amount = af_editor_tool_cross(offset, second) / denominator;
+    const double knife_amount = af_editor_tool_cross(offset, first) / denominator;
+    if (amount < 0.0 || amount > 1.0 || knife_amount < 0.0 || knife_amount > 1.0) {
+        return false;
+    }
+    *out_amount = (float)amount;
+    return true;
+}
+
+static float af_editor_tool_cut_amount(AfVec2 previous, const AfPathCommand *command, AfVec2 start,
+                                       AfVec2 end) {
+    const uint32_t samples = command->type == AF_PATH_CUBIC ? 32U : 1U;
+    AfVec2 sample_start = previous;
+    for (uint32_t sample = 1U; sample <= samples; ++sample) {
+        const float t = (float)sample / (float)samples;
+        const AfVec2 sample_end = command->type == AF_PATH_CUBIC
+                                      ? af_editor_tool_curve_at(previous, command, t)
+                                      : command->point;
+        float local_amount = 0.0F;
+        if (af_editor_tool_intersection(sample_start, sample_end, start, end, &local_amount)) {
+            const float amount = ((float)(sample - 1U) + local_amount) / (float)samples;
+            /* Avoid duplicate anchors when the gesture passes through an existing endpoint. */
+            if (amount > 0.015F && amount < 0.985F) {
+                return amount;
+            }
+        }
+        sample_start = sample_end;
+    }
+    return -1.0F;
+}
+
+static void af_editor_tool_split_segment(AfVec2 start, AfPathCommand command, float amount,
+                                         AfPathCommand *left, AfPathCommand *right) {
+    *left = command;
+    *right = command;
+    if (command.type == AF_PATH_CUBIC) {
+        const AfVec2 first = af_editor_tool_lerp(start, command.control1, amount);
+        const AfVec2 middle = af_editor_tool_lerp(command.control1, command.control2, amount);
+        const AfVec2 last = af_editor_tool_lerp(command.control2, command.point, amount);
+        left->control1 = first;
+        left->control2 = af_editor_tool_lerp(first, middle, amount);
+        right->control1 = af_editor_tool_lerp(middle, last, amount);
+        right->control2 = last;
+        left->point = af_editor_tool_lerp(left->control2, right->control1, amount);
+    } else {
+        left->point = af_editor_tool_lerp(start, command.point, amount);
+    }
+}
+
+static AfPathCommand af_editor_tool_explicit_segment(const AfPathCommand *commands,
+                                                     uint32_t contour, uint32_t index) {
+    return commands[index].type == AF_PATH_CLOSE
+               ? (AfPathCommand){.type = AF_PATH_LINE, .point = commands[contour].point}
+               : commands[index];
+}
+
+AfResult af_editor_vector_tool_knife(const AfPathCommand *commands, uint32_t command_count,
+                                     AfVec2 start, AfVec2 end, AfPathCommand *out_commands,
+                                     uint32_t capacity, AfEditorKnifeResult *out_result) {
+    AfPathCommand cut[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY];
+    float amounts[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY];
+    AfEditorKnifeResult result = {.first_cut_command = UINT32_MAX};
+    AfPath path = {
+        .id = 1U, .node_id = 1U, .command_count = command_count, .geometry_generation = 1U};
+    AfPathData data = {.paths = &path,
+                       .path_count = 1U,
+                       .path_capacity = 1U,
+                       .commands = cut,
+                       .command_count = command_count,
+                       .command_capacity = AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY};
+    uint32_t required = command_count;
+    if (commands == NULL || out_commands == NULL || out_result == NULL || command_count == 0U ||
+        !isfinite(start.x) || !isfinite(start.y) || !isfinite(end.x) || !isfinite(end.y) ||
+        fabsf(start.x) > 1000000.0F || fabsf(start.y) > 1000000.0F || fabsf(end.x) > 1000000.0F ||
+        fabsf(end.y) > 1000000.0F || hypotf(end.x - start.x, end.y - start.y) < 0.1F) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    if (command_count > AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY) {
+        return AF_RESULT_LIMIT_EXCEEDED;
+    }
+    memcpy(cut, commands, (size_t)command_count * sizeof(*commands));
+    if (af_path_data_validate(&data) != AF_RESULT_SUCCESS) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    for (uint32_t contour = 0U; contour < command_count;) {
+        uint32_t limit = contour + 1U;
+        uint32_t contour_cuts = 0U;
+        while (limit < command_count && commands[limit].type != AF_PATH_MOVE) {
+            ++limit;
+        }
+        for (uint32_t index = contour + 1U; index < limit; ++index) {
+            const AfPathCommand segment = af_editor_tool_explicit_segment(commands, contour, index);
+            amounts[index] =
+                af_editor_tool_cut_amount(commands[index - 1U].point, &segment, start, end);
+            if (amounts[index] >= 0.0F) {
+                const uint32_t cut_index = result.cut_count + contour_cuts;
+                result.source_commands[cut_index] = index;
+                result.cut_points[cut_index] =
+                    segment.type == AF_PATH_CUBIC
+                        ? af_editor_tool_curve_at(commands[index - 1U].point, &segment,
+                                                  amounts[index])
+                        : af_editor_tool_lerp(commands[index - 1U].point, segment.point,
+                                              amounts[index]);
+            }
+            contour_cuts += amounts[index] >= 0.0F;
+        }
+        required += contour_cuts * 2U;
+        if (contour_cuts != 0U && commands[limit - 1U].type == AF_PATH_CLOSE) {
+            /* Rotating a closed contour to its first cut eliminates one extra MOVE. */
+            --required;
+            if (commands[limit - 2U].point.x == commands[contour].point.x &&
+                commands[limit - 2U].point.y == commands[contour].point.y) {
+                --required; /* The closing edge is already explicit. */
+            }
+        }
+        result.cut_count += contour_cuts;
+        contour = limit;
+    }
+    if (result.cut_count == 0U) {
+        return AF_RESULT_NOT_FOUND;
+    }
+    if (required > capacity || required > AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY) {
+        return AF_RESULT_LIMIT_EXCEEDED;
+    }
+    for (uint32_t contour = 0U; contour < command_count;) {
+        uint32_t limit = contour + 1U;
+        uint32_t first_cut = UINT32_MAX;
+        while (limit < command_count && commands[limit].type != AF_PATH_MOVE) {
+            if (first_cut == UINT32_MAX && amounts[limit] >= 0.0F) {
+                first_cut = limit;
+            }
+            ++limit;
+        }
+        if (first_cut == UINT32_MAX) {
+            memcpy(&cut[result.command_count], &commands[contour],
+                   (size_t)(limit - contour) * sizeof(*cut));
+            result.command_count += limit - contour;
+        } else {
+            const bool closed = commands[limit - 1U].type == AF_PATH_CLOSE;
+            uint32_t index = closed ? first_cut : contour + 1U;
+            AfPathCommand closing_left = {0};
+            if (closed) {
+                AfPathCommand right = {0};
+                af_editor_tool_split_segment(
+                    commands[first_cut - 1U].point,
+                    af_editor_tool_explicit_segment(commands, contour, first_cut),
+                    amounts[first_cut], &closing_left, &right);
+                if (result.first_cut_command == UINT32_MAX) {
+                    result.first_cut_command = result.command_count;
+                }
+                cut[result.command_count++] =
+                    (AfPathCommand){.type = AF_PATH_MOVE, .point = closing_left.point};
+                cut[result.command_count++] = right;
+                index = first_cut + 1U == limit ? contour + 1U : first_cut + 1U;
+            } else {
+                cut[result.command_count++] = commands[contour];
+            }
+            /* Walk each original segment once, wrapping at the old start for closed contours. */
+            while (closed ? index != first_cut : index < limit) {
+                const AfPathCommand segment =
+                    af_editor_tool_explicit_segment(commands, contour, index);
+                const bool empty_close = commands[index].type == AF_PATH_CLOSE &&
+                                         commands[index - 1U].point.x == segment.point.x &&
+                                         commands[index - 1U].point.y == segment.point.y;
+                if (amounts[index] >= 0.0F) {
+                    AfPathCommand left = {0};
+                    AfPathCommand right = {0};
+                    af_editor_tool_split_segment(commands[index - 1U].point, segment,
+                                                 amounts[index], &left, &right);
+                    if (result.first_cut_command == UINT32_MAX) {
+                        result.first_cut_command = result.command_count;
+                    }
+                    cut[result.command_count++] = left;
+                    cut[result.command_count++] =
+                        (AfPathCommand){.type = AF_PATH_MOVE, .point = left.point};
+                    cut[result.command_count++] = right;
+                } else if (!empty_close) {
+                    cut[result.command_count++] = segment;
+                }
+                ++index;
+                if (closed && index == limit) {
+                    index = contour + 1U;
+                }
+            }
+            if (closed) {
+                cut[result.command_count++] = closing_left;
+            }
+        }
+        contour = limit;
+    }
+    memcpy(out_commands, cut, (size_t)result.command_count * sizeof(*cut));
+    *out_result = result;
+    return AF_RESULT_SUCCESS;
 }

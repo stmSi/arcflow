@@ -1,5 +1,6 @@
 #include "scene/scene.h"
 
+#include "core/id_index.h"
 #include "layout/layout.h"
 
 #include <math.h>
@@ -167,16 +168,16 @@ AfResult af_scene_validate(const AfScene *scene) {
 }
 
 static AfResult af_scene_evaluate_node(AfScene *scene, uint32_t index, uint8_t *states,
-                                       uint32_t depth) {
+                                       const AfIdIndex *lookup, uint32_t depth) {
     AfSceneNode *node = &scene->nodes[index];
-    const AfAffine2 local = af_affine_from_transform(node->local_transform);
-    uint32_t parent_index = 0U;
+
     if (states[index] == 2U) {
         return AF_RESULT_SUCCESS;
     }
     if (states[index] == 1U || depth > AF_MAX_HIERARCHY_DEPTH) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
+    const AfAffine2 local = af_affine_from_transform(node->local_transform);
     states[index] = 1U;
     node->resolved_bounds = node->bounds;
     if (node->parent_id == AF_INVALID_NODE_ID) {
@@ -184,38 +185,44 @@ static AfResult af_scene_evaluate_node(AfScene *scene, uint32_t index, uint8_t *
         node->world_opacity = node->opacity;
         node->world_visible = node->visible;
     } else {
-        for (parent_index = 0U; parent_index < scene->count; ++parent_index) {
-            if (scene->nodes[parent_index].id == node->parent_id) {
-                AfResult result = af_scene_evaluate_node(scene, parent_index, states, depth + 1U);
-                if (result != AF_RESULT_SUCCESS) {
-                    return result;
-                }
-                node->world_transform =
-                    af_affine_multiply(scene->nodes[parent_index].world_transform, local);
-                node->world_opacity = scene->nodes[parent_index].world_opacity * node->opacity;
-                node->world_visible = scene->nodes[parent_index].world_visible && node->visible;
-                states[index] = 2U;
-                return AF_RESULT_SUCCESS;
-            }
+        const uint32_t parent_index = af_id_index_find(lookup, node->parent_id);
+        if (parent_index == UINT32_MAX) {
+            return AF_RESULT_NOT_FOUND;
         }
-        return AF_RESULT_NOT_FOUND;
+        AfResult result = af_scene_evaluate_node(scene, parent_index, states, lookup, depth + 1U);
+        if (result != AF_RESULT_SUCCESS) {
+            return result;
+        }
+        node->world_transform =
+            af_affine_multiply(scene->nodes[parent_index].world_transform, local);
+        node->world_opacity = scene->nodes[parent_index].world_opacity * node->opacity;
+        node->world_visible = scene->nodes[parent_index].world_visible && node->visible;
     }
     states[index] = 2U;
     return AF_RESULT_SUCCESS;
 }
 
 AfResult af_scene_evaluate_world(AfScene *scene) {
-    uint8_t states[AF_MAX_NODES] = {0};
+    uint8_t states[AF_MAX_NODES];
+    uint32_t slots[AF_MAX_NODES * 2U];
+    AfIdIndex lookup;
     uint32_t index = 0U;
     AfResult result = AF_RESULT_SUCCESS;
-    if (scene == NULL || scene->count > AF_MAX_NODES) {
+    if (scene == NULL || scene->count > AF_MAX_NODES || scene->count > scene->capacity ||
+        (scene->count != 0U && scene->nodes == NULL)) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
     if (scene->layouts != NULL) {
         return af_layout_evaluate_scene(scene);
     }
+    result = af_id_index_build(&lookup, scene->nodes, scene->count, sizeof(*scene->nodes), slots,
+                               AF_MAX_NODES * 2U);
+    if (result != AF_RESULT_SUCCESS) {
+        return result;
+    }
+    memset(states, 0, (size_t)scene->count * sizeof(*states));
     for (index = 0U; index < scene->count; ++index) {
-        result = af_scene_evaluate_node(scene, index, states, 0U);
+        result = af_scene_evaluate_node(scene, index, states, &lookup, 0U);
         if (result != AF_RESULT_SUCCESS) {
             return result;
         }

@@ -321,10 +321,12 @@ static bool af_test_editor_vector_tools(void) {
     CHECK(strcmp(af_editor_vector_tool_name(AF_EDITOR_TOOL_PEN), "Pen") == 0);
     CHECK(strcmp(af_editor_vector_tool_name(AF_EDITOR_TOOL_SCISSORS), "Scissors") == 0);
     CHECK(strcmp(af_editor_vector_tool_label(AF_EDITOR_TOOL_SEGMENT_DELETE), "VDEL") == 0);
+    CHECK(strcmp(af_editor_vector_tool_label(AF_EDITOR_TOOL_KNIFE), "KNIFE") == 0);
     CHECK(strcmp(af_editor_vector_tool_label(AF_EDITOR_TOOL_POLYGON), "POLY") == 0);
     CHECK(!af_editor_vector_tool_is_construction(AF_EDITOR_TOOL_SELECT));
     CHECK(!af_editor_vector_tool_is_construction(AF_EDITOR_TOOL_SCISSORS));
     CHECK(!af_editor_vector_tool_is_construction(AF_EDITOR_TOOL_SEGMENT_DELETE));
+    CHECK(!af_editor_vector_tool_is_construction(AF_EDITOR_TOOL_KNIFE));
     CHECK(af_editor_vector_tool_is_construction(AF_EDITOR_TOOL_SPIRAL));
     CHECK(af_editor_vector_tool_rect((AfVec2){10.0F, 20.0F}, (AfVec2){40.0F, 60.0F}, false, false,
                                      &rect));

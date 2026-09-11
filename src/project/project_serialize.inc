@@ -120,14 +120,15 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
             "node\nid %llu\nparent %s\ntype %s\nname %s\nposition %.9g %.9g\nrotation "
             "%.9g\nscale %.9g %.9g\nskew %.9g %.9g\nbounds %.9g %.9g\nfill %.9g %.9g %.9g "
             "%.9g\nopacity "
-            "%.9g\ncorner_radius %.9g\nlayer %d\nvisible %u\nend\n",
+            "%.9g\ncorner_radius %.9g\nlayer %d\nvisible %u\npolygon %u %.9g\nend\n",
             (unsigned long long)node->id, parent, af_project_type_name(node->type),
             project->names[index], node->local_transform.position.x,
             node->local_transform.position.y, node->local_transform.rotation,
             node->local_transform.scale.x, node->local_transform.scale.y,
             node->local_transform.skew.x, node->local_transform.skew.y, node->bounds.x,
             node->bounds.y, node->fill.r, node->fill.g, node->fill.b, node->fill.a, node->opacity,
-            node->corner_radius, node->layer_order, node->visible ? 1U : 0U);
+            node->corner_radius, node->layer_order, node->visible ? 1U : 0U, node->polygon_sides,
+            node->polygon_inset);
     }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->style_data.count; ++index) {
         const AfStyle *style = &project->style_data.styles[index];

@@ -79,6 +79,7 @@ static AfResult af_vk_update_path_cache(AfVkRenderer *renderer, const AfPathData
     cache->content_hash = content_hash;
     cache->vertex_count = vertex_count;
     ++cache->rebuild_count;
+    ++renderer->frame_metrics.path_rebuilds;
     *out_cache = cache;
     return AF_RESULT_SUCCESS;
 }
@@ -161,18 +162,13 @@ static AfResult af_vk_update_stroke_cache(AfVkRenderer *renderer, const AfPathDa
     cache->stroke_geometry_generation = style->stroke_geometry_generation;
     cache->vertex_count = vertex_count;
     ++cache->rebuild_count;
+    ++renderer->frame_metrics.path_rebuilds;
     *out_cache = cache;
     return AF_RESULT_SUCCESS;
 }
 
-static void af_vk_insert_render_item(AfVkRenderer *renderer, uint32_t *count, AfVkRenderItem item) {
-    uint32_t insert = *count;
-    while (insert > 0U && renderer->render_items[insert - 1U].layer_order > item.layer_order) {
-        renderer->render_items[insert] = renderer->render_items[insert - 1U];
-        --insert;
-    }
-    renderer->render_items[insert] = item;
-    ++(*count);
+static void af_vk_append_render_item(AfVkRenderer *renderer, uint32_t *count, AfVkRenderItem item) {
+    renderer->render_items[(*count)++] = item;
 }
 
 static void af_vk_prune_path_caches(AfVkRenderer *renderer, const AfPathData *paths) {
@@ -403,7 +399,7 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                     .color = {color.r, color.g, color.b, color.a * node->world_opacity}};
             }
             if (cache->vertex_count != 0U) {
-                af_vk_insert_render_item(renderer, &item_count,
+                af_vk_append_render_item(renderer, &item_count,
                                          (AfVkRenderItem){.type = AF_VK_RENDER_PATH,
                                                           .layer_order = node->layer_order,
                                                           .first = first,
@@ -433,7 +429,7 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                                           .color = {color.r, color.g, color.b, color.a}};
                 }
                 if (stroke_cache->vertex_count != 0U) {
-                    af_vk_insert_render_item(renderer, &item_count,
+                    af_vk_append_render_item(renderer, &item_count,
                                              (AfVkRenderItem){.type = AF_VK_RENDER_PATH,
                                                               .layer_order = node->layer_order,
                                                               .first = stroke_first,
@@ -452,7 +448,7 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                 return result;
             }
             if (image_vertex_count != first) {
-                af_vk_insert_render_item(renderer, &item_count,
+                af_vk_append_render_item(renderer, &item_count,
                                          (AfVkRenderItem){.type = AF_VK_RENDER_IMAGE,
                                                           .layer_order = node->layer_order,
                                                           .first = first,
@@ -481,7 +477,7 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                 .color = {color.r, color.g, color.b, color.a},
                 .parameters = {(float)node->type, node->corner_radius, node->world_opacity, 0.0F},
                 .layer_order = node->layer_order};
-            af_vk_insert_render_item(renderer, &item_count,
+            af_vk_append_render_item(renderer, &item_count,
                                      (AfVkRenderItem){.type = AF_VK_RENDER_ANALYTIC,
                                                       .layer_order = node->layer_order,
                                                       .first = shape_count,
@@ -504,7 +500,7 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                     .parameters = {(float)node->type, node->corner_radius, node->world_opacity,
                                    style->stroke.width},
                     .layer_order = node->layer_order};
-                af_vk_insert_render_item(renderer, &item_count,
+                af_vk_append_render_item(renderer, &item_count,
                                          (AfVkRenderItem){.type = AF_VK_RENDER_ANALYTIC,
                                                           .layer_order = node->layer_order,
                                                           .first = shape_count,
@@ -533,6 +529,7 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
     *out_shape_count = shape_count;
     *out_path_vertex_count = path_vertex_count;
     *out_image_vertex_count = image_vertex_count;
-    *out_item_count = item_count;
+    *out_item_count = af_vk_prepare_render_items(renderer->render_items,
+                                                 renderer->render_item_scratch, item_count);
     return AF_RESULT_SUCCESS;
 }

@@ -209,6 +209,13 @@ static AfResult af_vk_create_device(AfVkRenderer *renderer) {
         VkPhysicalDeviceProperties properties;
         VkSampleCountFlags counts = 0U;
         vkGetPhysicalDeviceProperties(renderer->physical_device, &properties);
+        VkQueueFamilyProperties queues[AF_MAX_QUEUE_FAMILIES];
+        uint32_t queue_count = AF_MAX_QUEUE_FAMILIES;
+        vkGetPhysicalDeviceQueueFamilyProperties(renderer->physical_device, &queue_count, queues);
+        if (renderer->graphics_family < queue_count) {
+            renderer->timestamp_valid_bits = queues[renderer->graphics_family].timestampValidBits;
+            renderer->timestamp_period = properties.limits.timestampPeriod;
+        }
         counts = properties.limits.framebufferColorSampleCounts;
         renderer->sample_count =
             (counts & VK_SAMPLE_COUNT_4_BIT) != 0U

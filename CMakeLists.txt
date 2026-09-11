@@ -376,6 +376,11 @@ target_include_directories(arcflow_performance_tests PRIVATE src include)
 target_link_libraries(arcflow_performance_tests PRIVATE arcflow_core)
 add_test(NAME arcflow_performance_tests COMMAND arcflow_performance_tests)
 
+# Optional CPU microbenchmarks; timings are reported, not used as machine-dependent test gates.
+add_executable(arcflow_hotpath_benchmarks EXCLUDE_FROM_ALL tests/benchmark_hotpaths.c)
+target_include_directories(arcflow_hotpath_benchmarks PRIVATE src include)
+target_link_libraries(arcflow_hotpath_benchmarks PRIVATE arcflow_project SDL3::SDL3-static)
+
 add_executable(arcflow_stability_tests tests/test_stability.c)
 target_include_directories(arcflow_stability_tests PRIVATE src include)
 target_link_libraries(arcflow_stability_tests PRIVATE arcflow_core)
@@ -518,7 +523,7 @@ set(ARCFLOW_OWN_TARGETS
     arcflow_core arcflow_runtime arcflow_runtime_shared arcflow_project arcflow_editor_core
     arcflow_update arcflow_renderer
     arcflow_compiler arcflow_player_app arcflow_player arcflow_editor arcflow_tests
-    arcflow_performance_tests
+    arcflow_performance_tests arcflow_hotpath_benchmarks
     arcflow_stability_tests arcflow_beta_performance_tests arcflow_parser_fuzz_tests
     arcflow_import_fuzz_tests arcflow_release_tests
     arcflow_localization_tests

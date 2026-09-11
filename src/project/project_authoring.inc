@@ -371,33 +371,37 @@ static float af_project_cubic_ease(float progress, const float easing[4]) {
     return af_project_bezier(easing[1], easing[3], (low + high) * 0.5F);
 }
 
-static AfResult af_project_sample_track(const AfProject *project, const AfProjectTrack *track,
-                                        float time, float value[4]) {
-    const AfProjectKeyframe *first = NULL;
-    const AfProjectKeyframe *left = NULL;
-    const AfProjectKeyframe *right = NULL;
+typedef struct AfProjectTrackSample {
+    const AfProjectKeyframe *first;
+    const AfProjectKeyframe *left;
+    const AfProjectKeyframe *right;
+} AfProjectTrackSample;
+
+static void af_project_sample_key(AfProjectTrackSample *sample, const AfProjectKeyframe *key,
+                                  float time) {
+    if (sample->first == NULL || key->keyframe.time < sample->first->keyframe.time ||
+        (key->keyframe.time == sample->first->keyframe.time && key->id < sample->first->id)) {
+        sample->first = key;
+    }
+    if (key->keyframe.time <= time &&
+        (sample->left == NULL || key->keyframe.time > sample->left->keyframe.time ||
+         (key->keyframe.time == sample->left->keyframe.time && key->id > sample->left->id))) {
+        sample->left = key;
+    }
+    if (key->keyframe.time > time &&
+        (sample->right == NULL || key->keyframe.time < sample->right->keyframe.time ||
+         (key->keyframe.time == sample->right->keyframe.time && key->id < sample->right->id))) {
+        sample->right = key;
+    }
+}
+
+static AfResult af_project_sample_track(const AfProjectTrackSample *sample, float time,
+                                        float value[4]) {
+    const AfProjectKeyframe *first = sample->first;
+    const AfProjectKeyframe *left = sample->left;
+    const AfProjectKeyframe *right = sample->right;
     uint32_t index = 0U;
     float progress = 0.0F;
-    for (index = 0U; index < project->keyframe_count; ++index) {
-        const AfProjectKeyframe *key = &project->keyframes[index];
-        if (key->track_id != track->id) {
-            continue;
-        }
-        if (first == NULL || key->keyframe.time < first->keyframe.time ||
-            (key->keyframe.time == first->keyframe.time && key->id < first->id)) {
-            first = key;
-        }
-        if (key->keyframe.time <= time &&
-            (left == NULL || key->keyframe.time > left->keyframe.time ||
-             (key->keyframe.time == left->keyframe.time && key->id > left->id))) {
-            left = key;
-        }
-        if (key->keyframe.time > time &&
-            (right == NULL || key->keyframe.time < right->keyframe.time ||
-             (key->keyframe.time == right->keyframe.time && key->id < right->id))) {
-            right = key;
-        }
-    }
     if (first == NULL) {
         return AF_RESULT_NOT_FOUND;
     }
@@ -425,10 +429,27 @@ AfResult af_project_animation_apply(const AfProject *project, uint64_t clip_id, 
                                     AfScene *scene) {
     const AfProjectClip *clip = af_project_find_clip_const(project, clip_id);
     uint32_t index = 0U;
-    if (clip == NULL || scene == NULL || !isfinite(time)) {
+    AfIdIndex tracks;
+    uint32_t track_slots[AF_PROJECT_MAX_TRACKS * 2U];
+    AfProjectTrackSample samples[AF_PROJECT_MAX_TRACKS];
+    if (clip == NULL || scene == NULL || !isfinite(time) ||
+        project->track_count > AF_PROJECT_MAX_TRACKS ||
+        project->keyframe_count > AF_PROJECT_MAX_KEYFRAMES ||
+        (project->keyframe_count != 0U && project->keyframes == NULL) ||
+        af_id_index_build(&tracks, project->tracks, project->track_count, sizeof(*project->tracks),
+                          track_slots, AF_PROJECT_MAX_TRACKS * 2U) != AF_RESULT_SUCCESS) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
     time = time < 0.0F ? 0.0F : (time > clip->duration ? clip->duration : time);
+    memset(samples, 0, (size_t)project->track_count * sizeof(*samples));
+    /* Gather bracketing keys once for the active clip; editor key storage need not be sorted. */
+    for (index = 0U; index < project->keyframe_count; ++index) {
+        const AfProjectKeyframe *key = &project->keyframes[index];
+        const uint32_t track = af_id_index_find(&tracks, key->track_id);
+        if (track != UINT32_MAX && project->tracks[track].clip_id == clip_id) {
+            af_project_sample_key(&samples[track], key, time);
+        }
+    }
     for (index = 0U; index < project->track_count; ++index) {
         const AfProjectTrack *track = &project->tracks[index];
         AfSceneNode *node = NULL;
@@ -441,7 +462,7 @@ AfResult af_project_animation_apply(const AfProject *project, uint64_t clip_id, 
         if (node == NULL) {
             return AF_RESULT_NOT_FOUND;
         }
-        result = af_project_sample_track(project, track, time, value);
+        result = af_project_sample_track(&samples[index], time, value);
         if (result == AF_RESULT_NOT_FOUND) {
             continue;
         }

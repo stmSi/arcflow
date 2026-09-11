@@ -82,7 +82,8 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
         return true;
     }
     if (event->y < top + 42.0F) {
-        const float local_x = event->x - editor->left_width;
+        const float local_x = (event->x - editor->left_width) /
+                              af_editor_timeline_controls_scale(editor, width);
         if (local_x >= 10.0F && local_x < 56.0F) {
             editor->preview_playing = !editor->preview_playing;
             af_editor_status(editor,
@@ -103,6 +104,19 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
         } else if (local_x >= 398.0F && local_x < 514.0F) {
             if (af_editor_add_keyframe(editor) != AF_RESULT_SUCCESS) {
                 af_editor_status(editor, "Select an object and an animatable property first");
+            }
+        } else if (af_editor_timeline_compact_clips(editor, width)) {
+            if (event->x >= center_right - 74.0F && event->x < center_right - 6.0F &&
+                editor->project.clip_count != 0U) {
+                for (index = 0U; index < editor->project.clip_count; ++index) {
+                    if (editor->project.clips[index].id == editor->selected_clip_id)
+                        break;
+                }
+                editor->selected_clip_id =
+                    editor->project.clips[(index + 1U) % editor->project.clip_count].id;
+                editor->playhead = 0.0F;
+                af_editor_clear_key_selection(editor);
+                af_editor_status(editor, "Next animation clip selected");
             }
         } else {
             for (index = 0U; index < editor->project.clip_count && index < 8U; ++index) {
@@ -161,7 +175,7 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
                 return true;
             }
             const float curve_top = top + AF_EDITOR_TIMELINE_RULER_HEIGHT;
-            const float bottom = (float)height - AF_EDITOR_STATUS_HEIGHT - 12.0F;
+            const float bottom = (float)height - editor->status_height - 12.0F;
             const float out_x = ruler_x + 30.0F + key->keyframe.easing[0] * 100.0F;
             const float out_y = bottom - 30.0F - key->keyframe.easing[1] * 80.0F;
             const float in_x = center_right - 130.0F + key->keyframe.easing[2] * 100.0F;
@@ -321,7 +335,8 @@ static bool af_editor_path_segment_hit(const AfEditorState *editor, int width, i
     AfVec2 previous = {0};
     bool have_previous = false;
     AfAffine2 transform = {0};
-    if (node == NULL || path == NULL || out_command == NULL || out_t == NULL) {
+    if (node == NULL || path == NULL || node->polygon_sides != 0U || out_command == NULL ||
+        out_t == NULL) {
         return false;
     }
     transform = af_affine_multiply(af_editor_camera(editor, width, height), node->world_transform);
@@ -334,18 +349,30 @@ static bool af_editor_path_segment_hit(const AfEditorState *editor, int width, i
             continue;
         }
         if ((command->type == AF_PATH_LINE || command->type == AF_PATH_CUBIC) && have_previous) {
-            for (uint32_t sample = 2U; sample < 23U; ++sample) {
-                const float t = (float)sample / 24.0F;
-                const AfVec2 local = af_editor_path_segment_point(previous, command, t);
-                const AfVec2 screen = af_affine_transform_point(transform, local);
+            const uint32_t samples = command->type == AF_PATH_CUBIC ? 32U : 1U;
+            AfVec2 a = af_affine_transform_point(transform, previous);
+            for (uint32_t sample = 1U; sample <= samples; ++sample) {
+                const AfVec2 b = af_affine_transform_point(
+                    transform, af_editor_path_segment_point(previous, command,
+                                                            (float)sample / (float)samples));
+                const float vx = b.x - a.x, vy = b.y - a.y;
+                const float length2 = vx * vx + vy * vy;
+                const float u =
+                    length2 > 0.0001F
+                        ? af_editor_clamp(((mouse.x - a.x) * vx + (mouse.y - a.y) * vy) / length2,
+                                          0.0F, 1.0F)
+                        : 0.0F;
+                const float t = ((float)(sample - 1U) + u) / (float)samples;
+                const AfVec2 screen = {a.x + vx * u, a.y + vy * u};
                 const float dx = mouse.x - screen.x;
                 const float dy = mouse.y - screen.y;
                 const float distance = dx * dx + dy * dy;
-                if (distance < nearest_distance) {
+                if (t > 0.015F && t < 0.985F && distance < nearest_distance) {
                     nearest_distance = distance;
                     nearest_command = command_index;
                     nearest_t = t;
                 }
+                a = b;
             }
             previous = command->point;
         } else if (command->type == AF_PATH_CLOSE) {
@@ -366,7 +393,7 @@ static bool af_editor_path_mouse_down(AfEditorState *editor, int width, int heig
     AfPath *path = af_editor_selected_path(editor);
     AfAffine2 transform = {0};
     const float threshold_squared = 100.0F;
-    if (node == NULL || path == NULL) {
+    if (node == NULL || path == NULL || node->polygon_sides != 0U) {
         return false;
     }
     transform = af_affine_multiply(af_editor_camera(editor, width, height), node->world_transform);
@@ -1147,6 +1174,13 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         editor->context_menu = AF_EDITOR_CONTEXT_NONE;
         return;
     }
+    if (event->button == SDL_BUTTON_LEFT) {
+        const AfEditorDragMode splitter = af_editor_splitter_at(editor, width, height);
+        if (splitter != AF_EDITOR_DRAG_NONE) {
+            editor->drag_mode = splitter;
+            return;
+        }
+    }
     if (af_editor_timeline_mouse_down(editor, width, height, event, modifiers)) {
         return;
     }
@@ -1157,6 +1191,10 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         return;
     }
     if (event->button != SDL_BUTTON_LEFT) {
+        return;
+    }
+    if (x >= 12.0F && x <= 106.0F && y >= 30.0F && y <= 47.0F && x < editor->left_width) {
+        af_editor_group_selection(editor);
         return;
     }
     if (fabsf(x - editor->left_width) <= 5.0F) {
@@ -1173,7 +1211,8 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         if (y >= row_start) {
             const uint32_t row = (uint32_t)((y - row_start) / 27.0F);
             const uint32_t asset_index = editor->asset_scroll + row;
-            if (asset_index < editor->project.image_data.asset_count && row < 5U) {
+            if (asset_index < editor->project.image_data.asset_count &&
+                row < af_editor_asset_visible_rows(editor)) {
                 const uint64_t asset_id = editor->project.image_data.assets[asset_index].id;
                 editor->selected_asset_id = asset_id;
                 for (uint32_t binding = 0U; binding < editor->project.image_data.binding_count;
@@ -1191,9 +1230,8 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         }
         return;
     }
-    if (x < editor->left_width && y >= AF_EDITOR_TOOLBAR_HEIGHT + 8.0F) {
-        const uint32_t row =
-            (uint32_t)((y - AF_EDITOR_TOOLBAR_HEIGHT - 8.0F) / AF_EDITOR_ROW_HEIGHT);
+    if (x < editor->left_width && y >= editor->toolbar_height + 8.0F) {
+        const uint32_t row = (uint32_t)((y - editor->toolbar_height - 8.0F) / AF_EDITOR_ROW_HEIGHT);
         const uint32_t hierarchy_index = editor->hierarchy_scroll + row;
         if (hierarchy_index < editor->hierarchy_count) {
             const uint64_t clicked =
@@ -1207,6 +1245,10 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
             } else {
                 af_editor_select_only(editor, clicked);
                 editor->hierarchy_anchor_id = clicked;
+                editor->hierarchy_drag_id = clicked;
+                editor->hierarchy_drag_started = false;
+                editor->drag_start_mouse = (AfVec2){x, y};
+                editor->drag_mode = AF_EDITOR_DRAG_HIERARCHY;
             }
             editor->selected_path_command =
                 af_path_find_node_const(&editor->project.path_data, editor->selected_id) != NULL
@@ -1220,14 +1262,17 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         }
         return;
     }
-    if (y >= AF_EDITOR_MENU_HEIGHT && y < AF_EDITOR_TOOLBAR_HEIGHT && x >= editor->left_width &&
+    if (y >= AF_EDITOR_MENU_HEIGHT && y < editor->toolbar_height && x >= editor->left_width &&
         x < (float)width - editor->right_width) {
-        const float toolbar_x = x - editor->left_width - 14.0F;
+        const float toolbar_x = x - af_editor_toolbar_origin(editor, width);
         const float tools_width = (float)AF_EDITOR_TOOL_COUNT * 42.0F;
         if (toolbar_x >= 0.0F && toolbar_x < tools_width) {
             const uint32_t tool = (uint32_t)(toolbar_x / 42.0F);
             const float button_x = (float)tool * 42.0F;
-            if (tool < AF_EDITOR_TOOL_COUNT && toolbar_x < button_x + 38.0F) {
+            const float screen_x = af_editor_toolbar_origin(editor, width) + button_x;
+            if (tool < AF_EDITOR_TOOL_COUNT && toolbar_x < button_x + 38.0F &&
+                screen_x >= editor->left_width + 4.0F &&
+                screen_x + 38.0F <= (float)width - editor->right_width - 4.0F) {
                 af_editor_set_vector_tool(editor, (AfEditorVectorTool)tool);
             }
         } else if (toolbar_x >= tools_width + 8.0F && toolbar_x < tools_width + 96.0F) {
@@ -1254,6 +1299,33 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
             af_scene_find_const(&editor->preview_scene, editor->selected_id);
         const AfVec2 selected_pivot = af_editor_node_pivot(editor, selected);
         AfEditorGizmoGeometry geometry = {0};
+        if (event->clicks >= 2U && editor->active_tool == AF_EDITOR_TOOL_SELECT) {
+            const uint64_t hit = af_editor_hit_test(
+                editor, af_editor_screen_to_project(editor, width, height, (AfVec2){x, y}));
+            const AfSceneNode *hit_node = af_scene_find_const(&editor->project.scene, hit);
+            if (hit_node != NULL && hit_node->polygon_sides == 0U &&
+                af_path_find_node_const(&editor->project.path_data, hit) != NULL) {
+                af_editor_select_only(editor, hit);
+                af_editor_convert_selected_to_path(editor);
+                return;
+            }
+        }
+        if (editor->active_tool == AF_EDITOR_TOOL_KNIFE) {
+            if (selected != NULL && selected->polygon_sides != 0U) {
+                af_editor_status(editor, "Convert this shape to a path before using Knife");
+                return;
+            }
+            if (editor->selected_count == 1U && af_editor_selected_path(editor) != NULL) {
+                editor->tool_start = af_editor_tool_snap_point(
+                    editor, af_editor_screen_to_project(editor, width, height, (AfVec2){x, y}));
+                editor->tool_current = editor->tool_start;
+                editor->drag_mode = AF_EDITOR_DRAG_TOOL_CREATE;
+                af_editor_status(editor, "Drag a knife line across one or more path segments");
+            } else {
+                af_editor_status(editor, "Select one path before using the Knife tool");
+            }
+            return;
+        }
         if (editor->active_tool == AF_EDITOR_TOOL_SCISSORS ||
             editor->active_tool == AF_EDITOR_TOOL_SEGMENT_DELETE) {
             uint32_t command_index = UINT32_MAX;
@@ -1391,6 +1463,40 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
     editor->mouse_position = (AfVec2){event->x, event->y};
+    if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY) {
+        if (!editor->hierarchy_drag_started &&
+            hypotf(event->x - editor->drag_start_mouse.x, event->y - editor->drag_start_mouse.y) >
+                5.0F) {
+            editor->hierarchy_drag_started = true;
+            af_editor_status(editor,
+                             "Drop on a group to move inside; use insertion lines to choose parent and order");
+        }
+        return;
+    }
+    if (editor->drag_mode == AF_EDITOR_DRAG_ASSET_HEIGHT) {
+        editor->asset_height = af_editor_clamp(
+            (float)height - editor->status_height - editor->timeline_height - event->y, 80.0F,
+            fmaxf(80.0F, (float)height - editor->status_height - editor->timeline_height -
+                             editor->toolbar_height - 56.0F));
+        return;
+    }
+    if (editor->drag_mode == AF_EDITOR_DRAG_TOOLBAR_HEIGHT) {
+        editor->toolbar_height =
+            af_editor_clamp(event->y, 72.0F,
+                            fmaxf(72.0F, fminf(160.0F, (float)height - editor->status_height -
+                                                           editor->timeline_height - 150.0F)));
+        return;
+    }
+    if (editor->drag_mode == AF_EDITOR_DRAG_STATUS_HEIGHT) {
+        editor->status_height = af_editor_clamp((float)height - event->y, 28.0F, 96.0F);
+        return;
+    }
+    if (editor->drag_mode == AF_EDITOR_DRAG_TIMELINE_HEADER) {
+        editor->timeline_header_width = af_editor_clamp(
+            event->x - editor->left_width, 100.0F,
+            fmaxf(100.0F, (float)width - editor->left_width - editor->right_width - 140.0F));
+        return;
+    }
     if (editor->drag_mode == AF_EDITOR_DRAG_COLOR_SV ||
         editor->drag_mode == AF_EDITOR_DRAG_COLOR_HUE ||
         editor->drag_mode == AF_EDITOR_DRAG_COLOR_ALPHA) {
@@ -1410,9 +1516,9 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
         return;
     }
     if (editor->drag_mode == AF_EDITOR_DRAG_TIMELINE_HEIGHT) {
-        editor->timeline_height = af_editor_clamp(
-            (float)height - AF_EDITOR_STATUS_HEIGHT - event->y, AF_EDITOR_TIMELINE_MIN_HEIGHT,
-            (float)height - AF_EDITOR_TOOLBAR_HEIGHT - 150.0F);
+        editor->timeline_height = af_editor_clamp((float)height - editor->status_height - event->y,
+                                                  AF_EDITOR_TIMELINE_MIN_HEIGHT,
+                                                  (float)height - editor->toolbar_height - 150.0F);
         return;
     }
     if (editor->drag_mode == AF_EDITOR_DRAG_TIMELINE_PAN) {
@@ -1474,7 +1580,7 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
         AfProjectKeyframe *key =
             af_project_find_keyframe(&editor->project, editor->key_drag_before[0].keyframe.id);
         const float top = af_editor_timeline_top(editor, height) + AF_EDITOR_TIMELINE_RULER_HEIGHT;
-        const float bottom = (float)height - AF_EDITOR_STATUS_HEIGHT - 12.0F;
+        const float bottom = (float)height - editor->status_height - 12.0F;
         const float right = (float)width - editor->right_width;
         if (key == NULL) {
             return;
@@ -1606,6 +1712,53 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
 }
 
 static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
+    if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY && editor->hierarchy_drag_started) {
+        const float top = editor->toolbar_height + 8.0F;
+        const float bottom = editor->asset_browser_visible
+                                 ? af_editor_asset_browser_top(editor, height)
+                                 : (float)height - editor->status_height - editor->timeline_height;
+        const AfVec2 mouse = editor->mouse_position;
+        if (mouse.x >= 0 && mouse.x < editor->left_width && mouse.y >= top && mouse.y < bottom) {
+            const uint32_t row = (uint32_t)((mouse.y - top) / AF_EDITOR_ROW_HEIGHT);
+            const uint32_t index = editor->hierarchy_scroll + row;
+            if (index < editor->hierarchy_count) {
+                const AfSceneNode *target_node =
+                    &editor->project.scene.nodes[editor->hierarchy_order[index]];
+                const uint64_t target = target_node->id;
+                const float row_y = mouse.y - top - (float)row * AF_EDITOR_ROW_HEIGHT;
+                const bool inside = af_editor_hierarchy_drop_inside(target_node, row_y);
+                const bool after = row_y >= AF_EDITOR_ROW_HEIGHT * 0.5F;
+                const AfSceneNode *source =
+                    af_scene_find_const(&editor->project.scene, editor->hierarchy_drag_id);
+                const bool already_inside = inside && source != NULL && source->parent_id == target;
+                AfEditorCommand command = {0};
+                AfResult result =
+                    already_inside ? AF_RESULT_SUCCESS
+                    : inside
+                        ? af_editor_command_reparent(&editor->project, editor->hierarchy_drag_id,
+                                                     target, &command)
+                        : af_editor_command_reorder(&editor->project, editor->hierarchy_drag_id,
+                                                    target, after, &command);
+                if (result == AF_RESULT_SUCCESS && !already_inside)
+                    result = af_editor_history_execute(&editor->history, &editor->project, &command,
+                                                       false, false);
+                if (already_inside) {
+                    char message[AF_EDITOR_STATUS_CAPACITY];
+                    (void)snprintf(message, sizeof(message), "Object is already inside %s",
+                                   af_project_name(&editor->project, target));
+                    af_editor_status(editor, message);
+                } else if (result == AF_RESULT_SUCCESS) {
+                    af_editor_mark_dirty(editor);
+                    af_editor_status(editor, inside ? "Object moved into group · Ctrl+Z to undo"
+                                                    : "Object moved to this tree position · Ctrl+Z to undo");
+                } else if (target != editor->hierarchy_drag_id) {
+                    af_editor_status(editor, inside ? "Cannot move object into this group"
+                                                    : "Cannot move an object beside itself or into its own descendants");
+                }
+            }
+        }
+        editor->hierarchy_drag_started = false;
+    }
     if (editor->drag_mode == AF_EDITOR_DRAG_COLOR_SV ||
         editor->drag_mode == AF_EDITOR_DRAG_COLOR_HUE ||
         editor->drag_mode == AF_EDITOR_DRAG_COLOR_ALPHA) {
@@ -1670,20 +1823,42 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
 
 static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
                                   const SDL_MouseWheelEvent *event) {
+    const float direction = event->direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0F : 1.0F;
+    const float scroll_x = event->x * direction;
+    const float scroll_y = event->y * direction;
+    if (!isfinite(scroll_x) || !isfinite(scroll_y) || event->mouse_x < 0.0F ||
+        event->mouse_x >= (float)width - editor->right_width ||
+        event->mouse_y < AF_EDITOR_MENU_HEIGHT ||
+        event->mouse_y >= (float)height - editor->status_height) {
+        return;
+    }
+    if (event->mouse_x >= editor->left_width &&
+        event->mouse_x < (float)width - editor->right_width &&
+        event->mouse_y >= AF_EDITOR_MENU_HEIGHT && event->mouse_y < editor->toolbar_height) {
+        editor->toolbar_scroll =
+            af_editor_clamp(editor->toolbar_scroll - scroll_y * 42.0F - scroll_x * 42.0F, 0.0F,
+                            af_editor_toolbar_scroll_limit(editor, width));
+        af_editor_status(editor, "Scroll over the toolbar to reveal more tools");
+        return;
+    }
+    if (scroll_y == 0.0F) {
+        return;
+    }
     if (event->mouse_x < editor->left_width) {
         if (editor->asset_browser_visible &&
             event->mouse_y >= af_editor_asset_browser_top(editor, height)) {
-            const uint32_t maximum = editor->project.image_data.asset_count > 5U
-                                         ? editor->project.image_data.asset_count - 5U
+            const uint32_t visible = af_editor_asset_visible_rows(editor);
+            const uint32_t maximum = editor->project.image_data.asset_count > visible
+                                         ? editor->project.image_data.asset_count - visible
                                          : 0U;
-            if (event->y > 0.0F && editor->asset_scroll > 0U) {
+            if (scroll_y > 0.0F && editor->asset_scroll > 0U) {
                 --editor->asset_scroll;
-            } else if (event->y < 0.0F && editor->asset_scroll < maximum) {
+            } else if (scroll_y < 0.0F && editor->asset_scroll < maximum) {
                 ++editor->asset_scroll;
             }
-        } else if (event->y > 0.0F && editor->hierarchy_scroll > 0U) {
+        } else if (scroll_y > 0.0F && editor->hierarchy_scroll > 0U) {
             --editor->hierarchy_scroll;
-        } else if (event->y < 0.0F && editor->hierarchy_scroll < editor->hierarchy_count) {
+        } else if (scroll_y < 0.0F && editor->hierarchy_scroll < editor->hierarchy_count) {
             ++editor->hierarchy_scroll;
         }
         return;
@@ -1691,10 +1866,11 @@ static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
     if (event->mouse_y >= af_editor_timeline_top(editor, height)) {
         const float anchor_time = af_editor_x_to_time(editor, event->mouse_x);
         if ((SDL_GetModState() & SDL_KMOD_SHIFT) != 0U) {
-            editor->timeline_pan = fmaxf(0.0F, editor->timeline_pan - event->y * 0.25F);
+            editor->timeline_pan = fmaxf(0.0F, editor->timeline_pan - scroll_y * 0.25F);
         } else {
             editor->timeline_zoom = af_editor_clamp(
-                editor->timeline_zoom * (event->y > 0.0F ? 1.12F : 0.89F), 24.0F, 800.0F);
+                editor->timeline_zoom * powf(1.12F, af_editor_clamp(scroll_y, -64.0F, 64.0F)),
+                24.0F, 800.0F);
             editor->timeline_pan =
                 fmaxf(0.0F, anchor_time - (event->mouse_x - af_editor_timeline_ruler_x(editor)) /
                                               editor->timeline_zoom);
@@ -1716,7 +1892,8 @@ static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
         (void)canvas_width;
         (void)canvas_height;
         editor->zoom =
-            af_editor_clamp(editor->zoom * (event->y > 0.0F ? 1.12F : 0.89F), 0.1F, 8.0F);
+            af_editor_clamp(editor->zoom * powf(1.12F, af_editor_clamp(scroll_y, -64.0F, 64.0F)),
+                            0.1F, 8.0F);
         editor->pan.x = mouse.x - canvas_x - project.x * editor->zoom;
         editor->pan.y = mouse.y - canvas_y - project.y * editor->zoom;
     }
@@ -1791,6 +1968,16 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     if (af_editor_workflow_key(editor, event)) {
         return;
     }
+    if (control && event->key == SDLK_G) {
+        af_editor_group_selection(editor);
+        return;
+    }
+    if (event->key == SDLK_ESCAPE && editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY) {
+        editor->drag_mode = AF_EDITOR_DRAG_NONE;
+        editor->hierarchy_drag_started = false;
+        af_editor_status(editor, "Hierarchy drag cancelled");
+        return;
+    }
     if (editor->drag_mode == AF_EDITOR_DRAG_TOOL_CREATE && event->key == SDLK_ESCAPE) {
         af_editor_cancel_vector_tool(editor, "Drawing cancelled");
         return;
@@ -1815,13 +2002,13 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     if (!control && !alt && !editor->timeline_focus) {
         AfEditorVectorTool shortcut_tool = AF_EDITOR_TOOL_COUNT;
         if (event->key == SDLK_V) {
-            shortcut_tool = AF_EDITOR_TOOL_SELECT;
-        } else if (event->key == SDLK_F10) {
-            shortcut_tool = AF_EDITOR_TOOL_NODE;
+            shortcut_tool = shift ? AF_EDITOR_TOOL_NODE : AF_EDITOR_TOOL_SELECT;
         } else if (event->key == SDLK_X) {
             shortcut_tool = AF_EDITOR_TOOL_SCISSORS;
         } else if (event->key == SDLK_D) {
             shortcut_tool = AF_EDITOR_TOOL_SEGMENT_DELETE;
+        } else if (event->key == SDLK_J) {
+            shortcut_tool = AF_EDITOR_TOOL_KNIFE;
         } else if (event->key == SDLK_R && editor->active_tool != AF_EDITOR_TOOL_NODE) {
             shortcut_tool = shift ? AF_EDITOR_TOOL_ROUNDED_RECTANGLE : AF_EDITOR_TOOL_RECTANGLE;
         } else if (event->key == SDLK_O && editor->active_tool != AF_EDITOR_TOOL_NODE) {
@@ -2062,6 +2249,15 @@ static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int 
         af_editor_mouse_scale(editor, &button.x, &button.y);
         af_editor_mouse_down(editor, width, height, &button, SDL_GetModState());
     } else if (event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY &&
+            event->button.button != SDL_BUTTON_LEFT)
+            return;
+        float x = event->button.x, y = event->button.y;
+        af_editor_mouse_scale(editor, &x, &y);
+        editor->mouse_position = (AfVec2){x, y};
+        if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY &&
+            hypotf(x - editor->drag_start_mouse.x, y - editor->drag_start_mouse.y) > 5.0F)
+            editor->hierarchy_drag_started = true;
         af_editor_mouse_up(editor, width, height);
     } else if (event->type == SDL_EVENT_MOUSE_MOTION) {
         SDL_MouseMotionEvent motion = event->motion;
@@ -2088,6 +2284,559 @@ static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int 
     }
 }
 
+static AfResult af_editor_interaction_smoke_failure(const AfEditorState *editor, int line) {
+    af_log(AF_LOG_ERROR, "Editor interaction check at line %d failed: %s", line, editor->status);
+    return AF_RESULT_INVALID_ARGUMENT;
+}
+
+static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, int height) {
+    /* Navigation must preserve the pointer anchor and keep dock input local. */
+    const float saved_zoom = editor->zoom;
+    const AfVec2 saved_pan = editor->pan;
+    const float saved_timeline_zoom = editor->timeline_zoom;
+    const float saved_timeline_pan = editor->timeline_pan;
+    const bool saved_profiler = editor->profiler_visible;
+    const SDL_Keymod saved_modifiers = SDL_GetModState();
+    SDL_SetModState(SDL_KMOD_NONE);
+    editor->timeline_focus = false;
+    const SDL_KeyboardEvent node_key = {.key = SDLK_V, .mod = SDL_KMOD_SHIFT, .down = true};
+    af_editor_key(editor, width, height, &node_key);
+    if (editor->active_tool != AF_EDITOR_TOOL_NODE || editor->profiler_visible != saved_profiler)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    const SDL_KeyboardEvent profiler_key = {.key = SDLK_F10, .down = true};
+    af_editor_key(editor, width, height, &profiler_key);
+    if (editor->profiler_visible == saved_profiler || editor->active_tool != AF_EDITOR_TOOL_NODE)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    editor->profiler_visible = saved_profiler;
+    af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_SELECT);
+    SDL_MouseWheelEvent wheel = {.x = 1.0F,
+                                 .mouse_x = editor->left_width + 100.0F,
+                                 .mouse_y = editor->toolbar_height + 100.0F};
+    editor->zoom = 1.0F;
+    const AfVec2 anchor = af_editor_screen_to_project(
+        editor, width, height, (AfVec2){wheel.mouse_x, wheel.mouse_y});
+    af_editor_mouse_wheel(editor, width, height, &wheel);
+    if (editor->zoom != 1.0F || editor->pan.x != saved_pan.x || editor->pan.y != saved_pan.y)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    wheel.x = 0.0F;
+    wheel.y = 0.5F;
+    af_editor_mouse_wheel(editor, width, height, &wheel);
+    af_editor_mouse_wheel(editor, width, height, &wheel);
+    const AfVec2 after = af_editor_screen_to_project(
+        editor, width, height, (AfVec2){wheel.mouse_x, wheel.mouse_y});
+    if (fabsf(editor->zoom - 1.12F) > 0.0001F ||
+        hypotf(after.x - anchor.x, after.y - anchor.y) > 0.001F)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    wheel.y = 1.0F;
+    wheel.direction = SDL_MOUSEWHEEL_FLIPPED;
+    af_editor_mouse_wheel(editor, width, height, &wheel);
+    if (fabsf(editor->zoom - 1.0F) > 0.0001F)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    wheel.mouse_y = af_editor_timeline_top(editor, height) + 90.0F;
+    wheel.mouse_x = (float)width - editor->right_width + 20.0F;
+    af_editor_mouse_wheel(editor, width, height, &wheel);
+    if (editor->timeline_zoom != saved_timeline_zoom || editor->timeline_pan != saved_timeline_pan)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    wheel.mouse_x = af_editor_timeline_ruler_x(editor) + 100.0F;
+    wheel.x = 1.0F;
+    wheel.y = 0.0F;
+    af_editor_mouse_wheel(editor, width, height, &wheel);
+    if (editor->timeline_zoom != saved_timeline_zoom || editor->timeline_pan != saved_timeline_pan)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    editor->zoom = saved_zoom;
+    editor->pan = saved_pan;
+    SDL_SetModState(saved_modifiers);
+    /* Compact controls and clip cycling must use the same geometry as rendering. */
+    const int compact_width = (int)(editor->left_width + editor->right_width + 500.0F);
+    const float compact_right = (float)compact_width - editor->right_width;
+    const float saved_playhead = editor->playhead;
+    const bool saved_playing = editor->preview_playing;
+    const uint64_t saved_clip = editor->selected_clip_id;
+    const bool saved_timeline_focus = editor->timeline_focus;
+    AfProjectClip extra_clip = {.id = editor->project.next_animation_id,
+                                .name = "Compact clip", .duration = 4.0F};
+    if (af_project_add_clip(&editor->project, &extra_clip) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    editor->selected_clip_id = extra_clip.id;
+    SDL_MouseButtonEvent compact_click = {
+        .button = SDL_BUTTON_LEFT, .down = true,
+        .x = editor->left_width + 30.0F * af_editor_timeline_controls_scale(editor, compact_width),
+        .y = af_editor_timeline_top(editor, height) + 20.0F};
+    if (!af_editor_timeline_mouse_down(editor, compact_width, height, &compact_click, SDL_KMOD_NONE) ||
+        editor->preview_playing == saved_playing)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    compact_click.x = compact_right - 40.0F;
+    if (!af_editor_timeline_mouse_down(editor, compact_width, height, &compact_click, SDL_KMOD_NONE) ||
+        editor->selected_clip_id != editor->project.clips[0].id || editor->playhead != 0.0F ||
+        af_project_remove_clip_exact(&editor->project, extra_clip.id) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    editor->selected_clip_id = saved_clip;
+    editor->playhead = saved_playhead;
+    editor->preview_playing = saved_playing;
+    editor->timeline_focus = saved_timeline_focus;
+    const AfVec2 center = af_editor_visible_center(editor, width, height);
+    const AfEditorToolRect rect = {{center.x - 50, center.y - 40}, {100, 80}};
+    if (af_editor_create_primitive_at(editor, AF_NODE_ELLIPSE, rect) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    const uint64_t ellipse = editor->selected_id;
+    const uint32_t original_count = editor->project.scene.count;
+    const SDL_KeyboardEvent duplicate_key = {.key = SDLK_D, .mod = SDL_KMOD_CTRL, .down = true};
+    editor->timeline_focus = false;
+    af_editor_key(editor, width, height, &duplicate_key);
+    if (editor->project.scene.count != original_count + 1U || editor->selected_id == ellipse ||
+        af_editor_history_undo(&editor->history, &editor->project) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_select_only(editor, ellipse);
+    af_scene_find(&editor->project.scene, ellipse)->layer_order = 1000;
+    af_editor_update_preview(editor);
+    const uint32_t cursor = editor->history.cursor;
+    SDL_MouseButtonEvent click = {.button = SDL_BUTTON_LEFT,
+                                  .down = true,
+                                  .clicks = 1,
+                                  .x = (float)width - editor->right_width + 30,
+                                  .y = AF_EDITOR_CONVERT_PATH_Y + 12};
+    af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+    af_editor_mouse_up(editor, width, height);
+    if (af_scene_find(&editor->project.scene, ellipse)->type != AF_NODE_PATH ||
+        editor->active_tool != AF_EDITOR_TOOL_NODE || editor->history.cursor != cursor + 1U)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    if (af_editor_history_undo(&editor->history, &editor->project) != AF_RESULT_SUCCESS ||
+        af_scene_find(&editor->project.scene, ellipse)->type != AF_NODE_ELLIPSE ||
+        af_editor_history_redo(&editor->history, &editor->project) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_SELECT);
+    af_editor_update_preview(editor);
+    const AfVec2 screen =
+        af_affine_transform_point(af_editor_camera(editor, width, height), center);
+    click.x = screen.x;
+    click.y = screen.y;
+    click.clicks = 2;
+    af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+    af_editor_mouse_up(editor, width, height);
+    if (editor->active_tool != AF_EDITOR_TOOL_NODE || editor->selected_id != ellipse)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    AfPathCommand commands[16];
+    const uint32_t count = af_editor_vector_tool_polygon(rect.size, 5, 0.45F, commands, 16);
+    if (af_editor_create_path_geometry_with_shape(editor, rect.position, rect.size, commands, count,
+                                                  af_editor_vector_tool_name(AF_EDITOR_TOOL_STAR),
+                                                  true, 5U, 0.45F) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    const uint64_t star = editor->selected_id;
+    af_editor_update_preview(editor);
+    click.clicks = 1;
+    click.x = (float)width - editor->right_width + 18 + (editor->right_width - 36) * 0.375F;
+    click.y = AF_EDITOR_SHAPE_SETTINGS_Y + 12;
+    af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+    af_editor_mouse_up(editor, width, height);
+    if (af_scene_find(&editor->project.scene, star)->polygon_sides != 6U)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    click.y = AF_EDITOR_CONVERT_PATH_Y + 12;
+    af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+    af_editor_mouse_up(editor, width, height);
+    if (af_scene_find(&editor->project.scene, star)->polygon_sides != 0U ||
+        af_editor_history_undo(&editor->history, &editor->project) != AF_RESULT_SUCCESS ||
+        af_scene_find(&editor->project.scene, star)->polygon_sides != 6U)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_select_only(editor, ellipse);
+    af_editor_selection_add(editor, star);
+    click.x = 30;
+    click.y = 38;
+    af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+    af_editor_mouse_up(editor, width, height);
+    const uint64_t group = editor->selected_id;
+    if (af_scene_find(&editor->project.scene, ellipse)->parent_id != group ||
+        af_scene_find(&editor->project.scene, star)->parent_id != group)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_build_hierarchy(editor);
+    uint32_t first = 0U;
+    while (first < editor->hierarchy_count &&
+           editor->project.scene.nodes[editor->hierarchy_order[first]].id != star)
+        ++first;
+    if (first + 1U >= editor->hierarchy_count)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    editor->hierarchy_scroll = first;
+    const uint32_t reorder_cursor = editor->history.cursor;
+    click.x = 100;
+    click.y = editor->toolbar_height + 18;
+    af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+    SDL_MouseMotionEvent motion = {.x = 100,
+                                   .y = editor->toolbar_height + 8 + AF_EDITOR_ROW_HEIGHT * 1.8F};
+    af_editor_mouse_motion(editor, width, height, &motion);
+    af_editor_mouse_up(editor, width, height);
+    if (editor->history.cursor !=
+            (reorder_cursor < editor->history.capacity ? reorder_cursor + 1U : reorder_cursor) ||
+        af_scene_find(&editor->project.scene, star)->layer_order != 1000 ||
+        af_editor_history_undo(&editor->history, &editor->project) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    const float old_toolbar = editor->toolbar_height;
+    click.x = editor->left_width + 100;
+    click.y = old_toolbar;
+    af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+    motion.x = click.x;
+    motion.y = old_toolbar + 12;
+    af_editor_mouse_motion(editor, width, height, &motion);
+    af_editor_mouse_up(editor, width, height);
+    if (editor->toolbar_height <= old_toolbar)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    editor->toolbar_height = old_toolbar;
+    /* A newly created root can be dropped into the center of an existing group. */
+    if (af_editor_create_primitive_at(editor, AF_NODE_RECTANGLE, rect) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    const uint64_t fresh = editor->selected_id;
+    const uint64_t destination = af_scene_find(&editor->project.scene, star)->parent_id;
+    af_editor_update_preview(editor);
+    const AfVec2 fresh_position =
+        (AfVec2){af_scene_find(&editor->preview_scene, fresh)->world_transform.tx,
+                 af_scene_find(&editor->preview_scene, fresh)->world_transform.ty};
+    AfPlatformWindowMetrics metrics = {0};
+    if (af_platform_window_metrics(&editor->window, &metrics) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_build_hierarchy(editor);
+    for (uint32_t row = 0U; row < editor->hierarchy_count; ++row)
+        if (editor->project.scene.nodes[editor->hierarchy_order[row]].id == fresh)
+            editor->hierarchy_scroll = row;
+    SDL_Event direct = {.button = {.type = SDL_EVENT_MOUSE_BUTTON_DOWN,
+        .button = SDL_BUTTON_LEFT, .down = true, .clicks = 1,
+        .x = 100 / metrics.pixel_scale_x,
+        .y = (editor->toolbar_height + 8 + AF_EDITOR_ROW_HEIGHT * 0.5F) / metrics.pixel_scale_y}};
+    af_editor_handle_event(editor, &direct, width, height);
+    if (!af_editor_can_reorder(&editor->project, fresh, star))
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    for (uint32_t row = 0U; row < editor->hierarchy_count; ++row)
+        if (editor->project.scene.nodes[editor->hierarchy_order[row]].id == star)
+            editor->hierarchy_scroll = row;
+    direct.button.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    direct.button.down = false;
+    direct.button.x = 110 / metrics.pixel_scale_x;
+    direct.button.y = (editor->toolbar_height + 10) / metrics.pixel_scale_y;
+    af_editor_handle_event(editor, &direct, width, height);
+    if (af_scene_find(&editor->project.scene, fresh)->parent_id != destination ||
+        af_project_find_index(&editor->project, fresh) >= af_project_find_index(&editor->project, star) ||
+        af_editor_history_undo(&editor->history, &editor->project) != AF_RESULT_SUCCESS ||
+        af_scene_find(&editor->project.scene, fresh)->parent_id != AF_INVALID_NODE_ID)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    const float drop_offsets[] = {5.0F, AF_EDITOR_ROW_HEIGHT * 0.5F, AF_EDITOR_ROW_HEIGHT - 5.0F};
+    for (uint32_t attempt = 0U; attempt < 3U; ++attempt) {
+        af_editor_build_hierarchy(editor);
+        for (uint32_t row = 0U; row < editor->hierarchy_count; ++row)
+            if (editor->project.scene.nodes[editor->hierarchy_order[row]].id == fresh)
+                editor->hierarchy_scroll = row;
+        SDL_Event event = {
+            .button = {.type = SDL_EVENT_MOUSE_BUTTON_DOWN,
+                       .button = SDL_BUTTON_LEFT,
+                       .down = true,
+                       .clicks = 1,
+                       .x = 100 / metrics.pixel_scale_x,
+                       .y = (editor->toolbar_height + 8 + AF_EDITOR_ROW_HEIGHT * 0.5F) /
+                            metrics.pixel_scale_y}};
+        af_editor_handle_event(editor, &event, width, height);
+        if (editor->drag_mode != AF_EDITOR_DRAG_HIERARCHY)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        /* Start the drag, then release at a different location without another motion. */
+        event = (SDL_Event){.motion = {.type = SDL_EVENT_MOUSE_MOTION,
+                                       .x = 110 / metrics.pixel_scale_x,
+                                       .y = (editor->toolbar_height + 10) / metrics.pixel_scale_y}};
+        af_editor_handle_event(editor, &event, width, height);
+        const uint32_t scroll_before = editor->hierarchy_scroll;
+        af_editor_hierarchy_autoscroll(editor, height,
+                                       editor->hierarchy_scroll_ticks + UINT64_C(80000000));
+        if (scroll_before > 0U && editor->hierarchy_scroll != scroll_before - 1U)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        for (uint32_t row = 0U; row < editor->hierarchy_count; ++row)
+            if (editor->project.scene.nodes[editor->hierarchy_order[row]].id == destination)
+                editor->hierarchy_scroll = row;
+        /* Auxiliary button release must not finish the left-button drag. */
+        event =
+            (SDL_Event){.button = {.type = SDL_EVENT_MOUSE_BUTTON_UP, .button = SDL_BUTTON_RIGHT}};
+        af_editor_handle_event(editor, &event, width, height);
+        if (editor->drag_mode != AF_EDITOR_DRAG_HIERARCHY)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        event = (SDL_Event){.button = {.type = SDL_EVENT_MOUSE_BUTTON_UP,
+                                       .button = SDL_BUTTON_LEFT,
+                                       .x = 110 / metrics.pixel_scale_x,
+                                       .y = (editor->toolbar_height + 8 + drop_offsets[attempt]) /
+                                            metrics.pixel_scale_y}};
+        af_editor_handle_event(editor, &event, width, height);
+        af_editor_update_preview(editor);
+        const AfSceneNode *moved = af_scene_find(&editor->preview_scene, fresh);
+        if (af_scene_find(&editor->project.scene, fresh)->parent_id != destination ||
+            fabsf(moved->world_transform.tx - fresh_position.x) > 0.01F ||
+            fabsf(moved->world_transform.ty - fresh_position.y) > 0.01F ||
+            af_editor_history_undo(&editor->history, &editor->project) != AF_RESULT_SUCCESS ||
+            af_scene_find(&editor->project.scene, fresh)->parent_id != AF_INVALID_NODE_ID)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+    }
+    if (af_editor_history_redo(&editor->history, &editor->project) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    /* Dropping a child onto its current group is accepted without recording an edit. */
+    af_editor_build_hierarchy(editor);
+    for (uint32_t row = 0U; row < editor->hierarchy_count; ++row)
+        if (editor->project.scene.nodes[editor->hierarchy_order[row]].id == fresh)
+            editor->hierarchy_scroll = row;
+    SDL_Event same_parent = {
+        .button = {.type = SDL_EVENT_MOUSE_BUTTON_DOWN,
+                   .button = SDL_BUTTON_LEFT,
+                   .down = true,
+                   .clicks = 1,
+                   .x = 100 / metrics.pixel_scale_x,
+                   .y = (editor->toolbar_height + 8 + AF_EDITOR_ROW_HEIGHT * 0.5F) /
+                        metrics.pixel_scale_y}};
+    af_editor_handle_event(editor, &same_parent, width, height);
+    if (!af_editor_hierarchy_can_drop_inside(editor, destination))
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    for (uint32_t row = 0U; row < editor->hierarchy_count; ++row)
+        if (editor->project.scene.nodes[editor->hierarchy_order[row]].id == destination)
+            editor->hierarchy_scroll = row;
+    const uint32_t no_op_cursor = editor->history.cursor;
+    same_parent.button.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    same_parent.button.down = false;
+    same_parent.button.x = 110 / metrics.pixel_scale_x;
+    af_editor_handle_event(editor, &same_parent, width, height);
+    if (editor->history.cursor != no_op_cursor ||
+        strstr(editor->status, "already inside") == NULL ||
+        af_scene_find(&editor->project.scene, fresh)->parent_id != destination)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_select_only(editor, destination);
+    const uint32_t group_nodes = editor->project.scene.count;
+    const uint32_t group_paths = editor->project.path_data.path_count;
+    if (af_editor_duplicate_selection(editor) != AF_RESULT_SUCCESS ||
+        editor->project.scene.count != group_nodes + 4U ||
+        editor->project.path_data.path_count != group_paths + 2U ||
+        af_editor_history_undo(&editor->history, &editor->project) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    if (af_editor_prepare_image_smoke(editor) != AF_RESULT_SUCCESS ||
+        af_image_build_atlases(&editor->project.image_data) != AF_RESULT_SUCCESS ||
+        af_project_validate(&editor->project) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    for (uint32_t image_index = 0U; image_index < 2U; ++image_index) {
+        const AfImageBinding binding = editor->project.image_data.bindings[image_index];
+        af_editor_select_only(editor, binding.node_id);
+        const uint32_t image_count = editor->project.scene.count;
+        af_editor_execute_menu_action(editor, AF_EDITOR_MENU_ACTION_DUPLICATE, width, height);
+        const uint64_t image_copy = editor->selected_id;
+        const AfImageBinding *copied_binding =
+            af_image_find_binding_const(&editor->project.image_data, image_copy);
+        if (editor->project.scene.count != image_count + 1U || image_copy == binding.node_id ||
+            copied_binding == NULL || copied_binding->asset_id != binding.asset_id ||
+            copied_binding->sequence_id != binding.sequence_id ||
+            af_editor_history_undo(&editor->history, &editor->project) != AF_RESULT_SUCCESS ||
+            af_scene_find(&editor->project.scene, image_copy) != NULL ||
+            af_editor_history_redo(&editor->history, &editor->project) != AF_RESULT_SUCCESS)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+    }
+    af_editor_select_only(editor, star);
+    af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_SELECT);
+    af_editor_update_preview(editor);
+    return af_project_validate(&editor->project);
+}
+
+static AfResult af_editor_knife_smoke(AfEditorState *editor, int width, int height) {
+    const AfPathCommand rectangle[] = {{.type = AF_PATH_MOVE},
+                                       {.type = AF_PATH_LINE, .point = {100.0F, 0.0F}},
+                                       {.type = AF_PATH_LINE, .point = {100.0F, 100.0F}},
+                                       {.type = AF_PATH_LINE, .point = {0.0F, 100.0F}},
+                                       {.type = AF_PATH_CLOSE}};
+    AfPathCommand after[8];
+    AfVec2 position = af_editor_visible_center(editor, width, height);
+    position.x -= 50.0F;
+    position.y -= 50.0F;
+    if (af_editor_create_path_geometry(editor, position, (AfVec2){100.0F, 100.0F}, rectangle, 5U,
+                                       "Knife closing edge", true) != AF_RESULT_SUCCESS) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    const uint64_t selected_id = editor->selected_id;
+    const uint32_t original_selection = editor->selected_path_command;
+    const uint32_t history_count = editor->history.count;
+    const uint32_t history_cursor = editor->history.cursor;
+    const bool snapping = editor->snapping;
+    AfSceneNode *authored = af_scene_find(&editor->project.scene, selected_id);
+    authored->local_transform.rotation = 0.4F;
+    authored->local_transform.scale = (AfVec2){1.3F, 0.8F};
+    authored->local_transform.skew = (AfVec2){0.2F, 0.1F};
+    editor->snapping = false;
+    af_editor_update_preview(editor);
+    const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, selected_id);
+    const AfAffine2 transform =
+        af_affine_multiply(af_editor_camera(editor, width, height), node->world_transform);
+    const AfVec2 start = af_affine_transform_point(transform, (AfVec2){-10.0F, 50.0F});
+    const AfVec2 end = af_affine_transform_point(transform, (AfVec2){110.0F, 50.0F});
+    SDL_MouseButtonEvent click = {
+        .button = SDL_BUTTON_LEFT, .down = true, .clicks = 1U, .x = start.x, .y = start.y};
+    SDL_MouseMotionEvent motion = {
+        .x = end.x, .y = end.y, .xrel = end.x - start.x, .yrel = end.y - start.y};
+    SDL_KeyboardEvent key = {.down = true, .key = SDLK_ESCAPE};
+    af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_KNIFE);
+    af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+    af_editor_mouse_motion(editor, width, height, &motion);
+    if (editor->drag_mode != AF_EDITOR_DRAG_TOOL_CREATE || editor->history.count != history_count) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    af_editor_key(editor, width, height, &key);
+    af_editor_mouse_up(editor, width, height);
+    AfPath *path = af_editor_selected_path(editor);
+    if (path == NULL || path->command_count != 5U || editor->drag_mode != AF_EDITOR_DRAG_NONE ||
+        editor->history.count != history_count || editor->history.cursor != history_cursor ||
+        editor->selected_id != selected_id || editor->selected_path_command != original_selection ||
+        memcmp(&editor->project.path_data.commands[path->command_start], rectangle,
+               sizeof(rectangle)) != 0) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+    af_editor_mouse_motion(editor, width, height, &motion);
+    af_editor_mouse_up(editor, width, height);
+    path = af_editor_selected_path(editor);
+    if (path == NULL || path->command_count != 8U || editor->history.count != history_count + 1U ||
+        editor->history.cursor != history_cursor + 1U || editor->selected_id != selected_id ||
+        editor->selected_path_command != 0U || editor->selected_path_command_count != 1U) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    memcpy(after, &editor->project.path_data.commands[path->command_start], sizeof(after));
+    uint32_t moves = 0U;
+    for (uint32_t index = 0U; index < 8U; ++index) {
+        moves += after[index].type == AF_PATH_MOVE;
+        if (after[index].type == AF_PATH_CLOSE) {
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
+    }
+    if (moves != 2U || fabsf(after[0].point.x - 100.0F) > 0.001F ||
+        fabsf(after[0].point.y - 50.0F) > 0.001F || fabsf(after[4].point.x) > 0.001F ||
+        fabsf(after[4].point.y - 50.0F) > 0.001F) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    key.key = SDLK_Z;
+    key.mod = SDL_KMOD_CTRL;
+    af_editor_key(editor, width, height, &key);
+    path = af_editor_selected_path(editor);
+    if (path == NULL || path->command_count != 5U || editor->history.cursor != history_cursor ||
+        memcmp(&editor->project.path_data.commands[path->command_start], rectangle,
+               sizeof(rectangle)) != 0) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    key.mod = SDL_KMOD_CTRL | SDL_KMOD_SHIFT;
+    af_editor_key(editor, width, height, &key);
+    path = af_editor_selected_path(editor);
+    if (path == NULL || path->command_count != 8U ||
+        editor->history.cursor != history_cursor + 1U ||
+        memcmp(&editor->project.path_data.commands[path->command_start], after, sizeof(after)) !=
+            0) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    /* Indexed point animation must still reject topology changes without touching the history. */
+    editor->selected_property = AF_PROPERTY_PATH_POINT;
+    if (af_editor_add_keyframe(editor) != AF_RESULT_SUCCESS) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    const uint32_t animated_history = editor->history.count;
+    if (af_editor_knife_path(
+            editor, af_affine_transform_point(node->world_transform, (AfVec2){50.0F, -10.0F}),
+            af_affine_transform_point(node->world_transform, (AfVec2){50.0F, 110.0F})) !=
+            AF_RESULT_INVALID_ARGUMENT ||
+        editor->history.count != animated_history ||
+        memcmp(&editor->project.path_data.commands[path->command_start], after, sizeof(after)) !=
+            0) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    editor->snapping = snapping;
+    af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_NODE);
+    af_editor_update_preview(editor);
+    return af_project_validate(&editor->project);
+}
+
+static AfResult af_editor_vector_preview_smoke(AfEditorState *editor, int width, int height) {
+    const uint32_t stage = editor->rendered_frames;
+    const uint32_t scene_count = editor->project.scene.count;
+    const uint32_t path_count = editor->project.path_data.path_count;
+    const uint32_t history_count = editor->history.count;
+    const uint32_t render_count = editor->render_scene.count;
+    const uint32_t capacity = editor->render_scene.capacity;
+    SDL_MouseButtonEvent click = {.button = SDL_BUTTON_LEFT,
+                                  .down = true,
+                                  .clicks = 1U,
+                                  .x = editor->left_width + 300.0F,
+                                  .y = editor->toolbar_height + 90.0F};
+    SDL_MouseMotionEvent motion = {.x = click.x + 220.0F, .y = click.y + 170.0F};
+    if (stage >= 9U) {
+        return AF_RESULT_SUCCESS;
+    }
+    if (stage < 4U) {
+        static const AfEditorVectorTool tools[] = {AF_EDITOR_TOOL_STAR, AF_EDITOR_TOOL_POLYGON,
+                                                   AF_EDITOR_TOOL_ARC, AF_EDITOR_TOOL_SPIRAL};
+        af_editor_cancel_vector_tool(editor, NULL);
+        af_editor_set_vector_tool(editor, tools[stage]);
+        af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+        af_editor_mouse_motion(editor, width, height, &motion);
+    } else if (stage == 4U) {
+        af_editor_cancel_vector_tool(editor, NULL);
+        af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_PEN);
+        af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+        af_editor_mouse_up(editor, width, height);
+        click.x += 200.0F;
+        click.y += 110.0F;
+        af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+        motion.x = click.x + 50.0F;
+        motion.y = click.y - 65.0F;
+        af_editor_mouse_motion(editor, width, height, &motion);
+    } else if (stage == 5U) {
+        af_editor_mouse_up(editor, width, height);
+        motion.x = click.x + 300.0F;
+        motion.y = click.y + 180.0F;
+        af_editor_mouse_motion(editor, width, height, &motion);
+    } else if (stage == 6U) {
+        click.x += 300.0F;
+        click.y += 180.0F;
+        af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+        af_editor_mouse_up(editor, width, height);
+        const AfVec2 first = af_affine_transform_point(af_editor_camera(editor, width, height),
+                                                       editor->tool_commands[0].point);
+        motion.x = first.x + 3.0F;
+        motion.y = first.y + 2.0F;
+        af_editor_mouse_motion(editor, width, height, &motion);
+        if (!af_editor_pen_closes_at(editor, af_editor_camera(editor, width, height),
+                                     editor->mouse_position)) {
+            return AF_RESULT_INVALID_ARGUMENT;
+        }
+    } else if (stage == 7U) {
+        const AfVec2 start = editor->tool_commands[0].point;
+        // Exercise the maximum supported Pen length, including the final live segment.
+        editor->tool_command_count = AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY;
+        for (uint32_t index = 1U; index < editor->tool_command_count; ++index) {
+            const AfVec2 previous = editor->tool_commands[index - 1U].point;
+            const AfVec2 point = {start.x + (float)index * 0.8F,
+                                  start.y + 110.0F + sinf((float)index * 0.025F) * 70.0F};
+            editor->tool_commands[index] =
+                (AfPathCommand){.type = AF_PATH_CUBIC,
+                                .point = point,
+                                .control1 = {previous.x + 0.25F, previous.y - 8.0F},
+                                .control2 = {point.x - 0.25F, point.y + 8.0F}};
+        }
+        editor->tool_pen_has_outgoing = false;
+        editor->drag_mode = AF_EDITOR_DRAG_TOOL_CREATE;
+    } else {
+        const SDL_KeyboardEvent escape = {.key = SDLK_ESCAPE, .down = true};
+        af_editor_key(editor, width, height, &escape);
+    }
+    editor->render_scene.count = 0U;
+    af_editor_render_vector_tool_preview(editor, width, height);
+    const uint32_t preview_count = editor->render_scene.count;
+    const bool valid = editor->render_scene.capacity == capacity &&
+                       preview_count < capacity - AF_EDITOR_UI_RESERVE &&
+                       (stage == 8U ? (preview_count == 0U && editor->tool_command_count == 0U &&
+                                       editor->drag_mode == AF_EDITOR_DRAG_NONE)
+                                    : preview_count >= 10U) &&
+                       editor->project.scene.count == scene_count &&
+                       editor->project.path_data.path_count == path_count &&
+                       editor->history.count == history_count;
+    editor->render_scene.count = render_count;
+    if (!valid) {
+        af_log(AF_LOG_ERROR, "Vector preview smoke stage %u failed (%u preview nodes)", stage,
+               preview_count);
+    }
+    af_editor_status(editor, stage == 8U
+                                 ? "Vector preview smoke: previews and cancellation accepted"
+                                 : "Vector preview smoke: live construction in progress");
+    return valid ? AF_RESULT_SUCCESS : AF_RESULT_INVALID_ARGUMENT;
+}
+
 static void af_editor_parse_arguments(AfEditorState *editor, int argument_count, char **arguments) {
     int index = 1;
     (void)snprintf(editor->project_path, sizeof(editor->project_path), "arcflow_project.afproj");
@@ -2108,6 +2857,13 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->inspector_smoke = true;
         } else if (strcmp(arguments[index], "--vector-tools-smoke") == 0) {
             editor->vector_tools_smoke = true;
+        } else if (strcmp(arguments[index], "--pan-smoke") == 0) {
+            editor->pan_smoke = true;
+            editor->preferences_read_only = true;
+            if (editor->maximum_frames == 0U)
+                editor->maximum_frames = 180U;
+        } else if (strcmp(arguments[index], "--vector-preview-smoke") == 0) {
+            editor->vector_preview_smoke = true;
         } else if (strcmp(arguments[index], "--vfx-smoke") == 0) {
             editor->vfx_smoke = true;
         } else if (strcmp(arguments[index], "--particle-view-smoke") == 0) {
@@ -2148,7 +2904,8 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
                                  : editor->menu_smoke             ? 12U
                                  : editor->tooltip_smoke          ? 2U
                                  : editor->inspector_smoke        ? 8U
-                                 : editor->vector_tools_smoke     ? 7U
+                                 : editor->vector_tools_smoke     ? 8U
+                                 : editor->vector_preview_smoke   ? 9U
                                                                   : 1U;
     } else if (editor->sequence_prefix[0] != '\0' && editor->maximum_frames == 0U) {
         editor->maximum_frames = editor->particle_view_smoke      ? 24U
@@ -2160,14 +2917,16 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
                                  : editor->onboarding_smoke       ? 18U
                                  : editor->menu_smoke             ? 12U
                                  : editor->vfx_smoke              ? AF_EDITOR_PARTICLE_PAGE_COUNT
+                                 : editor->vector_preview_smoke   ? 9U
                                                                   : 60U;
     }
     editor->preferences_read_only =
         editor->output_path[0] != '\0' || editor->sequence_prefix[0] != '\0' ||
         editor->resize_smoke || editor->context_smoke || editor->tooltip_smoke ||
         editor->selection_smoke || editor->outline_smoke || editor->vector_tools_smoke ||
-        editor->vfx_smoke || editor->particle_view_smoke || editor->vector_animation_smoke ||
-        editor->image_smoke || editor->menu_smoke || editor->workflow_smoke ||
-        editor->platform_smoke || editor->release_smoke || editor->onboarding_smoke;
+        editor->vector_preview_smoke || editor->vfx_smoke || editor->particle_view_smoke ||
+        editor->vector_animation_smoke || editor->image_smoke || editor->menu_smoke ||
+        editor->workflow_smoke || editor->platform_smoke || editor->release_smoke ||
+        editor->onboarding_smoke;
     af_editor_derive_package_path(editor);
 }

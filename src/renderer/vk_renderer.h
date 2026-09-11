@@ -10,6 +10,15 @@
 
 typedef struct AfVkRenderer AfVkRenderer;
 
+typedef struct AfVkFrameMetrics {
+    double upload_ms;
+    /* Last completed frame slot; unavailable until its fence and timestamp queries complete. */
+    double gpu_ms;
+    uint32_t path_rebuilds;
+    uint32_t draw_batches;
+    bool gpu_valid;
+} AfVkFrameMetrics;
+
 typedef struct AfVkRenderOptions {
     const AfScene *particle_scene;
     AfAffine2 particle_transform;
@@ -34,5 +43,6 @@ AfResult af_vk_renderer_capture_next(AfVkRenderer *renderer, const char *path);
 void af_vk_renderer_request_resize(AfVkRenderer *renderer);
 bool af_vk_renderer_has_validation_errors(const AfVkRenderer *renderer);
 AfVkVfxMetrics af_vk_renderer_vfx_metrics(const AfVkRenderer *renderer);
+AfVkFrameMetrics af_vk_renderer_frame_metrics(const AfVkRenderer *renderer);
 
 #endif

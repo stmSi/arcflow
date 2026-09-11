@@ -24,7 +24,10 @@ typedef enum AfEditorCommandType {
     AF_EDITOR_COMMAND_DUPLICATE,
     AF_EDITOR_COMMAND_MODIFY,
     AF_EDITOR_COMMAND_ANIMATION,
-    AF_EDITOR_COMMAND_PATH
+    AF_EDITOR_COMMAND_PATH,
+    AF_EDITOR_COMMAND_CONVERT_PATH,
+    AF_EDITOR_COMMAND_GROUP,
+    AF_EDITOR_COMMAND_REORDER
 } AfEditorCommandType;
 
 typedef enum AfEditorMergeKey {
@@ -107,6 +110,18 @@ AfResult af_editor_command_animation(AfEditorMergeKey merge_key, uint64_t target
                                      AfEditorCommand *out_command);
 AfResult af_editor_command_path(AfEditorMergeKey merge_key, uint64_t target_id,
                                 AfEditorCommand *out_command);
+AfResult af_editor_command_convert_path(const AfProject *project, uint64_t node_id,
+                                        AfEditorCommand *out_command);
+AfResult af_editor_command_group(const AfProject *project, const uint64_t *ids, uint32_t count,
+                                 uint64_t group_id, AfEditorCommand *out_command);
+bool af_editor_can_reorder(const AfProject *project, uint64_t node_id, uint64_t target_id);
+AfResult af_editor_command_reorder(AfProject *project, uint64_t node_id, uint64_t target_id,
+                                   bool after, AfEditorCommand *out_command);
+bool af_editor_can_reparent(const AfProject *project, uint64_t node_id, uint64_t parent_id);
+AfResult af_editor_command_reparent(AfProject *project, uint64_t node_id, uint64_t parent_id,
+                                    AfEditorCommand *out_command);
+AfResult af_editor_command_polygon(const AfProject *project, uint64_t node_id, AfVec2 size,
+                                   uint32_t sides, float inset, AfEditorCommand *out_command);
 AfResult af_editor_history_execute(AfEditorHistory *history, AfProject *project,
                                    const AfEditorCommand *command, bool already_applied,
                                    bool allow_merge);

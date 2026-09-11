@@ -3,8 +3,9 @@
 Rectangles, rounded rectangles, and ellipses use an instanced batch of six-vertex
 quads. No primitive is tessellated. Instance records contain a 2D affine transform, bounds, solid
 color, primitive kind, corner radius, inherited opacity, optional centered-outline width, and layer
-order. A visible outline adds one expanded signed-distance instance after its fill. CPU insertion
-sorting preserves layer order before drawing.
+order. A visible outline adds one expanded signed-distance instance after its fill. A stable merge
+sort preserves layer and painter order before drawing; adjacent compatible buffer ranges on the
+same layer are batched, including instanced analytic shapes.
 
 The vertex shader converts local pixel coordinates through the world affine transform into a
 top-left, Y-down orthographic canvas. Canvas dimensions come from the current swapchain extent.

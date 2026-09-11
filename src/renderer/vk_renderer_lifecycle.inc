@@ -52,6 +52,8 @@ void af_vk_renderer_destroy(AfVkRenderer *renderer) {
     }
     if (renderer->device != VK_NULL_HANDLE) {
         (void)vkDeviceWaitIdle(renderer->device);
+        if (renderer->timestamp_pool != VK_NULL_HANDLE)
+            vkDestroyQueryPool(renderer->device, renderer->timestamp_pool, NULL);
         for (index = 0U; index < AF_FRAME_COUNT; ++index) {
             AfVkFrame *frame = &renderer->frames[index];
             if (frame->fence != VK_NULL_HANDLE) {

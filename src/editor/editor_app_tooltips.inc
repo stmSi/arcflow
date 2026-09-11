@@ -51,9 +51,9 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                                      "Expands the dope sheet or curve editor without hiding docks.",
                                  .shortcut = "Drag the horizontal divider"};
     }
-    if (mouse.y >= AF_EDITOR_MENU_HEIGHT && mouse.y < AF_EDITOR_TOOLBAR_HEIGHT &&
-        mouse.x >= editor->left_width) {
-        const float local_x = mouse.x - editor->left_width - 14.0F;
+    if (mouse.y >= AF_EDITOR_MENU_HEIGHT && mouse.y < editor->toolbar_height &&
+        mouse.x >= editor->left_width && mouse.x < center_right) {
+        const float local_x = mouse.x - af_editor_toolbar_origin(editor, width);
         const float tools_width = (float)AF_EDITOR_TOOL_COUNT * 42.0F;
         if (local_x >= 0.0F && local_x < tools_width) {
             const uint32_t tool = (uint32_t)(local_x / 42.0F);
@@ -63,6 +63,7 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                 "Edit path anchors and animated Bézier handles.",
                 "Cut a selected line or curve into two editable contours.",
                 "Remove the clicked segment while preserving the surrounding contours.",
+                "Drag a straight knife through every segment that should be split.",
                 "Drag an editable rectangle directly on the canvas.",
                 "Drag a live rounded rectangle with an editable radius.",
                 "Drag an ellipse; hold Shift for a circle.",
@@ -74,7 +75,7 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                 "Drag an open three-quarter Bézier arc.",
                 "Drag a bounded three-turn editable spiral."};
             static const char *const shortcuts[AF_EDITOR_TOOL_COUNT] = {
-                "V", "F10", "X", "D", "R", "Shift+R", "O", "L", "P", "B", "Y", "A", "C", "I"};
+                "V", "Shift+V", "X", "D", "J", "R", "Shift+R", "O", "L", "P", "B", "Y", "A", "C", "I"};
             if (tool < AF_EDITOR_TOOL_COUNT && local_x < button_x + 38.0F) {
                 return (AfEditorTooltip){
                     .id = 10U + tool,
@@ -250,6 +251,17 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                            "animation tracks; dimensions and layer edit the authored object.",
                 .shortcut = "−/+ step · Shift fine drag · Ctrl coarse drag"};
         }
+        if (af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_CONVERT_PATH_Y,
+                                    editor->right_width - 36.0F, 26.0F)) {
+            return (AfEditorTooltip){
+                .id = UINT64_C(0x20030),
+                .title = "Vector geometry",
+                .summary = "Convert a primitive into editable lines and Bezier points.",
+                .details =
+                    "Conversion keeps the object's transform and style. New stars and polygons "
+                    "keep their shape settings until converted. Ctrl+Z restores the shape.",
+                .shortcut = "Double-click a path to edit its points"};
+        }
         if (af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_STYLE_BAR_Y,
                                     editor->right_width - 36.0F,
                                     AF_EDITOR_INSPECTOR_FIELD_HEIGHT)) {
@@ -356,7 +368,8 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
             .shortcut = "Changes are stored in bounded undo history"};
     }
     if (mouse.y >= timeline_top) {
-        const float local_x = mouse.x - editor->left_width;
+        const float local_x = (mouse.x - editor->left_width) /
+                              af_editor_timeline_controls_scale(editor, width);
         if (mouse.y < timeline_top + 42.0F) {
             if (local_x >= 10.0F && local_x < 56.0F) {
                 return (AfEditorTooltip){
@@ -402,6 +415,14 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                         "creates the next key automatically.",
                     .shortcut = "Shortcut: K"};
             }
+            if (af_editor_timeline_compact_clips(editor, width) &&
+                mouse.x >= center_right - 74.0F && mouse.x < center_right - 6.0F) {
+                return (AfEditorTooltip){.id = UINT64_C(0x30200),
+                                         .title = "Next Animation Clip",
+                                         .summary = "Click to cycle through animation clips.",
+                                         .details = "The compact timeline shows the active clip.",
+                                         .shortcut = "New clip: Alt+C"};
+            }
             for (uint32_t index = 0U; index < editor->project.clip_count && index < 8U; ++index) {
                 const float x = center_right - 74.0F * (float)(index + 1U);
                 if (mouse.x >= x && mouse.x < x + 68.0F) {
@@ -441,7 +462,8 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
         const uint32_t row =
             mouse.y < row_start ? UINT32_MAX : (uint32_t)((mouse.y - row_start) / 27.0F);
         const uint32_t asset_index = editor->asset_scroll + row;
-        if (row < 5U && asset_index < editor->project.image_data.asset_count) {
+        if (row < af_editor_asset_visible_rows(editor) &&
+            asset_index < editor->project.image_data.asset_count) {
             const AfImageAsset *asset = &editor->project.image_data.assets[asset_index];
             return (AfEditorTooltip){
                 .id = UINT64_C(0x4100000000000000) | asset->id,
@@ -453,9 +475,9 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
         }
         return tooltip;
     }
-    if (mouse.x < editor->left_width && mouse.y >= AF_EDITOR_TOOLBAR_HEIGHT + 8.0F) {
+    if (mouse.x < editor->left_width && mouse.y >= editor->toolbar_height + 8.0F) {
         const uint32_t row =
-            (uint32_t)((mouse.y - AF_EDITOR_TOOLBAR_HEIGHT - 8.0F) / AF_EDITOR_ROW_HEIGHT);
+            (uint32_t)((mouse.y - editor->toolbar_height - 8.0F) / AF_EDITOR_ROW_HEIGHT);
         const uint32_t hierarchy_index = editor->hierarchy_scroll + row;
         if (hierarchy_index < editor->hierarchy_count) {
             const uint32_t node_index = editor->hierarchy_order[hierarchy_index];
@@ -463,14 +485,14 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
             return (AfEditorTooltip){
                 .id = UINT64_C(0x4000000000000000) | node->id,
                 .title = editor->project.names[node_index],
-                .summary = "Select this object in the scene hierarchy.",
-                .details = "Shift selects a contiguous range; Ctrl toggles individual objects.",
+                .summary = "Select or drag this object in the scene hierarchy.",
+                .details = "Drop on a group to move inside; insertion lines choose the parent and order.",
                 .shortcut = "Shift range / Ctrl toggle / Right click actions"};
         }
         return tooltip;
     }
     if (editor->selected_count == 1U && mouse.x >= editor->left_width && mouse.x < center_right &&
-        mouse.y >= AF_EDITOR_TOOLBAR_HEIGHT && mouse.y < timeline_top) {
+        mouse.y >= editor->toolbar_height && mouse.y < timeline_top) {
         const AfSceneNode *selected =
             af_scene_find_const(&editor->preview_scene, editor->selected_id);
         AfEditorGizmoGeometry geometry = {0};

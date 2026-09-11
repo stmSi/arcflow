@@ -1,7 +1,7 @@
 # Editable projects
 
 Arcflow editable projects use the `.afproj` extension and a bounded, line-oriented text format.
-The current format is version 12 and starts with `arcflow_project 12`. It declares reference-canvas
+The current format is version 13 and starts with `arcflow_project 13`. It declares reference-canvas
 and stable-ID counters, stores nodes in `node`/`end` blocks, paths in typed `path`/`end_path` blocks,
 and clips, tracks, and keys in typed animation blocks. Earlier supported versions are migrated by
 loading their known fields and applying bounded defaults for fields introduced later. Saving always
@@ -10,6 +10,12 @@ rule and geometry generation. Node transforms store position, rotation, scale, a
 angles. Version 11 and earlier projects load with zero skew. Node and clip names, loop regions, and
 editor-friendly hierarchy data remain in this file. Selection, panel layout, command history, and
 other transient state are not serialized.
+
+Version 13 adds `polygon <sides> <inset>` to node blocks. Zero sides/inset denotes raw geometry;
+3–64 sides retains polygon/star authoring settings, and a positive inset is the inner/outer radius
+ratio of a star (at most 0.95). Generated paths remain stored explicitly, so runtime compilation
+uses ordinary vector geometry. Older projects default to zero and keep their existing path edits.
+Converting a parametric shape to a raw path clears these settings; undo restores them.
 
 The loader accepts unknown optional fields to allow schema migration, while rejecting duplicate or
 missing required fields, unsupported versions, non-finite/out-of-range values, duplicate IDs,

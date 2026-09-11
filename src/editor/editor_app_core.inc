@@ -379,7 +379,8 @@ static AfResult af_editor_compile(AfEditorState *editor) {
 
 static void af_editor_hierarchy_visit(AfEditorState *editor, uint64_t parent_id, uint8_t depth) {
     uint32_t index = 0U;
-    for (index = 0U; index < editor->project.scene.count; ++index) {
+    for (uint32_t sorted = 0U; sorted < editor->project.scene.count; ++sorted) {
+        index = editor->hierarchy_sorted[sorted];
         const AfSceneNode *node = &editor->project.scene.nodes[index];
         if (node->parent_id != parent_id || editor->hierarchy_count >= AF_EDITOR_PROJECT_CAPACITY) {
             continue;
@@ -393,7 +394,60 @@ static void af_editor_hierarchy_visit(AfEditorState *editor, uint64_t parent_id,
     }
 }
 
+typedef struct AfEditorHierarchySort {
+    int32_t layer;
+    uint32_t index;
+} AfEditorHierarchySort;
+
+static int af_editor_hierarchy_compare(const void *a, const void *b) {
+    const AfEditorHierarchySort *first = a, *second = b;
+    if (first->layer != second->layer)
+        return first->layer < second->layer ? -1 : 1;
+    return first->index < second->index ? -1 : first->index != second->index;
+}
+
+static void af_editor_hierarchy_autoscroll(AfEditorState *editor, int height, uint64_t ticks) {
+    const float top = editor->toolbar_height + 8.0F;
+    const float bottom = (float)height - editor->status_height - editor->timeline_height -
+                         (editor->asset_browser_visible ? editor->asset_height : 0.0F);
+    const AfVec2 mouse = editor->mouse_position;
+    if (editor->drag_mode != AF_EDITOR_DRAG_HIERARCHY || !editor->hierarchy_drag_started ||
+        mouse.x < 0 || mouse.x >= editor->left_width || mouse.y < top || mouse.y >= bottom ||
+        bottom <= top || (mouse.y >= top + 4 && mouse.y < bottom - 4)) {
+        editor->hierarchy_scroll_ticks = ticks;
+        return;
+    }
+    if (ticks - editor->hierarchy_scroll_ticks < UINT64_C(80000000))
+        return;
+    editor->hierarchy_scroll_ticks = ticks;
+    const uint32_t rows = (uint32_t)fmaxf(1, floorf((bottom - top) / AF_EDITOR_ROW_HEIGHT));
+    const uint32_t limit = editor->hierarchy_count > rows ? editor->hierarchy_count - rows : 0U;
+    if (mouse.y < top + 4 && editor->hierarchy_scroll > 0U)
+        --editor->hierarchy_scroll;
+    else if (mouse.y >= bottom - 4 && editor->hierarchy_scroll < limit)
+        ++editor->hierarchy_scroll;
+}
+
+static bool af_editor_hierarchy_drop_inside(const AfSceneNode *target, float row_y) {
+    return target->type == AF_NODE_GROUP && row_y >= 4.0F && row_y < AF_EDITOR_ROW_HEIGHT - 4.0F;
+}
+
+static bool af_editor_hierarchy_can_drop_inside(const AfEditorState *editor, uint64_t target_id) {
+    const AfSceneNode *source =
+        af_scene_find_const(&editor->project.scene, editor->hierarchy_drag_id);
+    const AfSceneNode *target = af_scene_find_const(&editor->project.scene, target_id);
+    return source != NULL && target != NULL && target->type == AF_NODE_GROUP &&
+           (source->parent_id == target_id ||
+            af_editor_can_reparent(&editor->project, source->id, target_id));
+}
+
 static void af_editor_build_hierarchy(AfEditorState *editor) {
+    AfEditorHierarchySort sorted[AF_EDITOR_PROJECT_CAPACITY];
+    for (uint32_t i = 0U; i < editor->project.scene.count; ++i)
+        sorted[i] = (AfEditorHierarchySort){editor->project.scene.nodes[i].layer_order, i};
+    qsort(sorted, editor->project.scene.count, sizeof(*sorted), af_editor_hierarchy_compare);
+    for (uint32_t i = 0U; i < editor->project.scene.count; ++i)
+        editor->hierarchy_sorted[i] = sorted[i].index;
     editor->hierarchy_count = 0U;
     af_editor_hierarchy_visit(editor, AF_INVALID_NODE_ID, 0U);
     if (editor->hierarchy_search[0] != '\0') {

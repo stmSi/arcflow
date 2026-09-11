@@ -145,6 +145,19 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
     if (vkWaitForFences(renderer->device, 1U, &frame->fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
         return AF_RESULT_VULKAN_ERROR;
     }
+    renderer->frame_metrics.gpu_valid = false;
+    if (frame->timestamps_pending && renderer->timestamp_pool != VK_NULL_HANDLE) {
+        uint64_t timestamps[2];
+        if (vkGetQueryPoolResults(renderer->device, renderer->timestamp_pool, renderer->frame_index * 2U,
+            2U, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+            const uint64_t mask = renderer->timestamp_valid_bits >= 64U ? UINT64_MAX
+                : (UINT64_C(1) << renderer->timestamp_valid_bits) - 1U;
+            renderer->frame_metrics.gpu_ms = (double)((timestamps[1] - timestamps[0]) & mask) *
+                                             (double)renderer->timestamp_period / 1000000.0;
+            renderer->frame_metrics.gpu_valid = true;
+        }
+        frame->timestamps_pending = false;
+    }
     renderer->image_time = render_options.image_time_override ? render_options.image_time
                                                               : renderer->image_time + delta_time;
     if (!isfinite(renderer->image_time) || renderer->image_time < 0.0F) {
@@ -157,8 +170,11 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
         }
     }
     {
+        const uint64_t upload_start = SDL_GetTicksNS();
+        renderer->frame_metrics.path_rebuilds = 0U;
         const AfResult upload_result = af_vk_upload_scene(
             renderer, scene, &shape_count, &path_vertex_count, &image_vertex_count, &item_count);
+        renderer->frame_metrics.upload_ms = (double)(SDL_GetTicksNS() - upload_start) / 1000000.0;
         if (upload_result != AF_RESULT_SUCCESS) {
             return upload_result;
         }
@@ -187,6 +203,12 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
         vkBeginCommandBuffer(frame->command_buffer, &begin_info) != VK_SUCCESS) {
         return AF_RESULT_VULKAN_ERROR;
     }
+    if (renderer->timestamp_pool != VK_NULL_HANDLE) {
+        vkCmdResetQueryPool(frame->command_buffer, renderer->timestamp_pool, renderer->frame_index * 2U, 2U);
+        vkCmdWriteTimestamp2(frame->command_buffer, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                             renderer->timestamp_pool, renderer->frame_index * 2U);
+    }
+    renderer->frame_metrics.draw_batches = item_count;
     to_render.image = renderer->swapchain_images[image_index];
     if (renderer->sample_count == VK_SAMPLE_COUNT_1_BIT) {
         color_attachment.imageView = renderer->swapchain_views[image_index];
@@ -290,7 +312,7 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
             if (item->type == AF_VK_RENDER_PATH || item->type == AF_VK_RENDER_IMAGE) {
                 vkCmdDraw(frame->command_buffer, item->count, 1U, item->first, 0U);
             } else {
-                vkCmdDraw(frame->command_buffer, 6U, 1U, 0U, item->first);
+                vkCmdDraw(frame->command_buffer, 6U, item->count, 0U, item->first);
             }
         }
         if (!particles_drawn) {
@@ -304,6 +326,9 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
     (void)path_vertex_count;
     (void)image_vertex_count;
     vkCmdEndRendering(frame->command_buffer);
+    if (renderer->timestamp_pool != VK_NULL_HANDLE)
+        vkCmdWriteTimestamp2(frame->command_buffer, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+                             renderer->timestamp_pool, renderer->frame_index * 2U + 1U);
     to_render.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
     to_render.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
     to_render.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -363,6 +388,7 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
     if (vkQueueSubmit2(renderer->graphics_queue, 1U, &submit, frame->fence) != VK_SUCCESS) {
         return AF_RESULT_VULKAN_ERROR;
     }
+    frame->timestamps_pending = renderer->timestamp_pool != VK_NULL_HANDLE;
     frame->color_initialized = true;
     result = vkQueuePresentKHR(renderer->present_queue, &present);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {

@@ -214,12 +214,13 @@ static void af_editor_add_bitmap_text(AfEditorState *editor, float x, float y, c
     }
 }
 
-static void af_editor_finish_text_path(AfEditorState *editor, uint32_t command_start, AfColor color,
-                                       int32_t layer) {
+static void af_editor_finish_text_path(AfEditorState *editor, uint32_t command_start, AfVec2 origin,
+                                       AfColor color, int32_t layer) {
     const uint32_t command_count = editor->render_path_data.command_count - command_start;
     AfSceneNode *node = NULL;
     AfPath *path = NULL;
     uint64_t generation = 0U;
+    uint64_t path_id = 0U;
     if (command_count == 0U || command_count > AF_MAX_PATH_COMMANDS_PER_PATH ||
         editor->render_scene.count >= editor->render_scene.capacity ||
         editor->render_path_data.path_count >= editor->render_path_data.path_capacity) {
@@ -227,22 +228,29 @@ static void af_editor_finish_text_path(AfEditorState *editor, uint32_t command_s
         return;
     }
     node = &editor->render_scene.nodes[editor->render_scene.count++];
-    *node = (AfSceneNode){.id = AF_EDITOR_UI_NODE_ID_BASE + editor->render_scene.count,
-                          .parent_id = AF_INVALID_NODE_ID,
-                          .type = AF_NODE_PATH,
-                          .bounds = {1.0F, 1.0F},
-                          .resolved_bounds = {1.0F, 1.0F},
-                          .fill = color,
-                          .opacity = 1.0F,
-                          .layer_order = layer,
-                          .visible = true,
-                          .world_transform = {.m00 = 1.0F, .m11 = 1.0F},
-                          .world_opacity = 1.0F,
-                          .world_visible = true};
+    *node =
+        (AfSceneNode){.id = AF_EDITOR_UI_NODE_ID_BASE + editor->render_scene.count,
+                      .parent_id = AF_INVALID_NODE_ID,
+                      .type = AF_NODE_PATH,
+                      .bounds = {1.0F, 1.0F},
+                      .resolved_bounds = {1.0F, 1.0F},
+                      .fill = color,
+                      .opacity = 1.0F,
+                      .layer_order = layer,
+                      .visible = true,
+                      .world_transform = {.m00 = 1.0F, .m11 = 1.0F, .tx = origin.x, .ty = origin.y},
+                      .world_opacity = 1.0F,
+                      .world_visible = true};
     generation = af_hash_bytes(&editor->render_path_data.commands[command_start],
                                (size_t)command_count * sizeof(AfPathCommand));
+    /* Screen position and preceding UI nodes must not invalidate tessellated text.
+     * Probe duplicate outlines so each instance still has a unique path record. */
+    path_id = AF_EDITOR_UI_NODE_ID_BASE | (generation & UINT64_C(0x0FFFFFFFFFFFFFFF));
+    while (af_path_find_const(&editor->render_path_data, path_id) != NULL) {
+        path_id = AF_EDITOR_UI_NODE_ID_BASE | ((path_id + 1U) & UINT64_C(0x0FFFFFFFFFFFFFFF));
+    }
     path = &editor->render_path_data.paths[editor->render_path_data.path_count++];
-    *path = (AfPath){.id = node->id,
+    *path = (AfPath){.id = path_id,
                      .node_id = node->id,
                      .command_start = command_start,
                      .command_count = command_count,
@@ -308,7 +316,7 @@ static void af_editor_add_text(AfEditorState *editor, float x, float y, const ch
             break;
         }
         if (batch_glyph_count >= AF_EDITOR_TEXT_GLYPHS_PER_PATH) {
-            af_editor_finish_text_path(editor, command_start, color, layer);
+            af_editor_finish_text_path(editor, command_start, (AfVec2){x, y}, color, layer);
             command_start = editor->render_path_data.command_count;
             batch_glyph_count = 0U;
             available = AF_MAX_PATH_COMMANDS_PER_PATH;
@@ -322,12 +330,11 @@ static void af_editor_add_text(AfEditorState *editor, float x, float y, const ch
             break;
         }
         result = af_text_glyph_outline(
-            editor->text_engine, glyph->font_id, glyph->glyph_id, font_size,
-            (AfVec2){x + glyph->position.x, y + glyph->position.y},
+            editor->text_engine, glyph->font_id, glyph->glyph_id, font_size, glyph->position,
             &editor->render_path_data.commands[editor->render_path_data.command_count], available,
             &written);
         if (result == AF_RESULT_LIMIT_EXCEEDED && batch_commands != 0U) {
-            af_editor_finish_text_path(editor, command_start, color, layer);
+            af_editor_finish_text_path(editor, command_start, (AfVec2){x, y}, color, layer);
             command_start = editor->render_path_data.command_count;
             batch_glyph_count = 0U;
             available =
@@ -335,14 +342,14 @@ static void af_editor_add_text(AfEditorState *editor, float x, float y, const ch
             if (available > AF_MAX_PATH_COMMANDS_PER_PATH) {
                 available = AF_MAX_PATH_COMMANDS_PER_PATH;
             }
-            result = available == 0U
-                         ? AF_RESULT_LIMIT_EXCEEDED
-                         : af_text_glyph_outline(
-                               editor->text_engine, glyph->font_id, glyph->glyph_id, font_size,
-                               (AfVec2){x + glyph->position.x, y + glyph->position.y},
-                               &editor->render_path_data
-                                    .commands[editor->render_path_data.command_count],
-                               available, &written);
+            result =
+                available == 0U
+                    ? AF_RESULT_LIMIT_EXCEEDED
+                    : af_text_glyph_outline(editor->text_engine, glyph->font_id, glyph->glyph_id,
+                                            font_size, glyph->position,
+                                            &editor->render_path_data
+                                                 .commands[editor->render_path_data.command_count],
+                                            available, &written);
         }
         if (result != AF_RESULT_SUCCESS) {
             break;
@@ -352,15 +359,65 @@ static void af_editor_add_text(AfEditorState *editor, float x, float y, const ch
             ++batch_glyph_count;
         }
     }
-    af_editor_finish_text_path(editor, command_start, color, layer);
+    af_editor_finish_text_path(editor, command_start, (AfVec2){x, y}, color, layer);
+}
+
+/* Exercise cache identity across movement, UI insertion, duplicate labels and edits. */
+static AfResult af_editor_text_cache_smoke(AfEditorState *editor) {
+    const uint32_t node_start = editor->render_scene.count;
+    const uint32_t path_start = editor->render_path_data.path_count;
+    const uint32_t command_start = editor->render_path_data.command_count;
+    const AfColor color = {1, 1, 1, 1};
+    AfPath original = {0};
+    bool valid = true;
+    af_editor_add_text(editor, 20, 30, "CACHE", 1, 200, color, 1);
+    if (editor->render_path_data.path_count != path_start + 1U) {
+        valid = false;
+    } else {
+        original = editor->render_path_data.paths[path_start];
+    }
+    editor->render_scene.count = node_start;
+    editor->render_path_data.path_count = path_start;
+    editor->render_path_data.command_count = command_start;
+    af_editor_add_rect(editor, 0, 0, 10, 10, color, 0);
+    af_editor_add_text(editor, -150.25F, 420.5F, "CACHE", 1, 200, (AfColor){0, 1, 0, 1}, 2);
+    if (editor->render_path_data.path_count != path_start + 1U) {
+        valid = false;
+    } else {
+        const AfPath *moved = &editor->render_path_data.paths[path_start];
+        const AfSceneNode *node = &editor->render_scene.nodes[node_start + 1U];
+        valid = valid && original.id == moved->id && original.node_id != moved->node_id &&
+                original.geometry_generation == moved->geometry_generation &&
+                original.command_count == moved->command_count &&
+                node->world_transform.tx == -150.25F && node->world_transform.ty == 420.5F;
+    }
+    af_editor_add_text(editor, 50, 60, "CACHE", 1, 200, color, 1);
+    af_editor_add_text(editor, 50, 60, "EDIT", 1, 200, color, 1);
+    if (editor->render_path_data.path_count != path_start + 3U) {
+        valid = false;
+    } else {
+        const AfPath *duplicate = &editor->render_path_data.paths[path_start + 1U];
+        const AfPath *edited = &editor->render_path_data.paths[path_start + 2U];
+        valid = valid && duplicate->id != original.id &&
+                duplicate->geometry_generation == original.geometry_generation &&
+                edited->id != original.id &&
+                edited->geometry_generation != original.geometry_generation;
+    }
+    editor->render_scene.count = node_start;
+    editor->render_path_data.path_count = path_start;
+    editor->render_path_data.command_count = command_start;
+    if (!valid) {
+        af_log(AF_LOG_ERROR, "Text cache identity smoke failed");
+    }
+    return valid ? AF_RESULT_SUCCESS : AF_RESULT_INVALID_ARGUMENT;
 }
 
 static const AfEditorContextMenuInfo *af_editor_context_info(AfEditorContextMenu menu) {
     static const AfEditorContextMenuInfo menus[] = {
         {0},
         {.title = "SCENE",
-         .items = {"DUPLICATE", "RENAME", "UNPARENT", "DELETE"},
-         .item_count = 4U},
+         .items = {"DUPLICATE", "RENAME", "UNPARENT", "DELETE", "GROUP SELECTION"},
+         .item_count = 5U},
         {.title = "CANVAS",
          .items = {"ADD RECTANGLE", "ADD ROUNDED RECT", "ADD ELLIPSE", "ADD PATH", "TOGGLE GRID",
                    "TOGGLE SNAP"},
@@ -378,16 +435,16 @@ static const AfEditorContextMenuInfo *af_editor_context_info(AfEditorContextMenu
          .item_count = 6U},
         {.title = "RECTANGLE",
          .items = {"DUPLICATE", "RENAME", "MAKE ROUNDED", "FIT TO CANVAS", "TOGGLE PARTICLES",
-                   "BRING FORWARD", "DELETE"},
-         .item_count = 7U},
+                   "BRING FORWARD", "DELETE", "CONVERT TO PATH"},
+         .item_count = 8U},
         {.title = "ROUNDED RECTANGLE",
          .items = {"DUPLICATE", "RENAME", "INCREASE RADIUS", "MAKE RECTANGLE", "TOGGLE PARTICLES",
-                   "BRING FORWARD", "DELETE"},
-         .item_count = 7U},
+                   "BRING FORWARD", "DELETE", "CONVERT TO PATH"},
+         .item_count = 8U},
         {.title = "ELLIPSE",
          .items = {"DUPLICATE", "RENAME", "MAKE CIRCLE", "FIT TO CANVAS", "TOGGLE PARTICLES",
-                   "BRING FORWARD", "DELETE"},
-         .item_count = 7U},
+                   "BRING FORWARD", "DELETE", "CONVERT TO PATH"},
+         .item_count = 8U},
         {.title = "VECTOR PATH",
          .items = {"DUPLICATE", "RENAME", "TOGGLE FILL RULE", "EDIT POINTS", "TOGGLE PARTICLES",
                    "REVERSE CONTOUR", "DELETE"},

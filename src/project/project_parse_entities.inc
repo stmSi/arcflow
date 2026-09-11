@@ -3,6 +3,15 @@ static bool af_project_parse_node_field(const char *line, AfProjectNodeSnapshot 
     const char *value = NULL;
     float values[4] = {0};
     uint64_t integer = 0U;
+    if ((value = af_project_value(line, "polygon")) != NULL) {
+        if (!af_project_set_field(fields, AF_PROJECT_FIELD_POLYGON) ||
+            !af_project_parse_floats(value, values, 2U) || values[0] < 0.0F || values[0] > 64.0F ||
+            floorf(values[0]) != values[0] || values[1] < 0.0F || values[1] > 0.95F)
+            return false;
+        snapshot->node.polygon_sides = (uint32_t)values[0];
+        snapshot->node.polygon_inset = values[1];
+        return true;
+    }
     if ((value = af_project_value(line, "id")) != NULL) {
         return af_project_set_field(fields, AF_PROJECT_FIELD_ID) &&
                af_project_parse_u64(value, &snapshot->node.id);

@@ -2,6 +2,7 @@
 
 #include "animation/animation.h"
 #include "core/file_io.h"
+#include "core/id_index.h"
 #include "core/safe_math.h"
 #include "project/image_import.h"
 
@@ -30,6 +31,7 @@ enum {
     AF_PROJECT_FIELD_LAYER = 1U << 11U,
     AF_PROJECT_FIELD_VISIBLE = 1U << 12U,
     AF_PROJECT_FIELD_SKEW = 1U << 13U,
+    AF_PROJECT_FIELD_POLYGON = 1U << 14U,
     AF_PROJECT_LEGACY_REQUIRED_FIELDS = (1U << 13U) - 1U,
     AF_PROJECT_REQUIRED_FIELDS = (1U << 14U) - 1U
 };

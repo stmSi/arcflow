@@ -137,8 +137,15 @@ AfResult af_animation_sample_track(const AfAnimationData *animation, const AfAni
         }
         return AF_RESULT_SUCCESS;
     }
-    while (left_index + 1U < track->keyframe_count && keys[left_index + 1U].time <= time) {
-        ++left_index;
+    /* Upper bound preserves the last key at duplicate timestamps, including stepped tracks. */
+    uint32_t end = track->keyframe_count;
+    while (left_index + 1U < end) {
+        const uint32_t middle = left_index + (end - left_index) / 2U;
+        if (keys[middle].time <= time) {
+            left_index = middle;
+        } else {
+            end = middle;
+        }
     }
     if (left_index + 1U == track->keyframe_count ||
         keys[left_index].interpolation == AF_INTERPOLATION_STEP) {

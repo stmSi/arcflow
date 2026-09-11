@@ -174,12 +174,22 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
     return menu > AF_EDITOR_MENU_NONE && menu <= AF_EDITOR_MENU_HELP ? &menus[menu] : NULL;
 }
 
+static float af_editor_top_menu_scale(const AfEditorState *editor) {
+    float total = 0.0F;
+    for (AfEditorTopMenu menu = AF_EDITOR_MENU_FILE; menu <= AF_EDITOR_MENU_HELP;
+         menu = (AfEditorTopMenu)(menu + 1)) {
+        total += af_editor_top_menu_info(menu)->width;
+    }
+    return af_editor_clamp(((float)editor->window_width - editor->left_width -
+                            editor->right_width - 16.0F) / total, 0.1F, 1.0F);
+}
+
 static float af_editor_top_menu_x(const AfEditorState *editor, AfEditorTopMenu menu) {
     float x = editor->left_width + 8.0F;
     for (AfEditorTopMenu current = AF_EDITOR_MENU_FILE; current < menu;
          current = (AfEditorTopMenu)(current + 1)) {
         const AfEditorTopMenuInfo *info = af_editor_top_menu_info(current);
-        x += info == NULL ? 0.0F : info->width;
+        x += info == NULL ? 0.0F : info->width * af_editor_top_menu_scale(editor);
     }
     return x;
 }
@@ -1268,16 +1278,17 @@ static void af_editor_render_top_menu(AfEditorState *editor, int width, int heig
          menu = (AfEditorTopMenu)(menu + 1)) {
         const AfEditorTopMenuInfo *info = af_editor_top_menu_info(menu);
         const float x = af_editor_top_menu_x(editor, menu);
+        const float menu_width = info->width * af_editor_top_menu_scale(editor);
         const bool hovered = editor->mouse_position.x >= x &&
-                             editor->mouse_position.x < x + info->width &&
+                             editor->mouse_position.x < x + menu_width &&
                              editor->mouse_position.y < AF_EDITOR_MENU_HEIGHT;
         if (hovered || editor->top_menu == menu) {
-            af_editor_add_rect(editor, x, 0.0F, info->width, AF_EDITOR_MENU_HEIGHT,
+            af_editor_add_rect(editor, x, 0.0F, menu_width, AF_EDITOR_MENU_HEIGHT,
                                editor->top_menu == menu ? (AfColor){0.18F, 0.35F, 0.58F, 1.0F}
                                                         : (AfColor){0.16F, 0.18F, 0.23F, 1.0F},
                                210010);
         }
-        af_editor_add_text(editor, x + 10.0F, 9.0F, info->label, 0.95F, info->width - 16.0F,
+        af_editor_add_text(editor, x + 10.0F, 9.0F, info->label, 0.95F, menu_width - 16.0F,
                            text_color, 210020);
     }
     if (editor->top_menu != AF_EDITOR_MENU_NONE) {
@@ -1317,7 +1328,7 @@ static bool af_editor_top_menu_mouse_down(AfEditorState *editor, int width, int 
              menu = (AfEditorTopMenu)(menu + 1)) {
             const AfEditorTopMenuInfo *info = af_editor_top_menu_info(menu);
             const float menu_x = af_editor_top_menu_x(editor, menu);
-            if (x >= menu_x && x < menu_x + info->width) {
+            if (x >= menu_x && x < menu_x + info->width * af_editor_top_menu_scale(editor)) {
                 editor->top_menu = editor->top_menu == menu ? AF_EDITOR_MENU_NONE : menu;
                 editor->context_menu = AF_EDITOR_CONTEXT_NONE;
                 return true;

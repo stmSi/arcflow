@@ -35,6 +35,9 @@ typedef struct AfSceneNode {
     float corner_radius;
     int32_t layer_order;
     bool visible;
+    /* Authoring metadata; zero sides denotes raw geometry. Runtime uses the stored path. */
+    uint32_t polygon_sides;
+    float polygon_inset;
     AfAffine2 world_transform;
     float world_opacity;
     bool world_visible;

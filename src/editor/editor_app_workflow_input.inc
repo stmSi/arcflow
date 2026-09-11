@@ -199,15 +199,15 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
         const float panel_x =
             (float)width - editor->right_width - AF_EDITOR_WORKFLOW_PANEL_WIDTH - 12.0F;
         if (x >= panel_x && x < panel_x + AF_EDITOR_WORKFLOW_PANEL_WIDTH &&
-            y >= AF_EDITOR_TOOLBAR_HEIGHT + 12.0F &&
-            y < AF_EDITOR_TOOLBAR_HEIGHT + 12.0F + AF_EDITOR_WORKFLOW_PANEL_HEIGHT) {
+            y >= editor->toolbar_height + 12.0F &&
+            y < editor->toolbar_height + 12.0F + AF_EDITOR_WORKFLOW_PANEL_HEIGHT) {
             editor->profiler_visible = false;
             return true;
         }
     }
     if (editor->validation_visible) {
         const float panel_x = editor->left_width + 12.0F;
-        const float panel_y = AF_EDITOR_TOOLBAR_HEIGHT + 12.0F;
+        const float panel_y = editor->toolbar_height + 12.0F;
         if (x >= panel_x && x < panel_x + AF_EDITOR_WORKFLOW_PANEL_WIDTH && y >= panel_y &&
             y < panel_y + 40.0F) {
             editor->validation_visible = false;

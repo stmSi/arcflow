@@ -241,6 +241,11 @@ static void af_editor_load_preferences(AfEditorState *editor, int width, int hei
     editor->left_width = editor->workspace.left_width;
     editor->right_width = editor->workspace.right_width;
     editor->timeline_height = editor->workspace.timeline_height;
+    editor->asset_height = af_editor_clamp(
+        (float)editor->preferences.workspace.docks[AF_EDITOR_DOCK_ASSET_BROWSER].extent_pixels,
+        80.0F,
+        fmaxf(80.0F, (float)height - editor->status_height - editor->timeline_height -
+                         editor->toolbar_height - 56.0F));
     editor->asset_browser_visible |= editor->workspace.assets_visible;
     editor->profiler_visible = editor->workspace.profiling_visible;
     editor->validation_visible = editor->workspace.validation_visible;
@@ -271,6 +276,8 @@ static void af_editor_save_preferences(AfEditorState *editor) {
         (uint32_t)editor->timeline_height;
     editor->preferences.workspace.docks[AF_EDITOR_DOCK_ASSET_BROWSER].visible =
         editor->asset_browser_visible;
+    editor->preferences.workspace.docks[AF_EDITOR_DOCK_ASSET_BROWSER].extent_pixels =
+        (uint32_t)editor->asset_height;
     editor->preferences.workspace.docks[AF_EDITOR_DOCK_PROFILER].visible = editor->profiler_visible;
     editor->preferences.workspace.docks[AF_EDITOR_DOCK_VALIDATION].visible =
         editor->validation_visible;
@@ -710,6 +717,11 @@ static void af_editor_reset_workspace(AfEditorState *editor) {
     editor->left_width = editor->workspace.left_width;
     editor->right_width = editor->workspace.right_width;
     editor->timeline_height = editor->workspace.timeline_height;
+    editor->toolbar_height = 72.0F;
+    editor->status_height = 28.0F;
+    editor->asset_height = 190.0F;
+    editor->timeline_header_width = 190.0F;
+    editor->toolbar_scroll = 0.0F;
     editor->asset_browser_visible = true;
     editor->profiler_visible = false;
     editor->validation_visible = false;

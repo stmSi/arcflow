@@ -9,6 +9,69 @@ static AfVec2 af_editor_visible_center(const AfEditorState *editor, int width, i
         (AfVec2){canvas_x + canvas_width * 0.5F, canvas_y + canvas_height * 0.5F});
 }
 
+static void af_editor_group_selection(AfEditorState *editor) {
+    uint64_t ids[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
+    uint32_t count = 0U;
+    for (uint32_t i = 0U; i < editor->selected_count; ++i) {
+        if (!af_editor_selection_has_selected_ancestor(editor, editor->selected_ids[i]))
+            ids[count++] = editor->selected_ids[i];
+    }
+    if (count == 0U) {
+        af_editor_status(editor, "Select objects to group");
+        return;
+    }
+    uint64_t id = 0U;
+    AfEditorCommand command = {0};
+    AfResult result = af_project_allocate_id(&editor->project, &id);
+    if (result == AF_RESULT_SUCCESS)
+        result = af_editor_command_group(&editor->project, ids, count, id, &command);
+    if (result == AF_RESULT_SUCCESS)
+        result =
+            af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
+    if (result == AF_RESULT_SUCCESS) {
+        af_editor_select_only(editor, id);
+        af_editor_mark_dirty(editor);
+        af_editor_status(editor, "Objects grouped · Ctrl+Z to undo");
+    } else {
+        af_editor_status(editor, "Group up to 63 objects that share the same parent");
+    }
+}
+
+static void af_editor_convert_selected_to_path(AfEditorState *editor) {
+    const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
+    if (editor->selected_count != 1U || node == NULL) {
+        af_editor_status(editor, "Select one shape to convert to a path");
+        return;
+    }
+    if (node->type != AF_NODE_PATH || node->polygon_sides != 0U) {
+        for (uint32_t index = 0U; index < editor->project.track_count; ++index) {
+            const AfProjectTrack *track = &editor->project.tracks[index];
+            if (track->node_id == node->id && track->property == AF_PROPERTY_CORNER_RADIUS) {
+                af_editor_status(editor,
+                                 "Remove corner-radius animation before converting to a path");
+                return;
+            }
+        }
+        AfEditorCommand command = {0};
+        AfResult result = af_editor_command_convert_path(&editor->project, node->id, &command);
+        if (result == AF_RESULT_SUCCESS) {
+            result = af_editor_history_execute(&editor->history, &editor->project, &command, false,
+                                               false);
+        }
+        if (result != AF_RESULT_SUCCESS) {
+            af_editor_status(editor, "Could not convert this shape to a path");
+            return;
+        }
+        af_editor_mark_dirty(editor);
+    }
+    af_editor_cancel_vector_tool(editor, NULL);
+    editor->active_tool = AF_EDITOR_TOOL_NODE;
+    editor->selected_path_command = 0U;
+    af_editor_path_selection_only(editor, 0U);
+    af_editor_status(editor,
+                     "Vector points ready · drag points or handles · undo restores the shape");
+}
+
 static AfVec2 af_editor_tool_snap_point(const AfEditorState *editor, AfVec2 point) {
     if (editor->snapping && editor->grid_step > 0.0001F) {
         point.x = roundf(point.x / editor->grid_step) * editor->grid_step;
@@ -49,7 +112,9 @@ static void af_editor_set_vector_tool(AfEditorState *editor, AfEditorVectorTool 
                                      ? "click a selected path segment to cut it"
                                      : (tool == AF_EDITOR_TOOL_SEGMENT_DELETE
                                             ? "click a selected path segment to remove it"
-                                            : "select and transform objects"))));
+                                            : (tool == AF_EDITOR_TOOL_KNIFE
+                                                   ? "drag across selected path segments"
+                                                   : "select and transform objects")))));
     af_editor_status(editor, status);
 }
 
@@ -92,10 +157,9 @@ static AfResult af_editor_create_primitive_at(AfEditorState *editor, AfNodeType 
     return result;
 }
 
-static AfResult af_editor_create_path_geometry(AfEditorState *editor, AfVec2 position, AfVec2 size,
-                                               const AfPathCommand *commands,
-                                               uint32_t command_count, const char *name,
-                                               bool closed) {
+static AfResult af_editor_create_path_geometry_with_shape(
+    AfEditorState *editor, AfVec2 position, AfVec2 size, const AfPathCommand *commands,
+    uint32_t command_count, const char *name, bool closed, uint32_t sides, float inset) {
     AfProjectNodeSnapshot snapshot = {0};
     AfEditorCommand command = {0};
     uint64_t id = 0U;
@@ -111,6 +175,8 @@ static AfResult af_editor_create_path_geometry(AfEditorState *editor, AfVec2 pos
     snapshot = (AfProjectNodeSnapshot){.node = af_editor_default_node(AF_NODE_PATH, id, position),
                                        .index = editor->project.scene.count};
     snapshot.node.bounds = size;
+    snapshot.node.polygon_sides = sides;
+    snapshot.node.polygon_inset = inset;
     snapshot.node.fill =
         closed ? (AfColor){0.58F, 0.34F, 0.94F, 1.0F} : (AfColor){0.25F, 0.72F, 1.0F, 0.0F};
     snapshot.style = af_style_default(id, id, snapshot.node.fill);
@@ -152,6 +218,14 @@ static AfResult af_editor_create_path_geometry(AfEditorState *editor, AfVec2 pos
         af_editor_status(editor, "Editable path drawn · nodes and handles can be animated");
     }
     return result;
+}
+
+static AfResult af_editor_create_path_geometry(AfEditorState *editor, AfVec2 position, AfVec2 size,
+                                               const AfPathCommand *commands,
+                                               uint32_t command_count, const char *name,
+                                               bool closed) {
+    return af_editor_create_path_geometry_with_shape(editor, position, size, commands,
+                                                     command_count, name, closed, 0U, 0.0F);
 }
 
 static AfResult af_editor_create_path_points(AfEditorState *editor, const AfVec2 *points,
@@ -238,6 +312,16 @@ static AfVec2 af_editor_tool_line_end(AfVec2 start, AfVec2 end, SDL_Keymod modif
     return end;
 }
 
+static bool af_editor_pen_closes_at(const AfEditorState *editor, AfAffine2 camera, AfVec2 screen) {
+    if (editor->tool_command_count < 3U) {
+        return false;
+    }
+    const AfVec2 first = af_affine_transform_point(camera, editor->tool_commands[0].point);
+    const float dx = screen.x - first.x;
+    const float dy = screen.y - first.y;
+    return dx * dx + dy * dy <= 100.0F;
+}
+
 static bool af_editor_vector_tool_mouse_down(AfEditorState *editor, int width, int height,
                                              const SDL_MouseButtonEvent *event) {
     const AfVec2 raw_point =
@@ -249,14 +333,8 @@ static bool af_editor_vector_tool_mouse_down(AfEditorState *editor, int width, i
         return false;
     }
     if (editor->active_tool == AF_EDITOR_TOOL_PEN) {
-        bool close_path = false;
-        if (editor->tool_command_count >= 3U) {
-            const AfVec2 first_screen = af_affine_transform_point(
-                af_editor_camera(editor, width, height), editor->tool_commands[0].point);
-            const float dx = event->x - first_screen.x;
-            const float dy = event->y - first_screen.y;
-            close_path = dx * dx + dy * dy <= 100.0F;
-        }
+        const bool close_path = af_editor_pen_closes_at(
+            editor, af_editor_camera(editor, width, height), (AfVec2){event->x, event->y});
         if (close_path) {
             (void)af_editor_create_path_commands(editor, editor->tool_commands,
                                                  editor->tool_command_count, true, "Pen");
@@ -358,6 +436,10 @@ static void af_editor_finish_vector_tool_drag(AfEditorState *editor) {
     AfEditorToolRect rect = {0};
     AfPathCommand commands[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U];
     uint32_t command_count = 0U;
+    if (editor->active_tool == AF_EDITOR_TOOL_KNIFE) {
+        (void)af_editor_knife_path(editor, editor->tool_start, editor->tool_current);
+        return;
+    }
     if (editor->active_tool == AF_EDITOR_TOOL_PEN) {
         return;
     }
@@ -420,9 +502,13 @@ static void af_editor_finish_vector_tool_drag(AfEditorState *editor) {
     if (command_count >= 2U) {
         const bool closed = editor->active_tool == AF_EDITOR_TOOL_POLYGON ||
                             editor->active_tool == AF_EDITOR_TOOL_STAR;
-        (void)af_editor_create_path_geometry(
+        (void)af_editor_create_path_geometry_with_shape(
             editor, rect.position, rect.size, commands, command_count,
-            af_editor_vector_tool_name(editor->active_tool), closed);
+            af_editor_vector_tool_name(editor->active_tool), closed,
+            editor->active_tool == AF_EDITOR_TOOL_STAR      ? 5U
+            : editor->active_tool == AF_EDITOR_TOOL_POLYGON ? 6U
+                                                            : 0U,
+            editor->active_tool == AF_EDITOR_TOOL_STAR ? 0.45F : 0.0F);
     }
 }
 
@@ -490,6 +576,11 @@ static bool af_editor_selected_path_has_animation(const AfEditorState *editor) {
 }
 
 static bool af_editor_require_static_path_topology(AfEditorState *editor) {
+    const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
+    if (node != NULL && node->polygon_sides != 0U) {
+        af_editor_status(editor, "Convert this shape to a path before editing vector points");
+        return false;
+    }
     if (!af_editor_selected_path_has_animation(editor)) {
         return true;
     }
@@ -621,6 +712,11 @@ static AfResult af_editor_apply_path_edit(AfEditorState *editor, const AfPathCom
     AfResult result = AF_RESULT_NOT_FOUND;
     if (path == NULL || new_commands == NULL || new_command_count == 0U) {
         return result;
+    }
+    const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
+    if (node != NULL && node->polygon_sides != 0U) {
+        af_editor_status(editor, "Convert this shape to a path before editing vector points");
+        return AF_RESULT_INVALID_ARGUMENT;
     }
     if (path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS ||
         new_command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS) {
@@ -1042,6 +1138,41 @@ static AfResult af_editor_remove_path_segment(AfEditorState *editor, uint32_t se
     return AF_RESULT_INVALID_ARGUMENT;
 }
 
+static AfResult af_editor_knife_path(AfEditorState *editor, AfVec2 project_start,
+                                     AfVec2 project_end) {
+    const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
+    AfPath *path = af_editor_selected_path(editor);
+    AfPathCommand cut[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    AfEditorKnifeResult knife = {0};
+    AfAffine2 inverse = {0};
+    if (!af_editor_require_static_path_topology(editor) || node == NULL || path == NULL ||
+        !af_affine_inverse(node->world_transform, &inverse)) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    AfResult result = af_editor_vector_tool_knife(
+        &editor->project.path_data.commands[path->command_start], path->command_count,
+        af_affine_transform_point(inverse, project_start),
+        af_affine_transform_point(inverse, project_end), cut, AF_EDITOR_COMMAND_MAX_PATH_COMMANDS,
+        &knife);
+    if (result != AF_RESULT_SUCCESS) {
+        af_editor_status(editor, result == AF_RESULT_NOT_FOUND
+                                     ? "Knife did not cross a segment away from its endpoints"
+                                     : (result == AF_RESULT_LIMIT_EXCEEDED
+                                            ? "Knife cuts exceed bounded path capacity"
+                                            : "Drag a longer knife line across the selected path"));
+        return result;
+    }
+    char status[64];
+    (void)snprintf(status, sizeof(status), "%u knife cut%s applied", knife.cut_count,
+                   knife.cut_count == 1U ? "" : "s");
+    result = af_editor_apply_path_edit(editor, cut, knife.command_count, path->fill_rule, status);
+    if (result == AF_RESULT_SUCCESS) {
+        editor->selected_path_command = knife.first_cut_command;
+        af_editor_path_selection_only(editor, editor->selected_path_command);
+    }
+    return result;
+}
+
 static AfResult af_editor_delete_path_point(AfEditorState *editor) {
     AfPath *path = af_editor_selected_path(editor);
     AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
@@ -1452,6 +1583,9 @@ static AfResult af_editor_duplicate_selection(AfEditorState *editor) {
         copies[index].style.id = new_ids[index];
         copies[index].style.node_id = new_ids[index];
         copies[index].layout.node_id = new_ids[index];
+        if (copies[index].has_image_binding) {
+            copies[index].image_binding.node_id = new_ids[index];
+        }
         copies[index].index = editor->project.scene.count + index;
         bool is_root = false;
         for (uint32_t root_index = 0U; root_index < root_count; ++root_index) {
@@ -1527,7 +1661,19 @@ static AfResult af_editor_duplicate_selection(AfEditorState *editor) {
                 ? 0U
                 : UINT32_MAX;
         af_editor_mark_dirty(editor);
+        af_editor_build_hierarchy(editor);
+        for (uint32_t row = 0U; row < editor->hierarchy_count; ++row) {
+            if (editor->project.scene.nodes[editor->hierarchy_order[row]].id ==
+                editor->selected_id) {
+                editor->hierarchy_scroll = row;
+                break;
+            }
+        }
         af_editor_status(editor, root_count == 1U ? "Object duplicated" : "Objects duplicated");
+    } else {
+        char message[128];
+        (void)snprintf(message, sizeof(message), "Duplicate failed: %s", af_result_string(result));
+        af_editor_status(editor, message);
     }
     return result;
 }

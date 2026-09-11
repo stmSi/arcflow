@@ -4,6 +4,7 @@
 #include "core/hash.h"
 #include "core/log.h"
 #include "core/png.h"
+#include "renderer/render_items.h"
 #include "renderer/vk_particles.h"
 
 #include <SDL3/SDL_vulkan.h>
@@ -42,6 +43,7 @@ typedef struct AfVkFrame {
     uint8_t *capture_mapping;
     VkDeviceSize capture_size;
     bool color_initialized;
+    bool timestamps_pending;
 } AfVkFrame;
 
 typedef struct AfGpuShape {
@@ -88,20 +90,6 @@ typedef struct AfVkStrokeCache {
     uint64_t seen_serial;
 } AfVkStrokeCache;
 
-typedef enum AfVkRenderItemType {
-    AF_VK_RENDER_ANALYTIC = 0,
-    AF_VK_RENDER_PATH,
-    AF_VK_RENDER_IMAGE
-} AfVkRenderItemType;
-
-typedef struct AfVkRenderItem {
-    AfVkRenderItemType type;
-    int32_t layer_order;
-    uint32_t first;
-    uint32_t count;
-    uint32_t atlas_index;
-} AfVkRenderItem;
-
 typedef struct AfVkImageAtlasResource {
     VkImage image;
     VkDeviceMemory memory;
@@ -109,6 +97,10 @@ typedef struct AfVkImageAtlasResource {
 } AfVkImageAtlasResource;
 
 struct AfVkRenderer {
+    AfVkFrameMetrics frame_metrics;
+    VkQueryPool timestamp_pool;
+    float timestamp_period;
+    uint32_t timestamp_valid_bits;
     AfPlatformWindow *platform;
     VkInstance instance;
     VkDebugUtilsMessengerEXT debug_messenger;
@@ -157,6 +149,7 @@ struct AfVkRenderer {
     uint32_t cached_stroke_vertex_count;
     uint64_t path_cache_serial;
     AfVkRenderItem render_items[AF_MAX_RENDER_ITEMS];
+    AfVkRenderItem render_item_scratch[AF_MAX_RENDER_ITEMS];
     bool resize_requested;
     bool validation_enabled;
     bool validation_error;
@@ -187,3 +180,7 @@ static float af_vk_srgb_to_linear_component(float component) {
 #include "renderer/vk_renderer_upload.inc"
 #include "renderer/vk_renderer_draw.inc"
 // clang-format on
+
+AfVkFrameMetrics af_vk_renderer_frame_metrics(const AfVkRenderer *renderer) {
+    return renderer == NULL ? (AfVkFrameMetrics){0} : renderer->frame_metrics;
+}

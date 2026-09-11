@@ -140,35 +140,111 @@ static void af_editor_render_canvas_box(AfEditorState *editor) {
                        90040);
 }
 
+static AfVec2 af_editor_preview_cubic_point(AfVec2 start, const AfPathCommand *command, float t) {
+    const float inverse = 1.0F - t;
+    const float inverse_squared = inverse * inverse;
+    const float t_squared = t * t;
+    return (AfVec2){
+        inverse_squared * inverse * start.x + 3.0F * inverse_squared * t * command->control1.x +
+            3.0F * inverse * t_squared * command->control2.x + t_squared * t * command->point.x,
+        inverse_squared * inverse * start.y + 3.0F * inverse_squared * t * command->control1.y +
+            3.0F * inverse * t_squared * command->control2.y + t_squared * t * command->point.y};
+}
+
+static void af_editor_render_preview_segment(AfEditorState *editor, AfAffine2 camera, AfVec2 start,
+                                             const AfPathCommand *command, uint32_t samples,
+                                             float thickness, AfColor color, int32_t layer) {
+    if (command->type != AF_PATH_CUBIC) {
+        af_editor_add_line(editor, af_affine_transform_point(camera, start),
+                           af_affine_transform_point(camera, command->point), thickness, color,
+                           layer);
+        return;
+    }
+    AfVec2 previous = af_affine_transform_point(camera, start);
+    for (uint32_t sample = 1U; sample <= samples; ++sample) {
+        const AfVec2 point = af_affine_transform_point(
+            camera, af_editor_preview_cubic_point(start, command, (float)sample / (float)samples));
+        af_editor_add_line(editor, previous, point, thickness, color, layer);
+        previous = point;
+    }
+}
+
+static void af_editor_render_preview_commands(AfEditorState *editor, AfAffine2 camera,
+                                              AfVec2 origin, const AfPathCommand *commands,
+                                              uint32_t command_count, AfColor color) {
+    AfVec2 previous = {0};
+    AfVec2 contour_start = {0};
+    bool have_previous = false;
+    for (uint32_t index = 0U; index < command_count; ++index) {
+        AfPathCommand current = commands[index];
+        current.point.x += origin.x;
+        current.point.y += origin.y;
+        current.control1.x += origin.x;
+        current.control1.y += origin.y;
+        current.control2.x += origin.x;
+        current.control2.y += origin.y;
+        if (current.type == AF_PATH_MOVE) {
+            previous = current.point;
+            contour_start = current.point;
+            have_previous = true;
+        } else if (current.type == AF_PATH_LINE && have_previous) {
+            af_editor_add_line(editor, af_affine_transform_point(camera, previous),
+                               af_affine_transform_point(camera, current.point), 2.5F, color,
+                               90072);
+            previous = current.point;
+        } else if (current.type == AF_PATH_CUBIC && have_previous) {
+            af_editor_render_preview_segment(editor, camera, previous, &current, 20U, 2.5F, color,
+                                             90072);
+            previous = current.point;
+        } else if (current.type == AF_PATH_CLOSE && have_previous) {
+            af_editor_add_line(editor, af_affine_transform_point(camera, previous),
+                               af_affine_transform_point(camera, contour_start), 2.5F, color,
+                               90072);
+            have_previous = false;
+        }
+        if (current.type != AF_PATH_CLOSE) {
+            const AfVec2 point = af_affine_transform_point(camera, current.point);
+            af_editor_add_rect(editor, point.x - 2.5F, point.y - 2.5F, 5.0F, 5.0F, color, 90074);
+        }
+    }
+}
+
 static void af_editor_render_vector_tool_preview(AfEditorState *editor, int width, int height) {
     const AfAffine2 camera = af_editor_camera(editor, width, height);
     const AfColor line = {0.35F, 0.84F, 1.0F, 1.0F};
     const AfColor fill = {0.25F, 0.7F, 1.0F, 0.22F};
     if (editor->active_tool == AF_EDITOR_TOOL_PEN && editor->tool_command_count != 0U) {
-        for (uint32_t index = 1U; index < editor->tool_command_count; ++index) {
-            const AfPathCommand *command = &editor->tool_commands[index];
-            const AfVec2 previous =
-                af_affine_transform_point(camera, editor->tool_commands[index - 1U].point);
-            const AfVec2 point = af_affine_transform_point(camera, command->point);
-            af_editor_add_line(editor, previous, point, 2.0F, line, 90070);
-            if (command->type == AF_PATH_CUBIC) {
-                const AfVec2 first = af_affine_transform_point(camera, command->control1);
-                const AfVec2 second = af_affine_transform_point(camera, command->control2);
-                af_editor_add_line(editor, previous, first, 1.2F,
-                                   (AfColor){0.58F, 0.7F, 0.9F, 0.9F}, 90072);
-                af_editor_add_line(editor, second, point, 1.2F, (AfColor){0.58F, 0.7F, 0.9F, 0.9F},
-                                   90072);
-                af_editor_add_rect(editor, first.x - 3.0F, first.y - 3.0F, 6.0F, 6.0F, line, 90074);
-                af_editor_add_rect(editor, second.x - 3.0F, second.y - 3.0F, 6.0F, 6.0F, line,
-                                   90074);
-            }
+        const uint32_t capacity = editor->render_scene.capacity;
+        const uint32_t available = capacity - editor->render_scene.count;
+        if (available <= AF_EDITOR_UI_RESERVE) {
+            return;
         }
+        const uint32_t budget = available - AF_EDITOR_UI_RESERVE;
+        const uint32_t overhead = editor->tool_command_count + 32U;
+        const uint32_t segments =
+            editor->tool_command_count > 1U ? editor->tool_command_count - 1U : 1U;
+        const uint32_t samples = (uint32_t)af_editor_clamp(
+            budget > overhead ? (float)((budget - overhead) / segments) : 1.0F, 1.0F, 20.0F);
+        const bool closing = editor->drag_mode != AF_EDITOR_DRAG_TOOL_CREATE &&
+                             af_editor_pen_closes_at(editor, camera, editor->mouse_position);
+        // Leave room for the inspector, timeline and menus even for a long Pen path.
+        editor->render_scene.capacity = capacity - AF_EDITOR_UI_RESERVE;
         if (editor->drag_mode != AF_EDITOR_DRAG_TOOL_CREATE) {
-            af_editor_add_line(
-                editor,
-                af_affine_transform_point(
-                    camera, editor->tool_commands[editor->tool_command_count - 1U].point),
-                editor->mouse_position, 1.5F, (AfColor){0.5F, 0.75F, 0.9F, 0.8F}, 90070);
+            const AfVec2 anchor = editor->tool_commands[editor->tool_command_count - 1U].point;
+            const AfVec2 target =
+                closing ? editor->tool_commands[0].point
+                        : af_editor_tool_snap_point(
+                              editor, af_editor_screen_to_project(editor, width, height,
+                                                                  editor->mouse_position));
+            const AfPathCommand next = {
+                .type = !closing && editor->tool_pen_has_outgoing ? AF_PATH_CUBIC : AF_PATH_LINE,
+                .point = target,
+                .control1 = editor->tool_pen_outgoing,
+                .control2 = target};
+            af_editor_render_preview_segment(editor, camera, anchor, &next, 20U, 2.0F,
+                                             closing ? (AfColor){1.0F, 0.74F, 0.2F, 1.0F}
+                                                     : (AfColor){0.5F, 0.75F, 0.9F, 0.9F},
+                                             90070);
         }
         if (editor->tool_pen_has_outgoing) {
             const AfVec2 anchor = af_affine_transform_point(
@@ -179,12 +255,36 @@ static void af_editor_render_vector_tool_preview(AfEditorState *editor, int widt
             af_editor_add_rect(editor, outgoing.x - 3.0F, outgoing.y - 3.0F, 6.0F, 6.0F,
                                (AfColor){0.72F, 0.54F, 1.0F, 1.0F}, 90074);
         }
-        for (uint32_t index = 0U; index < editor->tool_command_count; ++index) {
+        for (uint32_t cursor = editor->tool_command_count; cursor > 0U; --cursor) {
+            const uint32_t index = cursor - 1U;
             const AfVec2 point =
                 af_affine_transform_point(camera, editor->tool_commands[index].point);
-            af_editor_add_rect(editor, point.x - 4.0F, point.y - 4.0F, 8.0F, 8.0F,
+            const float size = index == 0U && closing ? 12.0F : 8.0F;
+            af_editor_add_rect(editor, point.x - size * 0.5F, point.y - size * 0.5F, size, size,
                                index == 0U ? (AfColor){1.0F, 0.74F, 0.2F, 1.0F} : line, 90075);
         }
+        for (uint32_t cursor = editor->tool_command_count; cursor > 1U; --cursor) {
+            const uint32_t index = cursor - 1U;
+            const AfPathCommand *command = &editor->tool_commands[index];
+            const AfVec2 previous =
+                af_affine_transform_point(camera, editor->tool_commands[index - 1U].point);
+            const AfVec2 point = af_affine_transform_point(camera, command->point);
+            if (command->type == AF_PATH_CUBIC && index + 1U == editor->tool_command_count) {
+                const AfVec2 first = af_affine_transform_point(camera, command->control1);
+                const AfVec2 second = af_affine_transform_point(camera, command->control2);
+                af_editor_add_line(editor, previous, first, 1.2F,
+                                   (AfColor){0.58F, 0.7F, 0.9F, 0.9F}, 90072);
+                af_editor_add_line(editor, second, point, 1.2F, (AfColor){0.58F, 0.7F, 0.9F, 0.9F},
+                                   90072);
+                af_editor_add_rect(editor, first.x - 3.0F, first.y - 3.0F, 6.0F, 6.0F, line, 90074);
+                af_editor_add_rect(editor, second.x - 3.0F, second.y - 3.0F, 6.0F, 6.0F, line,
+                                   90074);
+            }
+            af_editor_render_preview_segment(editor, camera,
+                                             editor->tool_commands[index - 1U].point, command,
+                                             samples, 2.0F, line, 90070);
+        }
+        editor->render_scene.capacity = capacity;
         return;
     }
     if (editor->drag_mode != AF_EDITOR_DRAG_TOOL_CREATE) {
@@ -203,6 +303,70 @@ static void af_editor_render_vector_tool_preview(AfEditorState *editor, int widt
             af_editor_tool_line_end(editor->tool_start, editor->tool_current, SDL_GetModState());
         af_editor_add_line(editor, af_affine_transform_point(camera, editor->tool_start),
                            af_affine_transform_point(camera, end), 3.0F, line, 90070);
+        return;
+    }
+    if (editor->active_tool == AF_EDITOR_TOOL_KNIFE) {
+        const uint32_t capacity = editor->render_scene.capacity;
+        if (capacity - editor->render_scene.count <= AF_EDITOR_UI_RESERVE)
+            return;
+        editor->render_scene.capacity = capacity - AF_EDITOR_UI_RESERVE;
+        const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
+        const AfPath *path =
+            af_path_find_node_const(&editor->project.path_data, editor->selected_id);
+        AfAffine2 inverse = {0};
+        AfEditorKnifeResult cut = {0};
+        AfPathCommand commands[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY];
+        const bool animated = af_editor_selected_path_has_animation(editor);
+        if (!animated && node != NULL && node->polygon_sides == 0U && path != NULL &&
+            af_affine_inverse(node->world_transform, &inverse) &&
+            af_editor_vector_tool_knife(
+                &editor->project.path_data.commands[path->command_start], path->command_count,
+                af_affine_transform_point(inverse, editor->tool_start),
+                af_affine_transform_point(inverse, editor->tool_current), commands,
+                AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY, &cut) == AF_RESULT_SUCCESS) {
+            const AfAffine2 transform = af_affine_multiply(camera, node->world_transform);
+            for (uint32_t index = 0U; index < cut.cut_count && index < 64U; ++index) {
+                const uint32_t source = cut.source_commands[index];
+                AfPathCommand segment =
+                    editor->project.path_data.commands[path->command_start + source];
+                if (segment.type == AF_PATH_CLOSE) {
+                    uint32_t contour = source;
+                    while (contour > 0U &&
+                           editor->project.path_data.commands[path->command_start + contour].type !=
+                               AF_PATH_MOVE) {
+                        --contour;
+                    }
+                    segment.type = AF_PATH_LINE;
+                    segment.point =
+                        editor->project.path_data.commands[path->command_start + contour].point;
+                }
+                af_editor_render_preview_segment(
+                    editor, transform,
+                    editor->project.path_data.commands[path->command_start + source - 1U].point,
+                    &segment, 24U, 3.5F, (AfColor){1.0F, 0.36F, 0.18F, 1.0F}, 90072);
+                const AfVec2 p = af_affine_transform_point(transform, cut.cut_points[index]);
+                af_editor_add_rect(editor, p.x - 7.0F, p.y - 7.0F, 14.0F, 14.0F,
+                                   (AfColor){0.08F, 0.1F, 0.14F, 1.0F}, 90076);
+                af_editor_add_line(editor, (AfVec2){p.x - 5, p.y - 5}, (AfVec2){p.x + 5, p.y + 5},
+                                   2.5F, (AfColor){1, 0.8F, 0.25F, 1}, 90077);
+                af_editor_add_line(editor, (AfVec2){p.x - 5, p.y + 5}, (AfVec2){p.x + 5, p.y - 5},
+                                   2.5F, (AfColor){1, 0.8F, 0.25F, 1}, 90077);
+            }
+        }
+        af_editor_add_line(editor, af_affine_transform_point(camera, editor->tool_start),
+                           af_affine_transform_point(camera, editor->tool_current), 2.5F,
+                           (AfColor){1.0F, 0.42F, 0.24F, 1.0F}, 90075);
+        char label[80];
+        (void)snprintf(label, sizeof(label),
+                       animated ? "ANIMATED PATH: CUT UNAVAILABLE"
+                                : (cut.cut_count == 0U ? "NO CUTS · DRAG ACROSS A SEGMENT"
+                                                       : "%u CUTS · RELEASE TO CUT · ESC CANCEL"),
+                       cut.cut_count);
+        af_editor_add_text(editor, editor->left_width + 28.0F, editor->toolbar_height + 28.0F,
+                           label, 0.8F,
+                           (float)width - editor->left_width - editor->right_width - 56.0F,
+                           (AfColor){1.0F, 0.78F, 0.4F, 1.0F}, 90080);
+        editor->render_scene.capacity = capacity;
         return;
     }
     {
@@ -233,6 +397,32 @@ static void af_editor_render_vector_tool_preview(AfEditorState *editor, int widt
                     ? fminf(screen_size.x, screen_size.y) * 0.18F
                     : 0.0F,
                 90065);
+        } else if (editor->active_tool == AF_EDITOR_TOOL_POLYGON ||
+                   editor->active_tool == AF_EDITOR_TOOL_STAR ||
+                   editor->active_tool == AF_EDITOR_TOOL_ARC ||
+                   editor->active_tool == AF_EDITOR_TOOL_SPIRAL) {
+            AfPathCommand commands[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U];
+            uint32_t command_count = 0U;
+            if (editor->active_tool == AF_EDITOR_TOOL_POLYGON) {
+                command_count = af_editor_vector_tool_polygon(
+                    rect.size, 6U, 0.0F, commands, AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U);
+            } else if (editor->active_tool == AF_EDITOR_TOOL_STAR) {
+                command_count = af_editor_vector_tool_polygon(
+                    rect.size, 5U, 0.45F, commands, AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U);
+            } else if (editor->active_tool == AF_EDITOR_TOOL_ARC) {
+                command_count = af_editor_vector_tool_arc(
+                    rect.size, commands, AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U);
+            } else {
+                command_count = af_editor_vector_tool_spiral(
+                    rect.size, 3U, commands, AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U);
+            }
+            af_editor_render_preview_commands(editor, camera, rect.position, commands,
+                                              command_count, line);
+            af_editor_add_text(editor, top_left.x + 6.0F, top_left.y + 8.0F,
+                               af_editor_vector_tool_name(editor->active_tool), 0.62F,
+                               fmaxf(50.0F, screen_size.x - 12.0F),
+                               (AfColor){0.82F, 0.94F, 1.0F, 1.0F}, 90075);
+            return;
         }
         af_editor_add_line(editor, top_left, (AfVec2){bottom_right.x, top_left.y}, 2.0F, line,
                            90070);
@@ -249,13 +439,52 @@ static void af_editor_render_vector_tool_preview(AfEditorState *editor, int widt
     }
 }
 
+static void af_editor_render_path_hover(AfEditorState *editor, int width, int height,
+                                        AfAffine2 camera) {
+    if (editor->drag_mode != AF_EDITOR_DRAG_NONE || editor->selected_count != 1U ||
+        (editor->active_tool != AF_EDITOR_TOOL_NODE &&
+         editor->active_tool != AF_EDITOR_TOOL_SCISSORS &&
+         editor->active_tool != AF_EDITOR_TOOL_SEGMENT_DELETE)) {
+        return;
+    }
+    float x, y, w, h;
+    af_editor_layout(editor, width, height, &x, &y, &w, &h);
+    if (!af_editor_hovered_rect(editor, x, y + 20.0F, w, h - 20.0F)) {
+        return;
+    }
+    uint32_t index = UINT32_MAX;
+    float t = 0.0F;
+    if (af_editor_path_segment_hit(editor, width, height, editor->mouse_position, &index, &t)) {
+        const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
+        const AfPath *path =
+            af_path_find_node_const(&editor->render_path_data, editor->selected_id);
+        const AfPathCommand *command =
+            &editor->render_path_data.commands[path->command_start + index];
+        const AfVec2 start =
+            editor->render_path_data.commands[path->command_start + index - 1U].point;
+        const AfAffine2 transform = af_affine_multiply(camera, node->world_transform);
+        const AfColor color = editor->active_tool == AF_EDITOR_TOOL_NODE
+                                  ? (AfColor){0.25F, 0.8F, 1.0F, 1.0F}
+                                  : (AfColor){1.0F, 0.45F, 0.2F, 1.0F};
+        af_editor_render_preview_segment(editor, transform, start, command, 32U, 3.5F, color,
+                                         90032);
+        const AfVec2 local = command->type == AF_PATH_CUBIC
+                                 ? af_editor_preview_cubic_point(start, command, t)
+                                 : (AfVec2){start.x + (command->point.x - start.x) * t,
+                                            start.y + (command->point.y - start.y) * t};
+        const AfVec2 point = af_affine_transform_point(transform, local);
+        af_editor_add_rect(editor, point.x - 4, point.y - 4, 8, 8, color, 90035);
+    }
+}
+
 static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera) {
     const AfSceneNode *selected = af_scene_find_const(&editor->preview_scene, editor->selected_id);
     const AfPath *path = af_path_find_node_const(&editor->render_path_data, editor->selected_id);
     AfAffine2 transform = {0};
     AfVec2 previous = {0};
     bool have_previous = false;
-    if (selected == NULL || selected->type != AF_NODE_PATH || path == NULL) {
+    if (selected == NULL || selected->type != AF_NODE_PATH || selected->polygon_sides != 0U ||
+        path == NULL) {
         return;
     }
     transform = af_affine_multiply(camera, selected->world_transform);
@@ -270,6 +499,12 @@ static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera
         if (command->type == AF_PATH_MOVE || command->type == AF_PATH_LINE ||
             command->type == AF_PATH_CUBIC) {
             const AfVec2 point = af_affine_transform_point(transform, command->point);
+            if (editor->drag_mode == AF_EDITOR_DRAG_NONE &&
+                hypotf(editor->mouse_position.x - point.x, editor->mouse_position.y - point.y) <=
+                    9.0F) {
+                af_editor_add_rect(editor, point.x - 7.0F, point.y - 7.0F, 14.0F, 14.0F,
+                                   (AfColor){1.0F, 0.5F, 0.2F, 1.0F}, 90039);
+            }
             bool keyed = false;
             for (uint32_t track_index = 0U; track_index < editor->project.track_count;
                  ++track_index) {
@@ -301,6 +536,16 @@ static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera
                                    (AfColor){0.34F, 0.7F, 1.0F, 1.0F}, 90040);
                 af_editor_add_rect(editor, second.x - 4.0F, second.y - 4.0F, 8.0F, 8.0F,
                                    (AfColor){0.34F, 0.7F, 1.0F, 1.0F}, 90040);
+                const AfVec2 handles[] = {first, second};
+                for (uint32_t handle = 0U; handle < 2U; ++handle) {
+                    const AfVec2 p = handles[handle];
+                    if (editor->drag_mode == AF_EDITOR_DRAG_NONE &&
+                        hypotf(editor->mouse_position.x - p.x, editor->mouse_position.y - p.y) <=
+                            9.0F) {
+                        af_editor_add_rect(editor, p.x - 6, p.y - 6, 12, 12,
+                                           (AfColor){1.0F, 0.55F, 0.2F, 1.0F}, 90042);
+                    }
+                }
                 af_editor_add_text(editor, first.x + 7.0F, first.y - 7.0F, "OUT", 0.62F, 28.0F,
                                    (AfColor){0.42F, 0.76F, 1.0F, 1.0F}, 90045);
                 af_editor_add_text(editor, second.x + 7.0F, second.y - 7.0F, "IN", 0.62F, 24.0F,
@@ -512,7 +757,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
                            (float)height, (AfColor){0.095F, 0.102F, 0.125F, 1.0F}, -99990);
         af_editor_add_rect(editor, editor->left_width, 0.0F,
                            (float)width - editor->left_width - editor->right_width,
-                           AF_EDITOR_TOOLBAR_HEIGHT, (AfColor){0.11F, 0.12F, 0.145F, 1.0F}, -99980);
+                           editor->toolbar_height, (AfColor){0.11F, 0.12F, 0.145F, 1.0F}, -99980);
         af_editor_add_rect(editor, canvas_x, canvas_y, canvas_width, canvas_height,
                            (AfColor){0.145F, 0.155F, 0.18F, 1.0F}, -99990);
         af_editor_add_text(editor, editor->left_width + 18.0F, 18.0F, "ARCFLOW EDITOR", 0.82F,
@@ -545,6 +790,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
                                  af_scene_find_const(&editor->preview_scene, editor->selected_id),
                                  camera, (AfColor){0.98F, 0.8F, 0.22F, 1.0F}, 90000);
     }
+    af_editor_render_path_hover(editor, width, height, camera);
     if (editor->active_tool == AF_EDITOR_TOOL_NODE && editor->selected_count == 1U) {
         af_editor_render_path_points(editor, camera);
         af_editor_render_path_actions(editor, width, height);
@@ -557,21 +803,22 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
                        (float)height, (AfColor){0.095F, 0.102F, 0.125F, 1.0F}, 100000);
     af_editor_add_rect(editor, editor->left_width, 0.0F,
                        (float)width - editor->left_width - editor->right_width,
-                       AF_EDITOR_TOOLBAR_HEIGHT, (AfColor){0.11F, 0.12F, 0.145F, 1.0F}, 100000);
-    af_editor_add_rect(editor, editor->left_width, (float)height - AF_EDITOR_STATUS_HEIGHT,
+                       editor->toolbar_height, (AfColor){0.11F, 0.12F, 0.145F, 1.0F}, 100000);
+    af_editor_add_rect(editor, editor->left_width, (float)height - editor->status_height,
                        (float)width - editor->left_width - editor->right_width,
-                       AF_EDITOR_STATUS_HEIGHT, (AfColor){0.08F, 0.087F, 0.105F, 1.0F}, 100000);
+                       editor->status_height, (AfColor){0.08F, 0.087F, 0.105F, 1.0F}, 100000);
     af_editor_add_rect(editor, editor->left_width - 2.0F, 0.0F, 4.0F, (float)height,
                        (AfColor){0.23F, 0.25F, 0.3F, 1.0F}, 100100);
     af_editor_add_rect(editor, (float)width - editor->right_width - 2.0F, 0.0F, 4.0F, (float)height,
                        (AfColor){0.23F, 0.25F, 0.3F, 1.0F}, 100100);
     af_editor_render_hierarchy(editor, height);
     af_editor_render_asset_browser(editor, height);
-    af_editor_render_toolbar(editor);
+    af_editor_render_toolbar(editor, width);
     af_editor_render_inspector(editor, width);
     af_editor_render_timeline(editor, width, height);
+    af_editor_render_splitters(editor, width, height);
     af_editor_add_text(editor, editor->left_width + 12.0F,
-                       (float)height - AF_EDITOR_STATUS_HEIGHT + 9.0F, editor->status, 1.0F,
+                       (float)height - editor->status_height + 9.0F, editor->status, 1.0F,
                        (float)width - editor->left_width - editor->right_width - 24.0F,
                        (AfColor){0.62F, 0.67F, 0.76F, 1.0F}, 100140);
     af_editor_render_context_menu(editor, width, height);

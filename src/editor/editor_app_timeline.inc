@@ -1,18 +1,29 @@
 static void af_editor_layout(const AfEditorState *editor, int width, int height, float *canvas_x,
                              float *canvas_y, float *canvas_width, float *canvas_height) {
     *canvas_x = editor->left_width;
-    *canvas_y = AF_EDITOR_TOOLBAR_HEIGHT;
+    *canvas_y = editor->toolbar_height;
     *canvas_width = (float)width - editor->left_width - editor->right_width;
-    *canvas_height = (float)height - AF_EDITOR_TOOLBAR_HEIGHT - AF_EDITOR_STATUS_HEIGHT -
-                     editor->timeline_height;
+    *canvas_height =
+        (float)height - editor->toolbar_height - editor->status_height - editor->timeline_height;
 }
 
 static float af_editor_timeline_top(const AfEditorState *editor, int height) {
-    return (float)height - AF_EDITOR_STATUS_HEIGHT - editor->timeline_height;
+    return (float)height - editor->status_height - editor->timeline_height;
+}
+
+static float af_editor_timeline_controls_scale(const AfEditorState *editor, int width) {
+    const float available = (float)width - editor->left_width - editor->right_width - 80.0F;
+    return af_editor_clamp(available / 520.0F, 0.1F, 1.0F);
+}
+
+static bool af_editor_timeline_compact_clips(const AfEditorState *editor, int width) {
+    return editor->project.clip_count > 8U ||
+           (float)width - editor->left_width - editor->right_width <
+               526.0F + (float)editor->project.clip_count * 74.0F;
 }
 
 static float af_editor_timeline_ruler_x(const AfEditorState *editor) {
-    return editor->left_width + AF_EDITOR_TIMELINE_HEADER_WIDTH;
+    return editor->left_width + editor->timeline_header_width;
 }
 
 static float af_editor_time_to_x(const AfEditorState *editor, float time) {
@@ -268,7 +279,7 @@ static float af_editor_curve_bezier(float first, float second, float parameter) 
 static void af_editor_render_curve(AfEditorState *editor, int width, int height) {
     const AfProjectTrack *track = af_editor_selected_track(editor);
     const float top = af_editor_timeline_top(editor, height) + AF_EDITOR_TIMELINE_RULER_HEIGHT;
-    const float bottom = (float)height - AF_EDITOR_STATUS_HEIGHT - 12.0F;
+    const float bottom = (float)height - editor->status_height - 12.0F;
     const float left = af_editor_timeline_ruler_x(editor);
     const float right = (float)width - editor->right_width;
     uint32_t curve_count = 0U;
@@ -354,7 +365,7 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
     const float center_left = editor->left_width;
     const float center_right = (float)width - editor->right_width;
     const float ruler_x = af_editor_timeline_ruler_x(editor);
-    const float bottom = (float)height - AF_EDITOR_STATUS_HEIGHT;
+    const float bottom = (float)height - editor->status_height;
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
     float tick_time = 0.0F;
@@ -364,6 +375,10 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                        editor->timeline_height, (AfColor){0.075F, 0.082F, 0.102F, 1.0F}, 100000);
     af_editor_add_rect(editor, center_left, top - 2.0F, center_right - center_left, 4.0F,
                        (AfColor){0.27F, 0.29F, 0.35F, 1.0F}, 100110);
+    const uint32_t controls_start = editor->render_scene.count;
+    const float controls_scale = af_editor_timeline_controls_scale(editor, width);
+    const float mouse_x = editor->mouse_position.x;
+    editor->mouse_position.x = center_left + (mouse_x - center_left) / controls_scale;
     af_editor_add_button_rect(editor, center_left + 10.0F, top + 6.0F, 46.0F, 32.0F,
                               editor->preview_playing ? (AfColor){0.3F, 0.82F, 0.46F, 1.0F}
                                                       : (AfColor){0.24F, 0.27F, 0.33F, 1.0F},
@@ -411,15 +426,28 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
         af_editor_add_text(editor, center_left + 408.0F, top + 18.0F, key_label, 0.62F, 98.0F,
                            (AfColor){0.96F, 0.97F, 1.0F, 1.0F}, 100140);
     }
-    for (index = 0U; index < editor->project.clip_count && index < 8U; ++index) {
+    editor->mouse_position.x = mouse_x;
+    for (uint32_t node_index = controls_start; node_index < editor->render_scene.count; ++node_index) {
+        AfAffine2 *transform = &editor->render_scene.nodes[node_index].world_transform;
+        transform->tx = center_left + (transform->tx - center_left) * controls_scale;
+        transform->m00 *= controls_scale;
+        transform->m01 *= controls_scale;
+    }
+    const bool compact_clips = af_editor_timeline_compact_clips(editor, width);
+    for (index = 0U; index < editor->project.clip_count && index < (compact_clips ? 1U : 8U); ++index) {
+        const AfProjectClip *tab = compact_clips && clip != NULL ? clip : &editor->project.clips[index];
         const float x = center_right - 74.0F * (float)(index + 1U);
         af_editor_add_button_rect(editor, x, top + 8.0F, 68.0F, 28.0F,
-                                  editor->project.clips[index].id == editor->selected_clip_id
+                                  tab->id == editor->selected_clip_id
                                       ? (AfColor){0.2F, 0.42F, 0.68F, 1.0F}
                                       : (AfColor){0.18F, 0.2F, 0.25F, 1.0F},
                                   100120);
-        af_editor_add_text(editor, x + 4.0F, top + 17.0F, editor->project.clips[index].name, 0.75F,
-                           60.0F, (AfColor){0.92F, 0.94F, 0.98F, 1.0F}, 100135);
+        af_editor_add_text(editor, x + 4.0F, top + 17.0F, tab->name, 0.75F,
+                           compact_clips && editor->project.clip_count > 1U ? 48.0F : 60.0F,
+                           (AfColor){0.92F, 0.94F, 0.98F, 1.0F}, 100135);
+        if (compact_clips && editor->project.clip_count > 1U)
+            af_editor_add_text(editor, x + 56.0F, top + 17.0F, ">", 0.75F, 8.0F,
+                               (AfColor){0.92F, 0.94F, 0.98F, 1.0F}, 100135);
     }
     af_editor_add_rect(editor, center_left, top + 42.0F, center_right - center_left, 1.0F,
                        (AfColor){0.25F, 0.27F, 0.32F, 1.0F}, 100115);
@@ -431,7 +459,7 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
         (void)snprintf(timecode, sizeof(timecode), "%.2fs  /  %.2fs", (double)editor->playhead,
                        (double)clip->duration);
         af_editor_add_text(editor, center_left + 12.0F, top + 52.0F, timecode, 0.72F,
-                           AF_EDITOR_TIMELINE_HEADER_WIDTH - 20.0F,
+                           editor->timeline_header_width - 20.0F,
                            (AfColor){0.72F, 0.76F, 0.84F, 1.0F}, 100130);
     }
     tick_time = ceilf(editor->timeline_pan * 2.0F) * 0.5F;
@@ -442,7 +470,7 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
             af_editor_add_rect(editor, x, top + 44.0F, 1.0F, 15.0F,
                                (AfColor){0.48F, 0.5F, 0.58F, 1.0F}, 100120);
             (void)snprintf(tick_label, sizeof(tick_label), "%.1f", (double)tick_time);
-            af_editor_add_text(editor, x + 3.0F, top + 53.0F, tick_label, 0.72F, 28.0F,
+            af_editor_add_text(editor, x + 3.0F, top + 53.0F, tick_label, 0.72F, fminf(28.0F, center_right - x - 3.0F),
                                (AfColor){0.58F, 0.61F, 0.69F, 1.0F}, 100125);
         }
         tick_time += 0.5F;
@@ -460,17 +488,22 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                                    editor->mouse_position.x > loop_start &&
                                    editor->mouse_position.x < loop_end;
         const float bar_height = range_hovered ? 7.0F : 5.0F;
-        af_editor_add_rect(editor, loop_start, top + 65.5F - bar_height * 0.5F,
-                           loop_end - loop_start, bar_height,
+        const float visible_start = fmaxf(ruler_x, loop_start);
+        const float visible_end = fminf(center_right, loop_end);
+        if (visible_end > visible_start)
+            af_editor_add_rect(editor, visible_start, top + 65.5F - bar_height * 0.5F,
+                           visible_end - visible_start, bar_height,
                            range_hovered ? (AfColor){0.42F, 1.0F, 0.62F, 1.0F}
                                          : (AfColor){0.25F, 0.7F, 0.42F, 1.0F},
                            100125);
-        af_editor_add_rect(editor, loop_start - (start_hovered ? 5.0F : 3.0F), top + 58.0F,
+        if (loop_start >= ruler_x + 5.0F && loop_start <= center_right - 5.0F)
+            af_editor_add_rect(editor, loop_start - (start_hovered ? 5.0F : 3.0F), top + 58.0F,
                            start_hovered ? 10.0F : 6.0F, 14.0F,
                            start_hovered ? (AfColor){0.72F, 1.0F, 0.82F, 1.0F}
                                          : (AfColor){0.35F, 0.9F, 0.5F, 1.0F},
                            100130);
-        af_editor_add_rect(editor, loop_end - (end_hovered ? 5.0F : 3.0F), top + 58.0F,
+        if (loop_end >= ruler_x + 5.0F && loop_end <= center_right - 5.0F)
+            af_editor_add_rect(editor, loop_end - (end_hovered ? 5.0F : 3.0F), top + 58.0F,
                            end_hovered ? 10.0F : 6.0F, 14.0F,
                            end_hovered ? (AfColor){0.72F, 1.0F, 0.82F, 1.0F}
                                        : (AfColor){0.35F, 0.9F, 0.5F, 1.0F},
@@ -495,7 +528,7 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
             y = top + AF_EDITOR_TIMELINE_RULER_HEIGHT +
                 (float)row * AF_EDITOR_TIMELINE_TRACK_HEIGHT;
             af_editor_add_button_rect(
-                editor, center_left, y, AF_EDITOR_TIMELINE_HEADER_WIDTH,
+                editor, center_left, y, editor->timeline_header_width,
                 AF_EDITOR_TIMELINE_TRACK_HEIGHT - 1.0F,
                 track->node_id == editor->selected_id &&
                         track->property == editor->selected_property &&
@@ -508,16 +541,16 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                                af_editor_property_color(track->property), 100125);
             af_editor_add_text(editor, center_left + 23.0F, y + 4.0F,
                                af_project_name(&editor->project, track->node_id), 0.62F,
-                               AF_EDITOR_TIMELINE_HEADER_WIDTH - 54.0F,
+                               editor->timeline_header_width - 54.0F,
                                (AfColor){0.48F, 0.52F, 0.61F, 1.0F}, 100125);
             af_editor_add_text(editor, center_left + 23.0F, y + 17.0F,
                                af_editor_property_name(track->property), 1.0F,
-                               AF_EDITOR_TIMELINE_HEADER_WIDTH - 54.0F,
+                               editor->timeline_header_width - 54.0F,
                                (AfColor){0.72F, 0.75F, 0.82F, 1.0F}, 100125);
             if (track->property >= AF_PROPERTY_PATH_POINT) {
                 char point_label[16];
                 (void)snprintf(point_label, sizeof(point_label), "#%u", track->element_index + 1U);
-                af_editor_add_text(editor, center_left + AF_EDITOR_TIMELINE_HEADER_WIDTH - 31.0F,
+                af_editor_add_text(editor, center_left + editor->timeline_header_width - 31.0F,
                                    y + 17.0F, point_label, 0.72F, 27.0F,
                                    (AfColor){0.45F, 0.72F, 0.82F, 1.0F}, 100125);
             }

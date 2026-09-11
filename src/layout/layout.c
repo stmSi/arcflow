@@ -1,5 +1,6 @@
 #include "layout/layout.h"
 
+#include "core/id_index.h"
 #include "scene/scene.h"
 
 #include <math.h>
@@ -14,6 +15,13 @@ typedef struct AfLayoutContext {
     AfVec2 root_origin;
     AfVec2 root_size;
     uint8_t states[AF_MAX_LAYOUT_NODES];
+    AfIdIndex node_lookup;
+    uint32_t node_slots[AF_MAX_NODES * 2U];
+    const AfLayoutNode *node_layouts[AF_MAX_NODES];
+    uint32_t first_child[AF_MAX_NODES];
+    uint32_t next_sibling[AF_MAX_NODES];
+    float child_offsets[AF_MAX_NODES];
+    bool children_prepared[AF_MAX_NODES];
 } AfLayoutContext;
 
 typedef struct AfLayoutRect {
@@ -89,7 +97,9 @@ AfResult af_layout_node_validate(const AfLayoutNode *layout) {
     return AF_RESULT_SUCCESS;
 }
 
-AfResult af_layout_validate(const AfLayoutData *data, const AfScene *scene) {
+static AfResult af_layout_validate_indexed(const AfLayoutData *data, const AfScene *scene,
+                                           const AfIdIndex *lookup,
+                                           const AfLayoutNode **node_layouts) {
     if (data == NULL || scene == NULL || data->count > data->capacity ||
         data->capacity > AF_MAX_LAYOUT_NODES || (data->capacity != 0U && data->nodes == NULL) ||
         !isfinite(data->reference_size.x) || !isfinite(data->reference_size.y) ||
@@ -103,46 +113,29 @@ AfResult af_layout_validate(const AfLayoutData *data, const AfScene *scene) {
         data->safe_area.top + data->safe_area.bottom >= data->target_size.y) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
+    memset(node_layouts, 0, (size_t)scene->count * sizeof(*node_layouts));
     for (uint32_t index = 0U; index < data->count; ++index) {
         const AfLayoutNode *layout = &data->nodes[index];
-        const float values[] = {
-            layout->anchor_min.x,   layout->anchor_min.y,   layout->anchor_max.x,
-            layout->anchor_max.y,   layout->pivot.x,        layout->pivot.y,
-            layout->offset.x,       layout->offset.y,       layout->width.value,
-            layout->height.value,   layout->minimum_size.x, layout->minimum_size.y,
-            layout->maximum_size.x, layout->maximum_size.y, layout->aspect_ratio,
-            layout->spacing};
-        if (af_layout_node_validate(layout) != AF_RESULT_SUCCESS ||
-            af_scene_find_const(scene, layout->node_id) == NULL ||
-            layout->width.mode > AF_LAYOUT_VALUE_PERCENT ||
-            layout->height.mode > AF_LAYOUT_VALUE_PERCENT ||
-            layout->aspect > AF_ASPECT_HEIGHT_CONTROLS_WIDTH ||
-            layout->direction > AF_LAYOUT_DIRECTION_VERTICAL ||
-            layout->child_alignment > AF_LAYOUT_ALIGN_STRETCH ||
-            !af_layout_finite_insets(layout->padding) || layout->anchor_min.x < 0.0F ||
-            layout->anchor_min.y < 0.0F || layout->anchor_max.x < layout->anchor_min.x ||
-            layout->anchor_max.y < layout->anchor_min.y || layout->anchor_max.x > 1.0F ||
-            layout->anchor_max.y > 1.0F || layout->pivot.x < 0.0F || layout->pivot.x > 1.0F ||
-            layout->pivot.y < 0.0F || layout->pivot.y > 1.0F || layout->width.value < 0.0F ||
-            layout->height.value < 0.0F || layout->minimum_size.x < 0.0F ||
-            layout->minimum_size.y < 0.0F || layout->maximum_size.x < layout->minimum_size.x ||
-            layout->maximum_size.y < layout->minimum_size.y || layout->spacing < 0.0F ||
-            (layout->aspect != AF_ASPECT_NONE && layout->aspect_ratio <= 0.0F)) {
+        const uint32_t node = af_id_index_find(lookup, layout->node_id);
+        if (af_layout_node_validate(layout) != AF_RESULT_SUCCESS || node == UINT32_MAX ||
+            node_layouts[node] != NULL) {
             return AF_RESULT_INVALID_ARGUMENT;
         }
-        for (uint32_t value_index = 0U; value_index < sizeof(values) / sizeof(values[0]);
-             ++value_index) {
-            if (!isfinite(values[value_index]) || fabsf(values[value_index]) > AF_LAYOUT_LIMIT) {
-                return AF_RESULT_INVALID_ARGUMENT;
-            }
-        }
-        for (uint32_t other = index + 1U; other < data->count; ++other) {
-            if (layout->node_id == data->nodes[other].node_id) {
-                return AF_RESULT_INVALID_ARGUMENT;
-            }
-        }
+        node_layouts[node] = layout;
     }
     return AF_RESULT_SUCCESS;
+}
+
+AfResult af_layout_validate(const AfLayoutData *data, const AfScene *scene) {
+    AfIdIndex lookup;
+    uint32_t slots[AF_MAX_NODES * 2U];
+    const AfLayoutNode *node_layouts[AF_MAX_NODES];
+    if (scene == NULL || scene->count > AF_MAX_NODES || scene->count > scene->capacity ||
+        af_id_index_build(&lookup, scene->nodes, scene->count, sizeof(*scene->nodes), slots,
+                          AF_MAX_NODES * 2U) != AF_RESULT_SUCCESS) {
+        return AF_RESULT_INVALID_ARGUMENT;
+    }
+    return af_layout_validate_indexed(data, scene, &lookup, node_layouts);
 }
 
 static float af_layout_clamp(float value, float minimum, float maximum) {
@@ -208,7 +201,7 @@ static AfLayoutRect af_layout_node_rect(const AfLayoutContext *context, uint32_t
                                         AfLayoutRect parent_content,
                                         const AfLayoutNode *parent_layout) {
     const AfSceneNode *node = &context->scene->nodes[node_index];
-    const AfLayoutNode *layout = af_layout_find_const(context->data, node->id);
+    const AfLayoutNode *layout = context->node_layouts[node_index];
     AfLayoutRect rect = {.size = af_layout_resolve_size(node, layout, parent_content.size)};
     AfVec2 anchor = {0.0F, 0.0F};
     AfVec2 pivot = {0.0F, 0.0F};
@@ -222,24 +215,7 @@ static AfLayoutRect af_layout_node_rect(const AfLayoutContext *context, uint32_t
     rect.position.y +=
         parent_content.position.y + parent_content.size.y * anchor.y - rect.size.y * pivot.y;
     if (parent_layout != NULL && parent_layout->direction != AF_LAYOUT_DIRECTION_NONE) {
-        float cursor = 0.0F;
-        uint32_t ordinal = 0U;
-        for (uint32_t sibling_index = 0U; sibling_index < context->scene->count; ++sibling_index) {
-            const AfSceneNode *sibling = &context->scene->nodes[sibling_index];
-            AfVec2 sibling_size;
-            if (sibling->parent_id != node->parent_id) {
-                continue;
-            }
-            sibling_size = af_layout_resolve_size(
-                sibling, af_layout_find_const(context->data, sibling->id), parent_content.size);
-            if (sibling_index == node_index) {
-                break;
-            }
-            cursor += parent_layout->direction == AF_LAYOUT_DIRECTION_HORIZONTAL ? sibling_size.x
-                                                                                 : sibling_size.y;
-            ++ordinal;
-        }
-        cursor += (float)ordinal * parent_layout->spacing;
+        const float cursor = context->child_offsets[node_index];
         if (parent_layout->direction == AF_LAYOUT_DIRECTION_HORIZONTAL) {
             rect.position.x = parent_content.position.x + cursor;
             if (parent_layout->child_alignment == AF_LAYOUT_ALIGN_CENTER) {
@@ -267,6 +243,25 @@ static AfLayoutRect af_layout_node_rect(const AfLayoutContext *context, uint32_t
     return rect;
 }
 
+static void af_layout_prepare_children(AfLayoutContext *context, uint32_t parent,
+                                       AfLayoutRect content, const AfLayoutNode *layout) {
+    if (layout == NULL || layout->direction == AF_LAYOUT_DIRECTION_NONE ||
+        context->children_prepared[parent]) {
+        return;
+    }
+    float cursor = 0.0F;
+    uint32_t ordinal = 0U;
+    for (uint32_t child = context->first_child[parent]; child != UINT32_MAX;
+         child = context->next_sibling[child]) {
+        const AfVec2 size = af_layout_resolve_size(&context->scene->nodes[child],
+                                                   context->node_layouts[child], content.size);
+        context->child_offsets[child] = cursor + (float)ordinal * layout->spacing;
+        cursor += layout->direction == AF_LAYOUT_DIRECTION_HORIZONTAL ? size.x : size.y;
+        ++ordinal;
+    }
+    context->children_prepared[parent] = true;
+}
+
 static AfResult af_layout_evaluate_node(AfLayoutContext *context, uint32_t index, uint32_t depth) {
     AfSceneNode *node = &context->scene->nodes[index];
     AfAffine2 parent_world = context->canvas_transform;
@@ -280,28 +275,21 @@ static AfResult af_layout_evaluate_node(AfLayoutContext *context, uint32_t index
     }
     context->states[index] = 1U;
     if (node->parent_id != AF_INVALID_NODE_ID) {
-        bool found = false;
-        for (uint32_t parent_index = 0U; parent_index < context->scene->count; ++parent_index) {
-            if (context->scene->nodes[parent_index].id == node->parent_id) {
-                AfResult result = af_layout_evaluate_node(context, parent_index, depth + 1U);
-                if (result != AF_RESULT_SUCCESS) {
-                    return result;
-                }
-                parent_world = context->scene->nodes[parent_index].world_transform;
-                parent_layout = af_layout_find_const(context->data, node->parent_id);
-                parent_content =
-                    af_layout_parent_content(&context->scene->nodes[parent_index], parent_layout);
-                node->world_opacity =
-                    context->scene->nodes[parent_index].world_opacity * node->opacity;
-                node->world_visible =
-                    context->scene->nodes[parent_index].world_visible && node->visible;
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
+        const uint32_t parent_index = af_id_index_find(&context->node_lookup, node->parent_id);
+        if (parent_index == UINT32_MAX) {
             return AF_RESULT_NOT_FOUND;
         }
+        AfResult result = af_layout_evaluate_node(context, parent_index, depth + 1U);
+        if (result != AF_RESULT_SUCCESS) {
+            return result;
+        }
+        const AfSceneNode *parent = &context->scene->nodes[parent_index];
+        parent_world = parent->world_transform;
+        parent_layout = context->node_layouts[parent_index];
+        parent_content = af_layout_parent_content(parent, parent_layout);
+        node->world_opacity = parent->world_opacity * node->opacity;
+        node->world_visible = parent->world_visible && node->visible;
+        af_layout_prepare_children(context, parent_index, parent_content, parent_layout);
     } else {
         node->world_opacity = node->opacity;
         node->world_visible = node->visible;
@@ -309,7 +297,7 @@ static AfResult af_layout_evaluate_node(AfLayoutContext *context, uint32_t index
     {
         const AfLayoutRect rect =
             af_layout_node_rect(context, index, parent_content, parent_layout);
-        const AfLayoutNode *layout = af_layout_find_const(context->data, node->id);
+        const AfLayoutNode *layout = context->node_layouts[index];
         const AfVec2 pivot =
             layout == NULL ? (AfVec2){0}
                            : (AfVec2){rect.size.x * layout->pivot.x, rect.size.y * layout->pivot.y};
@@ -326,12 +314,38 @@ static AfResult af_layout_evaluate_node(AfLayoutContext *context, uint32_t index
 }
 
 AfResult af_layout_evaluate_scene(AfScene *scene) {
-    AfLayoutContext context = {.scene = scene, .data = scene == NULL ? NULL : scene->layouts};
+    AfLayoutContext context;
+    context.scene = scene;
+    context.data = scene == NULL ? NULL : scene->layouts;
     float scale_x = 1.0F;
     float scale_y = 1.0F;
-    if (scene == NULL || scene->layouts == NULL ||
-        af_layout_validate(scene->layouts, scene) != AF_RESULT_SUCCESS) {
+    if (scene == NULL || scene->layouts == NULL || scene->count > AF_MAX_NODES ||
+        scene->count > scene->capacity ||
+        af_id_index_build(&context.node_lookup, scene->nodes, scene->count, sizeof(*scene->nodes),
+                          context.node_slots, AF_MAX_NODES * 2U) != AF_RESULT_SUCCESS ||
+        af_layout_validate_indexed(scene->layouts, scene, &context.node_lookup,
+                                   context.node_layouts) != AF_RESULT_SUCCESS) {
         return AF_RESULT_INVALID_ARGUMENT;
+    }
+    memset(context.states, 0, (size_t)scene->count * sizeof(*context.states));
+    memset(context.children_prepared, 0, (size_t)scene->count * sizeof(*context.children_prepared));
+    for (uint32_t index = 0U; index < scene->count; ++index) {
+        context.first_child[index] = UINT32_MAX;
+        context.next_sibling[index] = UINT32_MAX;
+    }
+    /* Link siblings in scene order, even when children precede their parents in storage. */
+    for (uint32_t cursor = scene->count; cursor > 0U; --cursor) {
+        const uint32_t index = cursor - 1U;
+        if (scene->nodes[index].parent_id == AF_INVALID_NODE_ID) {
+            continue;
+        }
+        const uint32_t parent =
+            af_id_index_find(&context.node_lookup, scene->nodes[index].parent_id);
+        if (parent == UINT32_MAX) {
+            return AF_RESULT_NOT_FOUND;
+        }
+        context.next_sibling[index] = context.first_child[parent];
+        context.first_child[parent] = index;
     }
     scale_x = context.data->target_size.x / context.data->reference_size.x;
     scale_y = context.data->target_size.y / context.data->reference_size.y;

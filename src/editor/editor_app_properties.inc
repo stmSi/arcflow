@@ -428,6 +428,24 @@ static bool af_editor_apply_inspector_color(AfEditorState *editor, AfColor color
     return true;
 }
 
+static bool af_editor_update_polygon(AfEditorState *editor, AfVec2 size, uint32_t sides,
+                                     float inset, bool allow_merge) {
+    AfEditorCommand command = {0};
+    AfResult result = af_editor_command_polygon(&editor->project, editor->selected_id, size, sides,
+                                                inset, &command);
+    if (result == AF_RESULT_SUCCESS)
+        result = af_editor_history_execute(&editor->history, &editor->project, &command, false,
+                                           allow_merge);
+    if (result != AF_RESULT_SUCCESS) {
+        af_editor_status(editor, "Shape settings could not be changed");
+        return false;
+    }
+    af_editor_mark_dirty(editor);
+    af_editor_update_preview(editor);
+    af_editor_status(editor, "Shape updated · Convert to path unlocks individual vector points");
+    return true;
+}
+
 static bool af_editor_apply_inspector_number(AfEditorState *editor, AfEditorInspectorField field,
                                              float value, int32_t integer, bool allow_merge) {
     AfPropertyType property = AF_PROPERTY_POSITION;
@@ -436,6 +454,26 @@ static bool af_editor_apply_inspector_number(AfEditorState *editor, AfEditorInsp
         !(field >= AF_EDITOR_INSPECTOR_COLOR_HEX && field <= AF_EDITOR_INSPECTOR_COLOR_A);
     if (editor->selected_id == 0U) {
         return false;
+    }
+    if (field == AF_EDITOR_INSPECTOR_WIDTH || field == AF_EDITOR_INSPECTOR_HEIGHT) {
+        const AfSceneNode *shape = af_scene_find_const(&editor->project.scene, editor->selected_id);
+        if (shape != NULL && shape->polygon_sides != 0U) {
+            if (editor->selected_count != 1U)
+                return false;
+            AfVec2 size = shape->bounds;
+            const float next = af_editor_clamp(value, 0.1F, 1000000.0F);
+            if (field == AF_EDITOR_INSPECTOR_WIDTH) {
+                if (editor->inspector_ratio_locked)
+                    size.y *= next / size.x;
+                size.x = next;
+            } else {
+                if (editor->inspector_ratio_locked)
+                    size.x *= next / size.y;
+                size.y = next;
+            }
+            return af_editor_update_polygon(editor, size, shape->polygon_sides,
+                                            shape->polygon_inset, allow_merge);
+        }
     }
     af_editor_begin_selection_modify(editor, false);
     if (animatable) {
@@ -947,19 +985,19 @@ static void af_editor_nudge(AfEditorState *editor, float x, float y) {
 }
 
 static void af_editor_reparent(AfEditorState *editor, uint64_t parent_id) {
-    AfProjectNodeSnapshot before = {0};
-    AfSceneNode *parent = af_scene_find(&editor->project.scene, parent_id);
-    if (editor->selected_id == 0U || editor->selected_id == parent_id ||
-        (parent_id != AF_INVALID_NODE_ID && (parent == NULL || parent->type != AF_NODE_GROUP)) ||
-        af_project_snapshot(&editor->project, editor->selected_id, &before) != AF_RESULT_SUCCESS) {
-        return;
+    AfEditorCommand command = {0};
+    AfResult result =
+        af_editor_command_reparent(&editor->project, editor->selected_id, parent_id, &command);
+    if (result == AF_RESULT_SUCCESS) {
+        result =
+            af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
     }
-    if (af_scene_reparent(&editor->project.scene, editor->selected_id, parent_id) ==
-        AF_RESULT_SUCCESS) {
-        (void)af_scene_evaluate_world(&editor->project.scene);
-        (void)af_editor_commit_modify(editor, &before, AF_EDITOR_MERGE_PARENT, false);
+    if (result == AF_RESULT_SUCCESS) {
+        af_editor_mark_dirty(editor);
         af_editor_status(editor,
                          parent_id == AF_INVALID_NODE_ID ? "Node unparented" : "Node parented");
+    } else {
+        af_editor_status(editor, "Cannot move object into this parent");
     }
 }
 
@@ -1327,6 +1365,31 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
         af_project_find_node_emitter(&editor->project, editor->selected_id);
     const AfEditorInspectorField field = af_editor_inspector_field_at(editor, width, x, y);
     if (af_editor_handle_image_inspector(editor, width, x, y)) {
+        return;
+    }
+    if (editor->selected_count == 1U && y >= AF_EDITOR_SHAPE_SETTINGS_Y &&
+        y <= AF_EDITOR_SHAPE_SETTINGS_Y + 26.0F && x >= panel_x &&
+        x < panel_x + editor->right_width - 36.0F) {
+        const AfSceneNode *shape = af_scene_find_const(&editor->project.scene, editor->selected_id);
+        if (shape != NULL && shape->polygon_sides != 0U) {
+            const uint32_t action =
+                (uint32_t)((x - panel_x) / ((editor->right_width - 36.0F) / 4.0F));
+            uint32_t sides = shape->polygon_sides;
+            float inset = shape->polygon_inset;
+            if (action == 0U && sides > 3U)
+                --sides;
+            if (action == 1U && sides < 64U)
+                ++sides;
+            if (action >= 2U && inset > 0.0F)
+                inset = af_editor_clamp(inset + (action == 2U ? -0.05F : 0.05F), 0.05F, 0.95F);
+            if (sides != shape->polygon_sides || inset != shape->polygon_inset)
+                (void)af_editor_update_polygon(editor, shape->bounds, sides, inset, false);
+            return;
+        }
+    }
+    if (x >= panel_x && x <= panel_x + editor->right_width - 36.0F &&
+        y >= AF_EDITOR_CONVERT_PATH_Y && y <= AF_EDITOR_CONVERT_PATH_Y + 26.0F) {
+        af_editor_convert_selected_to_path(editor);
         return;
     }
     if (af_editor_inspector_ratio_hit(editor, width, x, y) &&
@@ -1752,6 +1815,12 @@ static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_
         af_editor_toggle_selected_particles(editor);
         return;
     }
+    if (item == 7U &&
+        (menu == AF_EDITOR_CONTEXT_RECTANGLE || menu == AF_EDITOR_CONTEXT_ROUNDED_RECTANGLE ||
+         menu == AF_EDITOR_CONTEXT_ELLIPSE)) {
+        af_editor_convert_selected_to_path(editor);
+        return;
+    }
     if (menu == AF_EDITOR_CONTEXT_RECTANGLE) {
         if (item == 2U) {
             af_editor_convert_selected(editor, AF_NODE_ROUNDED_RECTANGLE);
@@ -1786,9 +1855,7 @@ static void af_editor_execute_object_context_item(AfEditorState *editor, uint32_
         if (item == 2U) {
             (void)af_editor_toggle_path_fill_rule(editor);
         } else if (item == 3U) {
-            editor->selected_path_command = 0U;
-            af_editor_path_selection_only(editor, editor->selected_path_command);
-            af_editor_status(editor, "Path points ready for editing");
+            af_editor_convert_selected_to_path(editor);
         } else if (item == 5U) {
             (void)af_editor_reverse_path_contour(editor);
         } else if (item == 6U) {
@@ -1821,6 +1888,8 @@ static void af_editor_execute_context_item(AfEditorState *editor, uint32_t item,
             af_editor_reparent(editor, AF_INVALID_NODE_ID);
         } else if (item == 3U) {
             (void)af_editor_delete_selection(editor);
+        } else if (item == 4U) {
+            af_editor_group_selection(editor);
         }
     } else if (editor->context_menu == AF_EDITOR_CONTEXT_CANVAS) {
         if (item <= 2U) {
@@ -1915,7 +1984,8 @@ static void af_editor_open_context_menu(AfEditorState *editor, int width, int he
             const float row_start = af_editor_asset_browser_top(editor, height) + 48.0F;
             const uint32_t row = y < row_start ? UINT32_MAX : (uint32_t)((y - row_start) / 27.0F);
             const uint32_t asset_index = editor->asset_scroll + row;
-            if (row < 5U && asset_index < editor->project.image_data.asset_count) {
+            if (row < af_editor_asset_visible_rows(editor) &&
+                asset_index < editor->project.image_data.asset_count) {
                 editor->context_menu = AF_EDITOR_CONTEXT_ASSET;
                 editor->selected_asset_id = editor->project.image_data.assets[asset_index].id;
                 for (uint32_t binding = 0U; binding < editor->project.image_data.binding_count;
@@ -1933,7 +2003,7 @@ static void af_editor_open_context_menu(AfEditorState *editor, int width, int he
             }
             return;
         }
-        const float hierarchy_top = AF_EDITOR_TOOLBAR_HEIGHT + 8.0F;
+        const float hierarchy_top = editor->toolbar_height + 8.0F;
         editor->context_menu = AF_EDITOR_CONTEXT_HIERARCHY;
         if (y >= hierarchy_top) {
             const uint32_t row = (uint32_t)((y - hierarchy_top) / AF_EDITOR_ROW_HEIGHT);
@@ -1957,7 +2027,7 @@ static void af_editor_open_context_menu(AfEditorState *editor, int width, int he
                                                    &editor->project, editor->selected_id) != NULL
                 ? AF_EDITOR_CONTEXT_PARTICLE
                 : AF_EDITOR_CONTEXT_INSPECTOR;
-    } else if (y < AF_EDITOR_TOOLBAR_HEIGHT) {
+    } else if (y < editor->toolbar_height) {
         editor->context_menu = AF_EDITOR_CONTEXT_TOOLBAR;
     } else if (y >= timeline_top) {
         editor->context_menu = AF_EDITOR_CONTEXT_TIMELINE;
