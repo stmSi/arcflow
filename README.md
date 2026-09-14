@@ -32,8 +32,10 @@ highlight on hover and show resize cursors. Drag them to resize their sections.
 Construction happens directly on the canvas with live geometry previews; `Shift` constrains
 shapes/angles, `Ctrl` draws shapes from their center, and Pen previews its Bézier curves and handles
 while dragging and moving to the next snapped point. Hovering over the first Pen node highlights
-the closing segment. Pen finishes with a double-click or `Enter`, and `Esc` cancels an active
-construction. Pencil strokes are bounded and simplified into editable paths. Generated path points
+the closing segment. Click that first node to close the path, preserving the first and last
+Bézier handles; two-node curved loops can also close. Node mode displays the connecting edges
+even when the path has no stroke. Pen finishes an open path with a double-click or `Enter`, and
+`Esc` cancels an active construction. Pencil strokes are bounded and simplified into editable paths. Generated path points
 and Bézier handles use the same animation
 workflow as other vector paths. A selected shape exposes red/green move axes, blue axis/corner
 scale handles, magenta

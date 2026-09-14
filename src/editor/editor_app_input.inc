@@ -2742,6 +2742,113 @@ static AfResult af_editor_knife_smoke(AfEditorState *editor, int width, int heig
     return af_project_validate(&editor->project);
 }
 
+static AfResult af_editor_pen_close_smoke(AfEditorState *editor, int width, int height) {
+    const bool snapping = editor->snapping;
+    editor->snapping = false;
+    float x, y, w, h;
+    af_editor_layout(editor, width, height, &x, &y, &w, &h);
+    for (uint32_t mode = 0U; mode < 5U; ++mode) {
+        const uint32_t anchors = mode == 2U ? 2U : 3U;
+        const bool first_handle = mode == 1U || mode == 2U || mode == 3U;
+        const bool last_handle = mode == 1U || mode == 2U || mode == 4U;
+        const uint32_t scene_count = editor->project.scene.count;
+        af_editor_cancel_vector_tool(editor, NULL);
+        af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_PEN);
+        SDL_MouseButtonEvent click = {.button = SDL_BUTTON_LEFT, .down = true, .clicks = 1U};
+        for (uint32_t anchor = 0U; anchor < anchors; ++anchor) {
+            click.x = x + w * (anchor == 0U ? 0.3F : 0.65F);
+            click.y = y + h * (anchor == 2U ? 0.7F : 0.35F);
+            af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+            if ((anchor == 0U && first_handle) || (anchor + 1U == anchors && last_handle)) {
+                const SDL_MouseMotionEvent motion = {.x = click.x + 20.0F,
+                                                      .y = click.y - 24.0F};
+                af_editor_mouse_motion(editor, width, height, &motion);
+            }
+            af_editor_mouse_up(editor, width, height);
+        }
+        if (editor->tool_command_count != anchors)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        const AfVec2 start = editor->tool_commands[0].point;
+        const AfVec2 last = editor->tool_commands[anchors - 1U].point;
+        const AfVec2 outgoing = editor->tool_pen_outgoing;
+        const AfVec2 incoming = first_handle
+            ? (AfVec2){2.0F * start.x - editor->tool_commands[1].control1.x,
+                       2.0F * start.y - editor->tool_commands[1].control1.y} : start;
+        const AfVec2 first_screen = af_affine_transform_point(
+            af_editor_camera(editor, width, height), start);
+        click.x = first_screen.x;
+        click.y = first_screen.y;
+        af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
+        af_editor_mouse_up(editor, width, height);
+        const uint64_t node_id = editor->selected_id;
+        const AfPath *path = af_editor_selected_path(editor);
+        if (editor->tool_command_count != 0U || editor->drag_mode != AF_EDITOR_DRAG_NONE ||
+            editor->project.scene.count != scene_count + 1U ||
+            path == NULL ||
+            path->command_count != anchors + (mode == 0U ? 1U : 2U)) {
+            af_log(AF_LOG_ERROR, "Pen close case %u: pending=%u drag=%u nodes=%u/%u commands=%u",
+                   mode, editor->tool_command_count, (unsigned)editor->drag_mode,
+                   editor->project.scene.count, scene_count + 1U,
+                   path == NULL ? 0U : path->command_count);
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        }
+        const AfPathCommand *commands = &editor->project.path_data.commands[path->command_start];
+        const AfVec2 offset = {start.x - commands[0].point.x, start.y - commands[0].point.y};
+        if (commands[path->command_count - 1U].type != AF_PATH_CLOSE)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        if (mode != 0U) {
+            const AfPathCommand *closing = &commands[path->command_count - 2U];
+            const AfVec2 expected_out = last_handle ? outgoing : last;
+            if (closing->type != AF_PATH_CUBIC ||
+                hypotf(closing->point.x - commands[0].point.x,
+                       closing->point.y - commands[0].point.y) > 0.001F ||
+                hypotf(closing->control1.x + offset.x - expected_out.x,
+                       closing->control1.y + offset.y - expected_out.y) > 0.001F ||
+                hypotf(closing->control2.x + offset.x - incoming.x,
+                       closing->control2.y + offset.y - incoming.y) > 0.001F)
+                return af_editor_interaction_smoke_failure(editor, __LINE__);
+        }
+        af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_NODE);
+        af_editor_update_preview(editor);
+        af_editor_prepare_render_paths(editor);
+        editor->render_scene.count = 0U;
+        af_editor_render_path_points(editor, af_editor_camera(editor, width, height));
+        uint32_t connections = 0U;
+        for (uint32_t index = 0U; index < editor->render_scene.count; ++index) {
+            const AfSceneNode *node = &editor->render_scene.nodes[index];
+            if (node->layer_order == 90025 && node->bounds.x > 0.01F)
+                ++connections;
+        }
+        if (connections < anchors ||
+            af_editor_history_undo(&editor->history, &editor->project) != AF_RESULT_SUCCESS ||
+            af_scene_find(&editor->project.scene, node_id) != NULL ||
+            af_editor_history_redo(&editor->history, &editor->project) != AF_RESULT_SUCCESS ||
+            af_path_find_node_const(&editor->project.path_data, node_id) == NULL)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        if (mode != 4U &&
+            af_editor_history_undo(&editor->history, &editor->project) != AF_RESULT_SUCCESS)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+    }
+    /* A full command buffer cannot accept CLOSE: keep all input available for correction. */
+    const uint32_t scene_count = editor->project.scene.count;
+    af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_PEN);
+    editor->tool_command_count = AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY;
+    for (uint32_t index = 0U; index < editor->tool_command_count; ++index) {
+        editor->tool_commands[index] = (AfPathCommand){
+            .type = index == 0U ? AF_PATH_MOVE : AF_PATH_LINE,
+            .point = {(float)index, (float)(index % 3U)}};
+    }
+    if (af_editor_commit_pen_path(editor, true) ||
+        editor->tool_command_count != AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY ||
+        editor->project.scene.count != scene_count)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_cancel_vector_tool(editor, NULL);
+    af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_NODE);
+    af_editor_update_preview(editor);
+    editor->snapping = snapping;
+    return af_project_validate(&editor->project);
+}
+
 static AfResult af_editor_vector_preview_smoke(AfEditorState *editor, int width, int height) {
     const uint32_t stage = editor->rendered_frames;
     const uint32_t scene_count = editor->project.scene.count;
@@ -2864,6 +2971,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
                 editor->maximum_frames = 180U;
         } else if (strcmp(arguments[index], "--vector-preview-smoke") == 0) {
             editor->vector_preview_smoke = true;
+        } else if (strcmp(arguments[index], "--pen-close-smoke") == 0) {
+            editor->pen_close_smoke = true;
+            if (editor->maximum_frames == 0U)
+                editor->maximum_frames = 4U;
         } else if (strcmp(arguments[index], "--vfx-smoke") == 0) {
             editor->vfx_smoke = true;
         } else if (strcmp(arguments[index], "--particle-view-smoke") == 0) {
@@ -2924,7 +3035,8 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->output_path[0] != '\0' || editor->sequence_prefix[0] != '\0' ||
         editor->resize_smoke || editor->context_smoke || editor->tooltip_smoke ||
         editor->selection_smoke || editor->outline_smoke || editor->vector_tools_smoke ||
-        editor->vector_preview_smoke || editor->vfx_smoke || editor->particle_view_smoke ||
+        editor->vector_preview_smoke || editor->pen_close_smoke || editor->vfx_smoke ||
+        editor->particle_view_smoke ||
         editor->vector_animation_smoke || editor->image_smoke || editor->menu_smoke ||
         editor->workflow_smoke || editor->platform_smoke || editor->release_smoke ||
         editor->onboarding_smoke;

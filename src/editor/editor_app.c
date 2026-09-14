@@ -360,6 +360,7 @@ typedef struct AfEditorState {
     double pan_frame_ms;
     double pan_max_frame_ms;
     bool vector_preview_smoke;
+    bool pen_close_smoke;
     bool vfx_smoke;
     bool particle_view_smoke;
     bool vector_animation_smoke;
@@ -480,6 +481,7 @@ static bool af_editor_selected_path_has_animation(const AfEditorState *editor);
 static bool af_editor_path_segment_hit(const AfEditorState *editor, int width, int height,
                                        AfVec2 mouse, uint32_t *out_command, float *out_t);
 static void af_editor_group_selection(AfEditorState *editor);
+static AfPathCommand af_editor_pen_closing_segment(const AfEditorState *editor);
 
 // clang-format off
 #include "editor/editor_app_core.inc"
@@ -752,6 +754,13 @@ int af_editor_run(int argument_count, char **arguments) {
             if (result != AF_RESULT_SUCCESS) {
                 goto cleanup;
             }
+        }
+        if (editor.pen_close_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_pen_close_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS) {
+                goto cleanup;
+            }
+            af_editor_status(&editor, "Pen closure smoke: connections, handles and undo verified");
         }
         if (editor.vector_tools_smoke && editor.vector_tools_smoke_stage < 8U) {
             const float toolbar_start = editor.left_width + 14.0F;
@@ -1028,6 +1037,9 @@ int af_editor_run(int argument_count, char **arguments) {
                 result = af_editor_knife_smoke(&editor, width, height);
                 if (result == AF_RESULT_SUCCESS) {
                     result = af_editor_interaction_smoke(&editor, width, height);
+                }
+                if (result == AF_RESULT_SUCCESS) {
+                    result = af_editor_pen_close_smoke(&editor, width, height);
                 }
                 if (result != AF_RESULT_SUCCESS) {
                     af_log(AF_LOG_ERROR, "Vector interaction workflow smoke failed");

@@ -313,13 +313,53 @@ static AfVec2 af_editor_tool_line_end(AfVec2 start, AfVec2 end, SDL_Keymod modif
 }
 
 static bool af_editor_pen_closes_at(const AfEditorState *editor, AfAffine2 camera, AfVec2 screen) {
-    if (editor->tool_command_count < 3U) {
+    if (editor->tool_command_count < 2U ||
+        (editor->tool_command_count == 2U && editor->tool_commands[1].type != AF_PATH_CUBIC &&
+         !editor->tool_pen_has_outgoing)) {
         return false;
     }
     const AfVec2 first = af_affine_transform_point(camera, editor->tool_commands[0].point);
     const float dx = screen.x - first.x;
     const float dy = screen.y - first.y;
     return dx * dx + dy * dy <= 100.0F;
+}
+
+static AfPathCommand af_editor_pen_closing_segment(const AfEditorState *editor) {
+    const AfVec2 first = editor->tool_commands[0].point;
+    const AfVec2 last = editor->tool_commands[editor->tool_command_count - 1U].point;
+    const AfPathCommand *next = &editor->tool_commands[1];
+    const AfVec2 incoming = next->type == AF_PATH_CUBIC
+                               ? (AfVec2){2.0F * first.x - next->control1.x,
+                                          2.0F * first.y - next->control1.y}
+                               : first;
+    return (AfPathCommand){
+        .type = editor->tool_pen_has_outgoing || incoming.x != first.x || incoming.y != first.y
+                    ? AF_PATH_CUBIC : AF_PATH_LINE,
+        .point = first,
+        .control1 = editor->tool_pen_has_outgoing ? editor->tool_pen_outgoing : last,
+        .control2 = incoming};
+}
+
+static bool af_editor_commit_pen_path(AfEditorState *editor, bool closed) {
+    uint32_t count = editor->tool_command_count;
+    if (count < 2U || count > AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY) {
+        return false;
+    }
+    if (closed) {
+        const AfPathCommand closing = af_editor_pen_closing_segment(editor);
+        if (closing.type == AF_PATH_CUBIC) {
+            editor->tool_commands[count++] = closing;
+        }
+    }
+    const AfResult result =
+        af_editor_create_path_commands(editor, editor->tool_commands, count, closed, "Pen");
+    if (result != AF_RESULT_SUCCESS) {
+        af_editor_status(editor, "Cannot finish Pen path · drawing kept · Backspace removes a point");
+        return false;
+    }
+    af_editor_cancel_vector_tool(editor, closed ? "Pen path closed · endpoints connected"
+                                               : "Pen path finished · open endpoints");
+    return true;
 }
 
 static bool af_editor_vector_tool_mouse_down(AfEditorState *editor, int width, int height,
@@ -336,11 +376,7 @@ static bool af_editor_vector_tool_mouse_down(AfEditorState *editor, int width, i
         const bool close_path = af_editor_pen_closes_at(
             editor, af_editor_camera(editor, width, height), (AfVec2){event->x, event->y});
         if (close_path) {
-            (void)af_editor_create_path_commands(editor, editor->tool_commands,
-                                                 editor->tool_command_count, true, "Pen");
-            editor->tool_command_count = 0U;
-            editor->tool_pen_has_outgoing = false;
-            editor->drag_mode = AF_EDITOR_DRAG_NONE;
+            (void)af_editor_commit_pen_path(editor, true);
         } else {
             bool append = editor->tool_command_count == 0U;
             if (!append) {
@@ -367,11 +403,7 @@ static bool af_editor_vector_tool_mouse_down(AfEditorState *editor, int width, i
                 editor->tool_pen_has_outgoing = false;
             }
             if (event->clicks >= 2U && editor->tool_command_count >= 2U) {
-                (void)af_editor_create_path_commands(editor, editor->tool_commands,
-                                                     editor->tool_command_count, false, "Pen");
-                editor->tool_command_count = 0U;
-                editor->tool_pen_has_outgoing = false;
-                editor->drag_mode = AF_EDITOR_DRAG_NONE;
+                (void)af_editor_commit_pen_path(editor, false);
             } else {
                 editor->tool_start = point;
                 editor->tool_current = point;
@@ -519,11 +551,7 @@ static bool af_editor_finish_pen_path(AfEditorState *editor) {
         }
         return false;
     }
-    (void)af_editor_create_path_commands(editor, editor->tool_commands, editor->tool_command_count,
-                                         false, "Pen");
-    editor->tool_command_count = 0U;
-    editor->tool_pen_has_outgoing = false;
-    return true;
+    return af_editor_commit_pen_path(editor, false);
 }
 
 static AfResult af_editor_create_primitive(AfEditorState *editor, AfNodeType type, int width,

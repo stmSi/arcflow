@@ -236,11 +236,12 @@ static void af_editor_render_vector_tool_preview(AfEditorState *editor, int widt
                         : af_editor_tool_snap_point(
                               editor, af_editor_screen_to_project(editor, width, height,
                                                                   editor->mouse_position));
-            const AfPathCommand next = {
-                .type = !closing && editor->tool_pen_has_outgoing ? AF_PATH_CUBIC : AF_PATH_LINE,
-                .point = target,
-                .control1 = editor->tool_pen_outgoing,
-                .control2 = target};
+            const AfPathCommand next = closing ? af_editor_pen_closing_segment(editor)
+                : (AfPathCommand){
+                    .type = editor->tool_pen_has_outgoing ? AF_PATH_CUBIC : AF_PATH_LINE,
+                    .point = target,
+                    .control1 = editor->tool_pen_outgoing,
+                    .control2 = target};
             af_editor_render_preview_segment(editor, camera, anchor, &next, 20U, 2.0F,
                                              closing ? (AfColor){1.0F, 0.74F, 0.2F, 1.0F}
                                                      : (AfColor){0.5F, 0.75F, 0.9F, 0.9F},
@@ -482,15 +483,36 @@ static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera
     const AfPath *path = af_path_find_node_const(&editor->render_path_data, editor->selected_id);
     AfAffine2 transform = {0};
     AfVec2 previous = {0};
+    AfVec2 contour_start = {0};
     bool have_previous = false;
     if (selected == NULL || selected->type != AF_NODE_PATH || selected->polygon_sides != 0U ||
         path == NULL) {
         return;
     }
     transform = af_affine_multiply(camera, selected->world_transform);
+    /* Keep connections visible even when the authored path has no stroke. Bound overlay work
+     * so long paths leave room for their point handles and the docked UI. */
+    const uint32_t remaining = editor->render_scene.capacity - editor->render_scene.count;
+    const uint32_t reserve = AF_EDITOR_UI_RESERVE + path->command_count * 3U + 32U;
+    const uint32_t samples = remaining > reserve && path->command_count != 0U
+                                ? (uint32_t)af_editor_clamp(
+                                      (float)((remaining - reserve) / path->command_count), 1, 20)
+                                : 0U;
     for (uint32_t index = 0U; index < path->command_count; ++index) {
         const AfPathCommand *command =
             &editor->render_path_data.commands[path->command_start + index];
+        if (command->type == AF_PATH_MOVE) {
+            contour_start = command->point;
+            have_previous = false;
+        } else if (have_previous && samples != 0U) {
+            AfPathCommand connection = *command;
+            if (connection.type == AF_PATH_CLOSE) {
+                connection.type = AF_PATH_LINE;
+                connection.point = contour_start;
+            }
+            af_editor_render_preview_segment(editor, transform, previous, &connection, samples,
+                                             1.25F, (AfColor){0.35F, 0.75F, 1.0F, 1.0F}, 90025);
+        }
         const bool primary = index == editor->selected_path_command;
         const bool chosen = primary || af_editor_path_selection_contains(editor, index);
         const AfColor point_color = primary ? (AfColor){1.0F, 0.82F, 0.2F, 1.0F}
