@@ -1518,7 +1518,7 @@ static void af_editor_reset_selected(AfEditorState *editor, bool appearance) {
             node->fill = defaults.fill;
             node->corner_radius = defaults.corner_radius;
             if (style != NULL) {
-                *style = af_style_default(style->id, node->id, defaults.fill);
+                *style = af_editor_default_style(style->id, &defaults);
             }
         } else {
             node->local_transform = (AfTransform2D){.scale = {1.0F, 1.0F}};

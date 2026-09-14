@@ -247,6 +247,12 @@ static AfSceneNode af_editor_default_node(AfNodeType type, uint64_t id, AfVec2 p
                          .visible = true};
 }
 
+static AfStyle af_editor_default_style(uint64_t id, const AfSceneNode *node) {
+    AfStyle style = af_style_default(id, node->id, node->fill);
+    style.stroke.enabled = node->type >= AF_NODE_RECTANGLE && node->type <= AF_NODE_PATH;
+    return style;
+}
+
 static AfLayoutNode af_editor_centered_pivot_layout(const AfSceneNode *node) {
     AfLayoutNode layout = af_layout_node_default(node->id);
     layout.pivot = (AfVec2){0.5F, 0.5F};

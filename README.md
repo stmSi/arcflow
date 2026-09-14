@@ -66,6 +66,9 @@ Drag a numeric field horizontally to scrub it (`Shift` for fine control, `Ctrl` 
 or use its embedded `−`/`+` buttons for quick steps. `RATIO` links width/height and scale X/Y while
 typing, scrubbing, or stepping.
 New stars and polygons retain their point-count and inner-radius settings in the inspector.
+New shapes and closed paths start with a black 1 px outline; open paths keep their cyan 3 px
+outline. Use the inspector's **OUT** toggle to disable it. **Reset Appearance** enables the default
+outline again for shapes and paths.
 Choose **Convert to path** to turn a rectangle, rounded rectangle, ellipse, star, or polygon into
 individually editable vector points and Bézier handles. Conversion keeps the object's identity,
 transform, and paint, and one undo restores its shape settings. Ellipses and rounded corners use

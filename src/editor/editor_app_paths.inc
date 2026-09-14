@@ -140,6 +140,7 @@ static AfResult af_editor_create_primitive_at(AfEditorState *editor, AfNodeType 
     if (type == AF_NODE_ROUNDED_RECTANGLE) {
         snapshot.node.corner_radius = fminf(rect.size.x, rect.size.y) * 0.18F;
     }
+    snapshot.style = af_editor_default_style(id, &snapshot.node);
     snapshot.layout = af_editor_centered_pivot_layout(&snapshot.node);
     snapshot.has_layout = true;
     (void)snprintf(snapshot.name, sizeof(snapshot.name), "%s %llu", name, (unsigned long long)id);
@@ -179,9 +180,8 @@ static AfResult af_editor_create_path_geometry_with_shape(
     snapshot.node.polygon_inset = inset;
     snapshot.node.fill =
         closed ? (AfColor){0.58F, 0.34F, 0.94F, 1.0F} : (AfColor){0.25F, 0.72F, 1.0F, 0.0F};
-    snapshot.style = af_style_default(id, id, snapshot.node.fill);
+    snapshot.style = af_editor_default_style(id, &snapshot.node);
     if (!closed) {
-        snapshot.style.stroke.enabled = true;
         snapshot.style.stroke.width = 3.0F;
         snapshot.style.stroke.end_width = 3.0F;
         snapshot.style.stroke.cap = AF_STROKE_CAP_ROUND;
@@ -569,6 +569,7 @@ static AfResult af_editor_create_primitive(AfEditorState *editor, AfNodeType typ
     snapshot = (AfProjectNodeSnapshot){
         .node = af_editor_default_node(type, id, af_editor_visible_center(editor, width, height)),
         .index = editor->project.scene.count};
+    snapshot.style = af_editor_default_style(id, &snapshot.node);
     snapshot.layout = af_editor_centered_pivot_layout(&snapshot.node);
     snapshot.has_layout = true;
     (void)snprintf(snapshot.name, sizeof(snapshot.name), "%s %llu", name, (unsigned long long)id);
@@ -641,6 +642,7 @@ static AfResult af_editor_create_path(AfEditorState *editor, int width, int heig
         .index = editor->project.scene.count};
     snapshot.node.bounds = (AfVec2){220.0F, 180.0F};
     snapshot.node.fill = (AfColor){0.78F, 0.42F, 0.96F, 1.0F};
+    snapshot.style = af_editor_default_style(id, &snapshot.node);
     snapshot.layout = af_editor_centered_pivot_layout(&snapshot.node);
     snapshot.has_layout = true;
     (void)snprintf(snapshot.name, sizeof(snapshot.name), "Path %llu", (unsigned long long)id);
