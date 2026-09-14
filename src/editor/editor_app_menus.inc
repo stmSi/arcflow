@@ -67,7 +67,12 @@ typedef enum AfEditorMenuAction {
     AF_EDITOR_MENU_ACTION_SHORTCUTS,
     AF_EDITOR_MENU_ACTION_CHECK_UPDATES,
     AF_EDITOR_MENU_ACTION_ABOUT,
-    AF_EDITOR_MENU_ACTION_EXPORT
+    AF_EDITOR_MENU_ACTION_EXPORT,
+    /* Append actions: numeric IDs are persisted in shortcut preferences. */
+    AF_EDITOR_MENU_ACTION_WELD,
+    AF_EDITOR_MENU_ACTION_TRIM,
+    AF_EDITOR_MENU_ACTION_INTERSECT,
+    AF_EDITOR_MENU_ACTION_COUNT
 } AfEditorMenuAction;
 
 static void af_editor_execute_workflow_action(AfEditorState *editor, AfEditorMenuAction action,
@@ -161,10 +166,16 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
                    {"DISTRIBUTE H", "", AF_EDITOR_MENU_ACTION_DISTRIBUTE_HORIZONTAL},
                    {"DISTRIBUTE V", "", AF_EDITOR_MENU_ACTION_DISTRIBUTE_VERTICAL},
                    {"CANVAS GUIDES", "", AF_EDITOR_MENU_ACTION_ADD_VERTICAL_GUIDE},
-                   {"AUTOSAVE / RECOVERY", "", AF_EDITOR_MENU_ACTION_AUTOSAVE},
+                   {"AUTOSAVE / RECOVERY", "", AF_EDITOR_MENU_ACTION_AUTOSAVE}},
+         .item_count = 8U},
+        {.label = "SHAPE",
+         .width = 62.0F,
+         .items = {{"WELD", "", AF_EDITOR_MENU_ACTION_WELD},
+                   {"TRIM PRIMARY", "", AF_EDITOR_MENU_ACTION_TRIM},
+                   {"INTERSECT", "", AF_EDITOR_MENU_ACTION_INTERSECT},
                    {"COMBINE PATHS", "CTRL+L", AF_EDITOR_MENU_ACTION_COMBINE},
                    {"BREAK APART", "CTRL+SHIFT+L", AF_EDITOR_MENU_ACTION_BREAK_APART}},
-         .item_count = 10U},
+         .item_count = 5U},
         {.label = "HELP",
          .width = 56.0F,
          .items = {{"WELCOME", "", AF_EDITOR_MENU_ACTION_WELCOME},
@@ -1097,6 +1108,15 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
     case AF_EDITOR_MENU_ACTION_COMBINE:
         af_editor_compound_selection(editor, false);
         break;
+    case AF_EDITOR_MENU_ACTION_WELD:
+        af_editor_boolean_selection(editor, AF_PATH_BOOLEAN_UNION);
+        break;
+    case AF_EDITOR_MENU_ACTION_TRIM:
+        af_editor_boolean_selection(editor, AF_PATH_BOOLEAN_SUBTRACT);
+        break;
+    case AF_EDITOR_MENU_ACTION_INTERSECT:
+        af_editor_boolean_selection(editor, AF_PATH_BOOLEAN_INTERSECT);
+        break;
     case AF_EDITOR_MENU_ACTION_BREAK_APART:
         af_editor_compound_selection(editor, true);
         break;
@@ -1223,6 +1243,7 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         af_editor_show_project_dialog(editor, AF_EDITOR_DIALOG_UPDATE_MANIFEST);
         break;
     case AF_EDITOR_MENU_ACTION_NONE:
+    case AF_EDITOR_MENU_ACTION_COUNT:
         break;
     }
 }

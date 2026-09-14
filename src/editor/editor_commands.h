@@ -3,6 +3,7 @@
 
 #include "arcflow/arcflow_result.h"
 #include "core/allocator.h"
+#include "path/path_boolean.h"
 #include "project/project.h"
 
 #include <stdbool.h>
@@ -121,6 +122,10 @@ AfResult af_editor_command_combine(AfProject *project, const uint64_t *ids, uint
                                    uint64_t primary_id, AfEditorCommand *out_command);
 AfResult af_editor_command_break_apart(AfProject *project, uint64_t node_id,
                                        AfEditorCommand *out_command);
+/* Two closed static shapes. Subtract cuts other_id out of primary_id. Curves become
+ * line contours; empty results return NOT_FOUND and leave the sources intact. */
+AfResult af_editor_command_boolean(AfProject *project, uint64_t primary_id, uint64_t other_id,
+                                   AfPathBooleanOperation operation, AfEditorCommand *out_command);
 bool af_editor_can_reorder(const AfProject *project, uint64_t node_id, uint64_t target_id);
 AfResult af_editor_command_reorder(AfProject *project, uint64_t node_id, uint64_t target_id,
                                    bool after, AfEditorCommand *out_command);

@@ -77,6 +77,8 @@ typedef struct AfTestFixture {
 #include "test_editor_knife.inc"
 #include "test_editor_conversion.inc"
 #include "test_editor_compound.inc"
+#include "test_path_boolean.inc"
+#include "test_editor_boolean.inc"
 #include "test_gpu.inc"
 // clang-format on
 int main(void) {
@@ -116,6 +118,11 @@ int main(void) {
         {"compound geometry", af_test_editor_compound_geometry},
         {"compound persistence", af_test_editor_compound_persistence},
         {"compound rejections", af_test_editor_compound_rejections},
+        {"Boolean rectangles", af_test_boolean_rectangles},
+        {"Boolean contours and curves", af_test_boolean_contours_and_curves},
+        {"Boolean limits", af_test_boolean_limits},
+        {"Boolean editor commands", af_test_editor_boolean_commands},
+        {"Boolean curves and empty results", af_test_editor_boolean_curves_and_empty},
         {"shape settings and hierarchy", af_test_editor_shape_settings_and_hierarchy},
         {"hierarchy reparent", af_test_editor_reparent},
         {"knife limits", af_test_editor_knife_limits},

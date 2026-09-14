@@ -125,7 +125,8 @@ static uint32_t af_editor_menu_action_context(AfEditorMenuAction action) {
 
 static AfResult af_editor_action_callback(void *user, AfEditorActionId action_id) {
     AfEditorState *editor = user;
-    if (editor == NULL || action_id > (AfEditorActionId)AF_EDITOR_MENU_ACTION_EXPORT) {
+    if (editor == NULL || action_id == AF_EDITOR_MENU_ACTION_NONE ||
+        action_id >= (AfEditorActionId)AF_EDITOR_MENU_ACTION_COUNT) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
     af_editor_execute_menu_action(editor, (AfEditorMenuAction)action_id, editor->window_width,

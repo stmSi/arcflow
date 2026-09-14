@@ -77,6 +77,43 @@ static void af_editor_compound_selection(AfEditorState *editor, bool break_apart
         : "Combined with primary appearance; overlaps become holes · Ctrl+Z to undo");
 }
 
+static void af_editor_boolean_selection(AfEditorState *editor, AfPathBooleanOperation operation) {
+    if (editor->drag_mode != AF_EDITOR_DRAG_NONE || editor->tool_command_count != 0U) {
+        af_editor_status(editor, "Finish or cancel the current drawing or drag first");
+        return;
+    }
+    if (editor->selected_count != 2U) {
+        af_editor_status(editor, "Select two closed shapes; Trim cuts the last-selected shape");
+        return;
+    }
+    const uint64_t other = editor->selected_ids[0] == editor->selected_id
+        ? editor->selected_ids[1] : editor->selected_ids[0];
+    AfEditorCommand command = {0};
+    AfResult result = af_editor_command_boolean(&editor->project, editor->selected_id, other,
+                                                 operation, &command);
+    if (result == AF_RESULT_SUCCESS)
+        result = af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
+    if (result != AF_RESULT_SUCCESS) {
+        af_editor_status(editor, result == AF_RESULT_NOT_FOUND
+            ? "No filled result; original shapes kept"
+            : result == AF_RESULT_LIMIT_EXCEEDED
+                ? "Shape operation exceeds geometry or undo capacity; simplify the inputs"
+                : "Use closed static sibling shapes with solid paint; complex or tiny details may need simplification");
+        return;
+    }
+    af_editor_cancel_vector_tool(editor, NULL);
+    editor->active_tool = AF_EDITOR_TOOL_NODE;
+    af_editor_select_only(editor, command.target_id);
+    editor->selected_path_command = 0U;
+    af_editor_path_selection_only(editor, 0U);
+    af_editor_mark_dirty(editor);
+    af_editor_status(editor, operation == AF_PATH_BOOLEAN_UNION
+        ? "Welded · curves approximated as editable lines · Ctrl+Z restores originals"
+        : operation == AF_PATH_BOOLEAN_SUBTRACT
+            ? "Primary trimmed · curves approximated as editable lines · Ctrl+Z restores originals"
+            : "Intersection created · curves approximated as editable lines · Ctrl+Z restores originals");
+}
+
 static void af_editor_convert_selected_to_path(AfEditorState *editor) {
     const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
     if (editor->selected_count != 1U || node == NULL) {

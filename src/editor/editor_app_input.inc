@@ -2294,6 +2294,10 @@ static AfResult af_editor_interaction_smoke_failure(const AfEditorState *editor,
 }
 
 static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, int height) {
+    /* Hierarchy drags below need several visible rows regardless of saved dock preferences. */
+    const float saved_asset_height = editor->asset_height;
+    editor->asset_height = fminf(editor->asset_height, fmaxf(0,
+        af_editor_timeline_top(editor, height) - editor->toolbar_height - 6 * AF_EDITOR_ROW_HEIGHT - 16));
     /* Navigation must preserve the pointer anchor and keep dock input local. */
     const float saved_zoom = editor->zoom;
     const AfVec2 saved_pan = editor->pan;
@@ -2630,6 +2634,7 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
     }
     af_editor_select_only(editor, star);
     af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_SELECT);
+    editor->asset_height = saved_asset_height;
     af_editor_update_preview(editor);
     return af_project_validate(&editor->project);
 }
@@ -2744,6 +2749,50 @@ static AfResult af_editor_knife_smoke(AfEditorState *editor, int width, int heig
     af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_NODE);
     af_editor_update_preview(editor);
     return af_project_validate(&editor->project);
+}
+
+static AfResult af_editor_boolean_smoke(AfEditorState *editor, int width, int height) {
+    const AfVec2 center = af_editor_visible_center(editor, width, height);
+    const AfEditorMenuAction actions[] = {AF_EDITOR_MENU_ACTION_WELD, AF_EDITOR_MENU_ACTION_TRIM,
+                                          AF_EDITOR_MENU_ACTION_INTERSECT};
+    const SDL_KeyboardEvent undo = {.key = SDLK_Z, .mod = SDL_KMOD_CTRL, .down = true};
+    const SDL_KeyboardEvent redo = {.key = SDLK_Y, .mod = SDL_KMOD_CTRL, .down = true};
+    editor->timeline_focus = false;
+    for (uint32_t op = 0; op < 3U; ++op) {
+        const uint32_t initial_count = editor->project.scene.count;
+        const AfEditorToolRect a = {{center.x - 440 + (float)op * 300, center.y - 85}, {180, 150}};
+        const AfEditorToolRect b = {{a.position.x + 60, a.position.y + 35}, {150, 140}};
+        if (af_editor_create_primitive_at(editor, AF_NODE_RECTANGLE, a) != AF_RESULT_SUCCESS)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        const uint64_t primary = editor->selected_id;
+        if (af_editor_create_primitive_at(editor, AF_NODE_ELLIPSE, b) != AF_RESULT_SUCCESS)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        const uint64_t other = editor->selected_id;
+        af_editor_select_only(editor, other);
+        af_editor_selection_add(editor, primary);
+        const uint64_t started = SDL_GetPerformanceCounter();
+        if (af_editor_action_callback(editor, (AfEditorActionId)actions[op]) != AF_RESULT_SUCCESS)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        af_log(AF_LOG_INFO, "Boolean command %u: %.3f ms", op,
+            (double)(SDL_GetPerformanceCounter() - started) * 1000.0 / (double)SDL_GetPerformanceFrequency());
+        const AfPath *path = af_editor_selected_path(editor);
+        if (editor->project.scene.count != initial_count + 1U || editor->selected_id != primary ||
+            path == NULL || path->fill_rule != AF_PATH_FILL_NON_ZERO)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        af_editor_key(editor, width, height, &undo);
+        if (editor->project.scene.count != initial_count + 2U ||
+            af_scene_find_const(&editor->project.scene, primary)->type != AF_NODE_RECTANGLE)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        af_editor_key(editor, width, height, &redo);
+        if (editor->project.scene.count != initial_count + 1U ||
+            af_project_validate(&editor->project) != AF_RESULT_SUCCESS)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        af_editor_select_only(editor, primary);
+    }
+    editor->active_tool = AF_EDITOR_TOOL_SELECT;
+    af_editor_update_preview(editor);
+    af_editor_status(editor, "Left to right: Weld, Trim Primary, Intersect · curves approximated; undo verified");
+    return AF_RESULT_SUCCESS;
 }
 
 static AfResult af_editor_compound_smoke(AfEditorState *editor, int width, int height) {
@@ -3033,6 +3082,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->compound_smoke = true;
             if (editor->maximum_frames == 0U)
                 editor->maximum_frames = 4U;
+        } else if (strcmp(arguments[index], "--boolean-smoke") == 0) {
+            editor->boolean_smoke = true;
+            if (editor->maximum_frames == 0U)
+                editor->maximum_frames = 4U;
         } else if (strcmp(arguments[index], "--vfx-smoke") == 0) {
             editor->vfx_smoke = true;
         } else if (strcmp(arguments[index], "--particle-view-smoke") == 0) {
@@ -3093,7 +3146,7 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->output_path[0] != '\0' || editor->sequence_prefix[0] != '\0' ||
         editor->resize_smoke || editor->context_smoke || editor->tooltip_smoke ||
         editor->selection_smoke || editor->outline_smoke || editor->vector_tools_smoke ||
-        editor->vector_preview_smoke || editor->pen_close_smoke || editor->compound_smoke || editor->vfx_smoke ||
+        editor->vector_preview_smoke || editor->pen_close_smoke || editor->compound_smoke || editor->boolean_smoke || editor->vfx_smoke ||
         editor->particle_view_smoke ||
         editor->vector_animation_smoke || editor->image_smoke || editor->menu_smoke ||
         editor->workflow_smoke || editor->platform_smoke || editor->release_smoke ||

@@ -182,6 +182,7 @@ set(ARCFLOW_PROJECT_SOURCES
     src/animation/animation.c
     src/animation/advanced_animation.c
     src/path/path.c
+    src/path/path_boolean.c
     src/style/style.c
     src/layout/layout.c
     src/text/text.c

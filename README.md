@@ -86,14 +86,21 @@ undo/redo; responsive object dimensions are fixed at their current size during t
 Ctrl+D or Edit > Duplicate copies the selection, including group children, vector geometry and
 image/flipbook bindings. The hierarchy scrolls to the selected copy; failed copies report an error.
 Grouping and reordering both support undo/redo.
-**Tools > Combine Paths** (`Ctrl+L`) turns selected sibling shapes into one editable compound
+**Shape > Combine Paths** (`Ctrl+L`) turns selected sibling shapes into one editable compound
 path, keeping the primary (last-selected) object's name and appearance. Overlapping contours
-become holes using even-odd filling. **Tools > Break Apart** (`Ctrl+Shift+L`) separates a compound
+become holes using even-odd filling. **Shape > Break Apart** (`Ctrl+Shift+L`) separates a compound
 path into individual contour objects; holes become filled objects. Each action is one undo step.
 Bézier controls retain their geometry under transforms. This first slice accepts static leaf
 shapes with solid paint and no bindings, emitters, dependent styles, or parent flow layout;
 resolved layout becomes fixed placement. Existing undo limits apply (8 source/result paths and
-512 total path commands per side). Weld/union, Trim/subtract, and Intersect remain planned.
+512 total path commands per side).
+**Shape > Weld**, **Trim Primary**, and **Intersect** operate on two closed shapes. Weld produces
+their combined filled region, Trim subtracts the other shape from the last-selected shape, and
+Intersect retains their overlap. Both originals are replaced in one undo step, retaining the
+primary object's appearance; undo restores the originals, including their curves. Empty results
+leave both originals intact. These operations respect each input's fill rule and approximate curves
+with editable line contours (target tolerance 0.1 canvas unit). The same static-source restrictions
+apply. Dense intersections or details below the clipping precision are rejected without editing.
 Timeline edits share bounded `Ctrl+Z`/`Ctrl+Y` history with scene edits. Scene shortcuts include
 `1`–`4`, `F2`, arrows, `Q`/`E`, `-`/`+`, brackets, `U`, `Ctrl+S`, and `F5`. `4` creates an editable
 path. Selecting a point opens a canvas action bar for point keys, line/curve conversion, insertion,

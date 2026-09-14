@@ -136,6 +136,10 @@ static AfResult af_compound_output(const AfProject *project, const AfProjectNode
     output->node.local_transform.position = af_affine_transform_point(placement, minimum);
     output->node.local_transform.position.x -= content_origin.x;
     output->node.local_transform.position.y -= content_origin.y;
+    output->node.world_transform =
+        af_affine_multiply(source->node.world_transform,
+                           (AfAffine2){.m00 = 1, .m11 = 1, .tx = minimum.x, .ty = minimum.y});
+    output->node.resolved_bounds = output->node.bounds;
     output->layout = af_layout_node_default(id);
     output->layout.width = (AfLayoutValue){AF_LAYOUT_VALUE_FIXED, output->node.bounds.x};
     output->layout.height = (AfLayoutValue){AF_LAYOUT_VALUE_FIXED, output->node.bounds.y};
@@ -318,5 +322,62 @@ AfResult af_editor_command_break_apart(AfProject *project, uint64_t node_id,
         return AF_RESULT_INVALID_ARGUMENT;
     out_command->path_after_count = out_command->after_count;
     out_command->path_command_after_count = path->command_count;
+    return AF_RESULT_SUCCESS;
+}
+
+AfResult af_editor_command_boolean(AfProject *project, uint64_t primary_id, uint64_t other_id,
+                                   AfPathBooleanOperation operation, AfEditorCommand *out_command) {
+    const uint64_t ids[] = {primary_id, other_id};
+    AfResult result = af_editor_command_combine(project, ids, 2U, primary_id, out_command);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
+    /* Combine has already captured originals and placed both inputs in the primary frame.
+     * Count the first operand's commands before its generated metadata is discarded. */
+    const AfPath *original = af_path_find_node_const(&project->path_data, primary_id);
+    AfPathCommand primitive[16];
+    const AfSceneNode *node = af_scene_find_const(&project->scene, primary_id);
+    const uint32_t first_count =
+        original != NULL ? original->command_count
+                         : af_editor_vector_primitive_path(node->type, node->resolved_bounds,
+                                                           node->corner_radius, primitive, 16U);
+    if (first_count == 0U)
+        return AF_RESULT_INVALID_ARGUMENT;
+    const AfPath *other = af_path_find_node_const(&project->path_data, other_id);
+    AfPath paths[] = {{.id = 1U,
+                       .node_id = 1U,
+                       .command_count = first_count,
+                       .geometry_generation = 1U,
+                       .fill_rule = original != NULL ? original->fill_rule : AF_PATH_FILL_NON_ZERO},
+                      {.id = 2U,
+                       .node_id = 2U,
+                       .command_start = first_count,
+                       .command_count = out_command->path_command_after_count - first_count,
+                       .geometry_generation = 1U,
+                       .fill_rule = other != NULL ? other->fill_rule : AF_PATH_FILL_NON_ZERO}};
+    AfPathData data = {.paths = paths,
+                       .path_count = 2U,
+                       .path_capacity = 2U,
+                       .commands = out_command->path_command_after,
+                       .command_count = out_command->path_command_after_count,
+                       .command_capacity = AF_EDITOR_COMMAND_MAX_PATH_COMMANDS};
+    const AfAffine2 world = node->world_transform;
+    const float scale = sqrtf(world.m00 * world.m00 + world.m01 * world.m01 +
+                              world.m10 * world.m10 + world.m11 * world.m11);
+    uint32_t count = 0U;
+    result = af_path_boolean(project->allocator, &data, &paths[0], &paths[1], operation,
+                             0.1F / fmaxf(scale, 0.0001F), out_command->path_command_after,
+                             AF_EDITOR_COMMAND_MAX_PATH_COMMANDS, &count);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
+    if (count == 0U)
+        return AF_RESULT_NOT_FOUND;
+    const AfProjectNodeSnapshot combined = out_command->after[0];
+    result = af_compound_output(project, &combined, primary_id, out_command->path_command_after,
+                                count, &out_command->after[0]);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
+    out_command->path_command_after_count = count;
+    out_command->path_after[0].path.command_count = count;
+    out_command->path_after[0].path.fill_rule = AF_PATH_FILL_NON_ZERO;
     return AF_RESULT_SUCCESS;
 }

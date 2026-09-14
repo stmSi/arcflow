@@ -152,6 +152,7 @@ typedef enum AfEditorTopMenu {
     AF_EDITOR_MENU_ASSETS,
     AF_EDITOR_MENU_WORKSPACE,
     AF_EDITOR_MENU_TOOLS,
+    AF_EDITOR_MENU_SHAPE,
     AF_EDITOR_MENU_HELP
 } AfEditorTopMenu;
 
@@ -362,6 +363,7 @@ typedef struct AfEditorState {
     bool vector_preview_smoke;
     bool pen_close_smoke;
     bool compound_smoke;
+    bool boolean_smoke;
     bool vfx_smoke;
     bool particle_view_smoke;
     bool vector_animation_smoke;
@@ -768,6 +770,11 @@ int af_editor_run(int argument_count, char **arguments) {
             if (result != AF_RESULT_SUCCESS)
                 goto cleanup;
         }
+        if (editor.boolean_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_boolean_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS)
+                goto cleanup;
+        }
         if (editor.vector_tools_smoke && editor.vector_tools_smoke_stage < 8U) {
             const float toolbar_start = editor.left_width + 14.0F;
             const float canvas_left = editor.left_width + 90.0F;
@@ -1043,6 +1050,9 @@ int af_editor_run(int argument_count, char **arguments) {
                 result = af_editor_knife_smoke(&editor, width, height);
                 if (result == AF_RESULT_SUCCESS) {
                     result = af_editor_compound_smoke(&editor, width, height);
+                }
+                if (result == AF_RESULT_SUCCESS) {
+                    result = af_editor_boolean_smoke(&editor, width, height);
                 }
                 if (result == AF_RESULT_SUCCESS) {
                     result = af_editor_interaction_smoke(&editor, width, height);
