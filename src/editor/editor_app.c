@@ -361,6 +361,7 @@ typedef struct AfEditorState {
     double pan_max_frame_ms;
     bool vector_preview_smoke;
     bool pen_close_smoke;
+    bool compound_smoke;
     bool vfx_smoke;
     bool particle_view_smoke;
     bool vector_animation_smoke;
@@ -762,6 +763,11 @@ int af_editor_run(int argument_count, char **arguments) {
             }
             af_editor_status(&editor, "Pen closure smoke: connections, handles and undo verified");
         }
+        if (editor.compound_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_compound_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS)
+                goto cleanup;
+        }
         if (editor.vector_tools_smoke && editor.vector_tools_smoke_stage < 8U) {
             const float toolbar_start = editor.left_width + 14.0F;
             const float canvas_left = editor.left_width + 90.0F;
@@ -1035,6 +1041,9 @@ int af_editor_run(int argument_count, char **arguments) {
             }
             if (editor.vector_tools_smoke_stage == 7U) {
                 result = af_editor_knife_smoke(&editor, width, height);
+                if (result == AF_RESULT_SUCCESS) {
+                    result = af_editor_compound_smoke(&editor, width, height);
+                }
                 if (result == AF_RESULT_SUCCESS) {
                     result = af_editor_interaction_smoke(&editor, width, height);
                 }

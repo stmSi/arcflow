@@ -86,6 +86,14 @@ undo/redo; responsive object dimensions are fixed at their current size during t
 Ctrl+D or Edit > Duplicate copies the selection, including group children, vector geometry and
 image/flipbook bindings. The hierarchy scrolls to the selected copy; failed copies report an error.
 Grouping and reordering both support undo/redo.
+**Tools > Combine Paths** (`Ctrl+L`) turns selected sibling shapes into one editable compound
+path, keeping the primary (last-selected) object's name and appearance. Overlapping contours
+become holes using even-odd filling. **Tools > Break Apart** (`Ctrl+Shift+L`) separates a compound
+path into individual contour objects; holes become filled objects. Each action is one undo step.
+Bézier controls retain their geometry under transforms. This first slice accepts static leaf
+shapes with solid paint and no bindings, emitters, dependent styles, or parent flow layout;
+resolved layout becomes fixed placement. Existing undo limits apply (8 source/result paths and
+512 total path commands per side). Weld/union, Trim/subtract, and Intersect remain planned.
 Timeline edits share bounded `Ctrl+Z`/`Ctrl+Y` history with scene edits. Scene shortcuts include
 `1`–`4`, `F2`, arrows, `Q`/`E`, `-`/`+`, brackets, `U`, `Ctrl+S`, and `F5`. `4` creates an editable
 path. Selecting a point opens a canvas action bar for point keys, line/curve conversion, insertion,

@@ -24,6 +24,7 @@
 #include "particle/particle.h"
 #include "path/path.h"
 #include "project/image_import.h"
+#include "project/interchange.h"
 #include "project/project.h"
 #include "renderer/render_items.h"
 #include "rigging/rigging.h"
@@ -75,6 +76,7 @@ typedef struct AfTestFixture {
 #include "test_editor.inc"
 #include "test_editor_knife.inc"
 #include "test_editor_conversion.inc"
+#include "test_editor_compound.inc"
 #include "test_gpu.inc"
 // clang-format on
 int main(void) {
@@ -111,6 +113,9 @@ int main(void) {
         {"editor inspector values", af_test_editor_inspector_values},
         {"knife geometry", af_test_editor_knife_geometry},
         {"shape conversion", af_test_editor_conversion},
+        {"compound geometry", af_test_editor_compound_geometry},
+        {"compound persistence", af_test_editor_compound_persistence},
+        {"compound rejections", af_test_editor_compound_rejections},
         {"shape settings and hierarchy", af_test_editor_shape_settings_and_hierarchy},
         {"hierarchy reparent", af_test_editor_reparent},
         {"knife limits", af_test_editor_knife_limits},

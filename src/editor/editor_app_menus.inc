@@ -10,6 +10,8 @@ typedef enum AfEditorMenuAction {
     AF_EDITOR_MENU_ACTION_UNDO,
     AF_EDITOR_MENU_ACTION_REDO,
     AF_EDITOR_MENU_ACTION_DUPLICATE,
+    AF_EDITOR_MENU_ACTION_COMBINE,
+    AF_EDITOR_MENU_ACTION_BREAK_APART,
     AF_EDITOR_MENU_ACTION_RENAME,
     AF_EDITOR_MENU_ACTION_DELETE,
     AF_EDITOR_MENU_ACTION_SELECT_ALL,
@@ -159,8 +161,10 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
                    {"DISTRIBUTE H", "", AF_EDITOR_MENU_ACTION_DISTRIBUTE_HORIZONTAL},
                    {"DISTRIBUTE V", "", AF_EDITOR_MENU_ACTION_DISTRIBUTE_VERTICAL},
                    {"CANVAS GUIDES", "", AF_EDITOR_MENU_ACTION_ADD_VERTICAL_GUIDE},
-                   {"AUTOSAVE / RECOVERY", "", AF_EDITOR_MENU_ACTION_AUTOSAVE}},
-         .item_count = 8U},
+                   {"AUTOSAVE / RECOVERY", "", AF_EDITOR_MENU_ACTION_AUTOSAVE},
+                   {"COMBINE PATHS", "CTRL+L", AF_EDITOR_MENU_ACTION_COMBINE},
+                   {"BREAK APART", "CTRL+SHIFT+L", AF_EDITOR_MENU_ACTION_BREAK_APART}},
+         .item_count = 10U},
         {.label = "HELP",
          .width = 56.0F,
          .items = {{"WELCOME", "", AF_EDITOR_MENU_ACTION_WELCOME},
@@ -1089,6 +1093,12 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         break;
     case AF_EDITOR_MENU_ACTION_GRID:
         editor->grid_visible = !editor->grid_visible;
+        break;
+    case AF_EDITOR_MENU_ACTION_COMBINE:
+        af_editor_compound_selection(editor, false);
+        break;
+    case AF_EDITOR_MENU_ACTION_BREAK_APART:
+        af_editor_compound_selection(editor, true);
         break;
     case AF_EDITOR_MENU_ACTION_SNAP:
         editor->snapping = !editor->snapping;

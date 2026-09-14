@@ -1972,6 +1972,10 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
         af_editor_group_selection(editor);
         return;
     }
+    if (control && event->key == SDLK_L) {
+        af_editor_compound_selection(editor, (event->mod & SDL_KMOD_SHIFT) != 0U);
+        return;
+    }
     if (event->key == SDLK_ESCAPE && editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY) {
         editor->drag_mode = AF_EDITOR_DRAG_NONE;
         editor->hierarchy_drag_started = false;
@@ -2742,6 +2746,56 @@ static AfResult af_editor_knife_smoke(AfEditorState *editor, int width, int heig
     return af_project_validate(&editor->project);
 }
 
+static AfResult af_editor_compound_smoke(AfEditorState *editor, int width, int height) {
+    const uint32_t initial_count = editor->project.scene.count;
+    const AfVec2 center = af_editor_visible_center(editor, width, height);
+    const AfEditorToolRect outer = {{center.x - 150, center.y - 120}, {300, 240}};
+    const AfEditorToolRect inner = {{center.x - 70, center.y - 60}, {140, 120}};
+    if (af_editor_create_primitive_at(editor, AF_NODE_ROUNDED_RECTANGLE, outer) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    const uint64_t outer_id = editor->selected_id;
+    if (af_editor_create_primitive_at(editor, AF_NODE_ELLIPSE, inner) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    const uint64_t inner_id = editor->selected_id;
+    af_editor_select_only(editor, outer_id);
+    af_editor_selection_add(editor, inner_id);
+    editor->timeline_focus = false;
+    const SDL_KeyboardEvent combine = {.key = SDLK_L, .mod = SDL_KMOD_CTRL, .down = true};
+    const SDL_KeyboardEvent undo = {.key = SDLK_Z, .mod = SDL_KMOD_CTRL, .down = true};
+    const SDL_KeyboardEvent redo = {.key = SDLK_Y, .mod = SDL_KMOD_CTRL, .down = true};
+    const uint32_t cursor = editor->history.cursor;
+    editor->tool_command_count = 1U;
+    af_editor_key(editor, width, height, &combine);
+    if (editor->history.cursor != cursor || editor->tool_command_count != 1U ||
+        editor->project.scene.count != initial_count + 2U)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    editor->tool_command_count = 0U;
+    af_editor_key(editor, width, height, &combine);
+    const AfPath *path = af_editor_selected_path(editor);
+    if (editor->project.scene.count != initial_count + 1U || editor->selected_id != inner_id ||
+        path == NULL || path->fill_rule != AF_PATH_FILL_EVEN_ODD)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_key(editor, width, height, &undo);
+    if (editor->project.scene.count != initial_count + 2U ||
+        af_scene_find_const(&editor->project.scene, outer_id) == NULL)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_key(editor, width, height, &redo);
+    af_editor_select_only(editor, inner_id);
+    af_editor_execute_menu_action(editor, AF_EDITOR_MENU_ACTION_BREAK_APART, width, height);
+    if (editor->selected_count != 2U || editor->project.scene.count != initial_count + 2U)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_key(editor, width, height, &undo);
+    af_editor_key(editor, width, height, &redo);
+    if (editor->project.scene.count != initial_count + 2U ||
+        af_project_validate(&editor->project) != AF_RESULT_SUCCESS)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_key(editor, width, height, &undo);
+    af_editor_select_only(editor, inner_id);
+    af_editor_update_preview(editor);
+    af_editor_status(editor, "Combine / Break Apart: curves, selection, menu and undo verified");
+    return AF_RESULT_SUCCESS;
+}
+
 static AfResult af_editor_pen_close_smoke(AfEditorState *editor, int width, int height) {
     const bool snapping = editor->snapping;
     editor->snapping = false;
@@ -2975,6 +3029,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->pen_close_smoke = true;
             if (editor->maximum_frames == 0U)
                 editor->maximum_frames = 4U;
+        } else if (strcmp(arguments[index], "--compound-smoke") == 0) {
+            editor->compound_smoke = true;
+            if (editor->maximum_frames == 0U)
+                editor->maximum_frames = 4U;
         } else if (strcmp(arguments[index], "--vfx-smoke") == 0) {
             editor->vfx_smoke = true;
         } else if (strcmp(arguments[index], "--particle-view-smoke") == 0) {
@@ -3035,7 +3093,7 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->output_path[0] != '\0' || editor->sequence_prefix[0] != '\0' ||
         editor->resize_smoke || editor->context_smoke || editor->tooltip_smoke ||
         editor->selection_smoke || editor->outline_smoke || editor->vector_tools_smoke ||
-        editor->vector_preview_smoke || editor->pen_close_smoke || editor->vfx_smoke ||
+        editor->vector_preview_smoke || editor->pen_close_smoke || editor->compound_smoke || editor->vfx_smoke ||
         editor->particle_view_smoke ||
         editor->vector_animation_smoke || editor->image_smoke || editor->menu_smoke ||
         editor->workflow_smoke || editor->platform_smoke || editor->release_smoke ||

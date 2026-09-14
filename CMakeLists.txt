@@ -242,6 +242,7 @@ target_link_libraries(arcflow_project PUBLIC arcflow_core PRIVATE SDL3::SDL3-sta
 
 add_library(arcflow_editor_core STATIC
     src/editor/editor_commands.c
+    src/editor/editor_compound.c
     src/editor/editor_actions.c
     src/editor/editor_gizmo.c
     src/editor/editor_inspector.c

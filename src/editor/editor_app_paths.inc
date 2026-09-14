@@ -37,6 +37,46 @@ static void af_editor_group_selection(AfEditorState *editor) {
     }
 }
 
+static void af_editor_compound_selection(AfEditorState *editor, bool break_apart) {
+    if (editor->drag_mode != AF_EDITOR_DRAG_NONE || editor->tool_command_count != 0U) {
+        af_editor_status(editor, "Finish or cancel the current drawing or drag first");
+        return;
+    }
+    if ((break_apart && editor->selected_count != 1U) ||
+        (!break_apart && editor->selected_count < 2U)) {
+        af_editor_status(editor, break_apart ? "Select one compound path to break apart"
+                                             : "Select two or more shapes to combine");
+        return;
+    }
+    AfEditorCommand command = {0};
+    AfResult result = break_apart
+        ? af_editor_command_break_apart(&editor->project, editor->selected_id, &command)
+        : af_editor_command_combine(&editor->project, editor->selected_ids, editor->selected_count,
+                                     editor->selected_id, &command);
+    if (result == AF_RESULT_SUCCESS)
+        result = af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
+    if (result != AF_RESULT_SUCCESS) {
+        af_editor_status(editor, result == AF_RESULT_LIMIT_EXCEEDED
+            ? "Compound edit exceeds document or undo capacity (8 paths / 512 commands)"
+            : result == AF_RESULT_UNSUPPORTED_FEATURE
+                ? "Use static sibling shapes with solid paint, no bindings, and no flow layout"
+                : break_apart ? "Break Apart needs a path with at least two contours"
+                              : "Cannot combine this selection; check shapes and transforms");
+        return;
+    }
+    af_editor_cancel_vector_tool(editor, NULL);
+    editor->active_tool = AF_EDITOR_TOOL_SELECT;
+    af_editor_select_only(editor, command.after[0].node.id);
+    for (uint32_t i = 1U; i < command.after_count; ++i)
+        editor->selected_ids[editor->selected_count++] = command.after[i].node.id;
+    editor->selected_path_command = UINT32_MAX;
+    editor->selected_path_command_count = 0U;
+    af_editor_mark_dirty(editor);
+    af_editor_status(editor, break_apart
+        ? "Contours separated; holes become filled objects · Ctrl+Z to undo"
+        : "Combined with primary appearance; overlaps become holes · Ctrl+Z to undo");
+}
+
 static void af_editor_convert_selected_to_path(AfEditorState *editor) {
     const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
     if (editor->selected_count != 1U || node == NULL) {

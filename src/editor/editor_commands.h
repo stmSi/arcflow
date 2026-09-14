@@ -27,7 +27,8 @@ typedef enum AfEditorCommandType {
     AF_EDITOR_COMMAND_PATH,
     AF_EDITOR_COMMAND_CONVERT_PATH,
     AF_EDITOR_COMMAND_GROUP,
-    AF_EDITOR_COMMAND_REORDER
+    AF_EDITOR_COMMAND_REORDER,
+    AF_EDITOR_COMMAND_COMPOUND
 } AfEditorCommandType;
 
 typedef enum AfEditorMergeKey {
@@ -114,6 +115,12 @@ AfResult af_editor_command_convert_path(const AfProject *project, uint64_t node_
                                         AfEditorCommand *out_command);
 AfResult af_editor_command_group(const AfProject *project, const uint64_t *ids, uint32_t count,
                                  uint64_t group_id, AfEditorCommand *out_command);
+/* Static leaf siblings with solid appearance. The primary object's appearance is retained;
+ * Combine uses even-odd filling. Builders never allocate IDs or mutate authored project data. */
+AfResult af_editor_command_combine(AfProject *project, const uint64_t *ids, uint32_t count,
+                                   uint64_t primary_id, AfEditorCommand *out_command);
+AfResult af_editor_command_break_apart(AfProject *project, uint64_t node_id,
+                                       AfEditorCommand *out_command);
 bool af_editor_can_reorder(const AfProject *project, uint64_t node_id, uint64_t target_id);
 AfResult af_editor_command_reorder(AfProject *project, uint64_t node_id, uint64_t target_id,
                                    bool after, AfEditorCommand *out_command);

@@ -309,6 +309,68 @@ static AfResult af_editor_path_apply(AfProject *project, const AfEditorCommand *
 static AfResult af_editor_command_apply_side(AfProject *project, const AfEditorCommand *command,
                                              bool forward) {
     switch (command->type) {
+    case AF_EDITOR_COMMAND_COMPOUND: {
+        const AfProjectNodeSnapshot *remove = forward ? command->before : command->after;
+        const AfProjectNodeSnapshot *insert = forward ? command->after : command->before;
+        const uint32_t remove_count = forward ? command->before_count : command->after_count;
+        const uint32_t insert_count = forward ? command->after_count : command->before_count;
+        const uint32_t remove_paths =
+            forward ? command->path_before_count : command->path_after_count;
+        const uint32_t insert_paths =
+            forward ? command->path_after_count : command->path_before_count;
+        const uint32_t remove_points =
+            forward ? command->path_command_before_count : command->path_command_after_count;
+        const uint32_t insert_points =
+            forward ? command->path_command_after_count : command->path_command_before_count;
+        uint32_t remove_layouts = 0U, insert_layouts = 0U;
+        if (remove_count == 0U || insert_count == 0U)
+            return AF_RESULT_INVALID_ARGUMENT;
+        for (uint32_t i = 0; i < remove_count; ++i) {
+            if (af_scene_find_const(&project->scene, remove[i].node.id) == NULL)
+                return AF_RESULT_NOT_FOUND;
+            remove_layouts += remove[i].has_layout;
+        }
+        for (uint32_t i = 0; i < insert_count; ++i)
+            insert_layouts += insert[i].has_layout;
+        if (project->scene.count < remove_count || project->style_data.count < remove_count ||
+            project->layout_data.count < remove_layouts ||
+            project->path_data.path_count < remove_paths ||
+            project->path_data.command_count < remove_points)
+            return AF_RESULT_INVALID_ARGUMENT;
+        if (insert_count > project->scene.capacity - (project->scene.count - remove_count) ||
+            insert_count >
+                project->style_data.capacity - (project->style_data.count - remove_count) ||
+            insert_layouts >
+                project->layout_data.capacity - (project->layout_data.count - remove_layouts) ||
+            insert_paths >
+                project->path_data.path_capacity - (project->path_data.path_count - remove_paths) ||
+            insert_points > project->path_data.command_capacity -
+                                (project->path_data.command_count - remove_points))
+            return AF_RESULT_LIMIT_EXCEEDED;
+        const uint64_t next_id = project->next_id;
+        af_editor_path_remove(project, command, forward);
+        /* Builders accept only independent leaves. No invalid intermediate state is rendered. */
+        for (uint32_t i = remove_count; i > 0U; --i)
+            (void)af_project_remove_node_exact(project, remove[i - 1U].node.id);
+        AfResult result = af_editor_restore(project, insert, insert_count);
+        const bool inserted = result == AF_RESULT_SUCCESS;
+        if (inserted)
+            result = af_editor_path_restore(project, command, !forward);
+        if (result == AF_RESULT_SUCCESS)
+            result = af_layout_evaluate_scene(&project->scene);
+        if (result != AF_RESULT_SUCCESS) {
+            if (inserted) {
+                af_editor_path_remove(project, command, !forward);
+                for (uint32_t i = insert_count; i > 0U; --i)
+                    (void)af_project_remove_node_exact(project, insert[i - 1U].node.id);
+            }
+            (void)af_editor_restore(project, remove, remove_count);
+            (void)af_editor_path_restore(project, command, forward);
+            (void)af_layout_evaluate_scene(&project->scene);
+            project->next_id = next_id;
+        }
+        return result;
+    }
     case AF_EDITOR_COMMAND_CREATE:
     case AF_EDITOR_COMMAND_DUPLICATE:
         if (forward) {
