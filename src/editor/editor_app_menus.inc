@@ -72,6 +72,11 @@ typedef enum AfEditorMenuAction {
     AF_EDITOR_MENU_ACTION_WELD,
     AF_EDITOR_MENU_ACTION_TRIM,
     AF_EDITOR_MENU_ACTION_INTERSECT,
+    AF_EDITOR_MENU_ACTION_JOIN_ENDPOINTS,
+    AF_EDITOR_MENU_ACTION_CONTINUE_PATH,
+    AF_EDITOR_MENU_ACTION_OUTLINE_OBJECT,
+    AF_EDITOR_MENU_ACTION_OFFSET,
+    AF_EDITOR_MENU_ACTION_TEXT,
     AF_EDITOR_MENU_ACTION_COUNT
 } AfEditorMenuAction;
 
@@ -174,8 +179,13 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
                    {"TRIM PRIMARY", "", AF_EDITOR_MENU_ACTION_TRIM},
                    {"INTERSECT", "", AF_EDITOR_MENU_ACTION_INTERSECT},
                    {"COMBINE PATHS", "CTRL+L", AF_EDITOR_MENU_ACTION_COMBINE},
-                   {"BREAK APART", "CTRL+SHIFT+L", AF_EDITOR_MENU_ACTION_BREAK_APART}},
-         .item_count = 5U},
+                   {"BREAK APART", "CTRL+SHIFT+L", AF_EDITOR_MENU_ACTION_BREAK_APART},
+                   {"JOIN ENDPOINTS", "", AF_EDITOR_MENU_ACTION_JOIN_ENDPOINTS},
+                   {"CONTINUE PATH", "", AF_EDITOR_MENU_ACTION_CONTINUE_PATH},
+                   {"OUTLINE TO OBJECT", "", AF_EDITOR_MENU_ACTION_OUTLINE_OBJECT},
+                   {"CONTOUR / OFFSET...", "", AF_EDITOR_MENU_ACTION_OFFSET},
+                   {"CREATE / EDIT TEXT...", "T", AF_EDITOR_MENU_ACTION_TEXT}},
+         .item_count = 10U},
         {.label = "HELP",
          .width = 56.0F,
          .items = {{"WELCOME", "", AF_EDITOR_MENU_ACTION_WELCOME},
@@ -1119,6 +1129,26 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         break;
     case AF_EDITOR_MENU_ACTION_BREAK_APART:
         af_editor_compound_selection(editor, true);
+        break;
+    case AF_EDITOR_MENU_ACTION_JOIN_ENDPOINTS:
+        af_editor_join_endpoints(editor);
+        break;
+    case AF_EDITOR_MENU_ACTION_CONTINUE_PATH:
+        af_editor_continue_path(editor);
+        break;
+    case AF_EDITOR_MENU_ACTION_OUTLINE_OBJECT:
+        (void)af_editor_expand_outline(editor, false, 0.0F);
+        break;
+    case AF_EDITOR_MENU_ACTION_OFFSET:
+        if (editor->selected_count == 1U && editor->tool_command_count == 0U) {
+            editor->offset_panel_open = true;
+            editor->offset_replace = true;
+            (void)snprintf(editor->offset_buffer, sizeof(editor->offset_buffer), "8");
+        } else
+            af_editor_status(editor, "Select one closed shape and finish drawing first");
+        break;
+    case AF_EDITOR_MENU_ACTION_TEXT:
+        af_editor_open_text_panel(editor, width, height);
         break;
     case AF_EDITOR_MENU_ACTION_SNAP:
         editor->snapping = !editor->snapping;

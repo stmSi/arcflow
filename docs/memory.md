@@ -18,7 +18,7 @@ Runtime-package limits are 4,096 nodes, 256 clips, 8,192 tracks, 65,536 keyframe
 32,768 path commands. Each path has at most 4,096 commands; flattening, contours, subdivision depth,
 tessellated vertices, and aggregate cached vertices have fixed caps. Editable projects use bounded
 arrays for 64 clips, 1,024 tracks, and 16,384 keys. Timeline selections hold at most 256 keys and path
-undo snapshots at most 512 commands, while undo storage has a fixed byte budget. Geometry allocates
+undo snapshots at most 4,096 aggregate commands per side, while undo storage has a fixed 16 MiB default byte budget. Pen, Knife and Join retain separate 512-command bounds. Editable text metadata is stored alongside project nodes and in node snapshots; runtime nodes remain unchanged. Geometry allocates
 only when a path generation changes; transform, paint, opacity, and normal playback do not rebuild it.
 Composition targets come from a bounded pool, shape and rig solvers use fixed-capacity scratch
 storage, constraints cap iterations and chain length, and procedural updates cap fixed steps per

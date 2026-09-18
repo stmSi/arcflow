@@ -401,7 +401,8 @@ static void af_editor_render_vector_tool_preview(AfEditorState *editor, int widt
         } else if (editor->active_tool == AF_EDITOR_TOOL_POLYGON ||
                    editor->active_tool == AF_EDITOR_TOOL_STAR ||
                    editor->active_tool == AF_EDITOR_TOOL_ARC ||
-                   editor->active_tool == AF_EDITOR_TOOL_SPIRAL) {
+                   editor->active_tool == AF_EDITOR_TOOL_SPIRAL ||
+                   editor->active_tool == AF_EDITOR_TOOL_TEXT) {
             AfPathCommand commands[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U];
             uint32_t command_count = 0U;
             if (editor->active_tool == AF_EDITOR_TOOL_POLYGON) {
@@ -479,6 +480,8 @@ static void af_editor_render_path_hover(AfEditorState *editor, int width, int he
 }
 
 static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera) {
+    if (af_editor_is_text(editor, editor->selected_id))
+        return;
     const AfSceneNode *selected = af_scene_find_const(&editor->preview_scene, editor->selected_id);
     const AfPath *path = af_path_find_node_const(&editor->render_path_data, editor->selected_id);
     AfAffine2 transform = {0};
@@ -586,6 +589,8 @@ static bool af_editor_path_action_fits(float x, float width, float canvas_right)
 }
 
 static void af_editor_render_path_actions(AfEditorState *editor, int width, int height) {
+    if (af_editor_is_text(editor, editor->selected_id))
+        return;
     float canvas_x = 0.0F;
     float canvas_y = 0.0F;
     float canvas_width = 0.0F;

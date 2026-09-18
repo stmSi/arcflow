@@ -391,7 +391,7 @@ static bool af_emit_join(AfVec2 *vertices, uint32_t capacity, uint32_t *count, A
         return true;
     }
     {
-        const float side = cross > 0.0F ? 1.0F : -1.0F;
+        const float side = cross > 0.0F ? -1.0F : 1.0F;
         first_outer = af_vec_add(
             point, (AfVec2){-incoming.y * width * 0.5F * side, incoming.x * width * 0.5F * side});
         second_outer = af_vec_add(
@@ -430,7 +430,9 @@ static bool af_emit_join(AfVec2 *vertices, uint32_t capacity, uint32_t *count, A
             const AfVec2 miter = af_vec_add(first_outer, af_vec_scale(first_direction, distance));
             if (hypotf(miter.x - point.x, miter.y - point.y) <=
                 stroke->miter_limit * width * 0.5F) {
-                return af_emit_triangle(vertices, capacity, count, first_outer, miter,
+                return af_emit_triangle(vertices, capacity, count, point, first_outer,
+                                        second_outer) &&
+                       af_emit_triangle(vertices, capacity, count, first_outer, miter,
                                         second_outer);
             }
         }

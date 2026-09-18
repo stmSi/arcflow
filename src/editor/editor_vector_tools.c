@@ -93,19 +93,20 @@ const char *af_editor_vector_tool_name(AfEditorVectorTool tool) {
                                                             "Polygon",
                                                             "Star",
                                                             "Arc",
-                                                            "Spiral"};
+                                                            "Spiral",
+                                                            "Text"};
     return tool < AF_EDITOR_TOOL_COUNT ? names[tool] : "Unknown";
 }
 
 const char *af_editor_vector_tool_label(AfEditorVectorTool tool) {
     static const char *const labels[AF_EDITOR_TOOL_COUNT] = {
-        "PICK", "NODE", "CUT",    "VDEL", "KNIFE", "RECT", "ROUND", "OVAL",
-        "LINE", "PEN",  "PENCIL", "POLY", "STAR",  "ARC",  "SPIRAL"};
+        "PICK", "NODE", "CUT",    "VDEL", "KNIFE", "RECT", "ROUND",  "OVAL",
+        "LINE", "PEN",  "PENCIL", "POLY", "STAR",  "ARC",  "SPIRAL", "TEXT"};
     return tool < AF_EDITOR_TOOL_COUNT ? labels[tool] : "?";
 }
 
 bool af_editor_vector_tool_is_construction(AfEditorVectorTool tool) {
-    return tool >= AF_EDITOR_TOOL_RECTANGLE && tool <= AF_EDITOR_TOOL_SPIRAL;
+    return tool >= AF_EDITOR_TOOL_RECTANGLE && tool <= AF_EDITOR_TOOL_TEXT;
 }
 
 bool af_editor_vector_tool_rect(AfVec2 start, AfVec2 current, bool from_center,
@@ -488,5 +489,80 @@ AfResult af_editor_vector_tool_knife(const AfPathCommand *commands, uint32_t com
     }
     memcpy(out_commands, cut, (size_t)result.command_count * sizeof(*cut));
     *out_result = result;
+    return AF_RESULT_SUCCESS;
+}
+
+void af_editor_vector_reverse_open(const AfPathCommand *commands, uint32_t count,
+                                   AfPathCommand *output) {
+    output[0] = (AfPathCommand){.type = AF_PATH_MOVE, .point = commands[count - 1U].point};
+    for (uint32_t i = 1U; i < count; ++i) {
+        AfPathCommand segment = commands[count - i];
+        segment.point = commands[count - i - 1U].point;
+        if (segment.type == AF_PATH_CUBIC) {
+            const AfVec2 control = segment.control1;
+            segment.control1 = segment.control2;
+            segment.control2 = control;
+        }
+        output[i] = segment;
+    }
+}
+
+static bool af_vector_open_endpoint(const AfPathCommand *commands, uint32_t count,
+                                    uint32_t endpoint, uint32_t *start, uint32_t *end) {
+    if (endpoint >= count)
+        return false;
+    *start = endpoint;
+    while (*start > 0U && commands[*start].type != AF_PATH_MOVE)
+        --*start;
+    *end = *start + 1U;
+    while (*end < count && commands[*end].type != AF_PATH_MOVE)
+        ++*end;
+    return commands[*start].type == AF_PATH_MOVE && *end > *start + 1U &&
+           commands[*end - 1U].type != AF_PATH_CLOSE &&
+           (endpoint == *start || endpoint == *end - 1U);
+}
+
+AfResult af_editor_vector_join(const AfPathCommand *commands, uint32_t count, uint32_t first,
+                               uint32_t second, AfPathCommand *output, uint32_t capacity,
+                               uint32_t *out_count) {
+    uint32_t a, b, c, d;
+    AfPathCommand joined[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 1U];
+    AfPathCommand tail[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY];
+    if (!commands || !output || !out_count || first == second ||
+        count > AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY ||
+        !af_vector_open_endpoint(commands, count, first, &a, &b) ||
+        !af_vector_open_endpoint(commands, count, second, &c, &d))
+        return AF_RESULT_INVALID_ARGUMENT;
+    uint32_t write = 0U;
+    if (a == c) {
+        memcpy(joined, commands, (size_t)b * sizeof(*joined));
+        joined[b] = (AfPathCommand){.type = AF_PATH_CLOSE};
+        memcpy(joined + b + 1U, commands + b, (size_t)(count - b) * sizeof(*joined));
+        write = count + 1U;
+    } else {
+        /* Emit the joined contour first. The order of all untouched contours is preserved. */
+        if (first == a)
+            af_editor_vector_reverse_open(commands + a, b - a, joined);
+        else
+            memcpy(joined, commands + a, (size_t)(b - a) * sizeof(*joined));
+        write = b - a;
+        if (second != c)
+            af_editor_vector_reverse_open(commands + c, d - c, tail);
+        else
+            memcpy(tail, commands + c, (size_t)(d - c) * sizeof(*tail));
+        if (joined[write - 1U].point.x != tail[0].point.x ||
+            joined[write - 1U].point.y != tail[0].point.y) {
+            joined[write++] = (AfPathCommand){.type = AF_PATH_LINE, .point = tail[0].point};
+        }
+        memcpy(joined + write, tail + 1U, (size_t)(d - c - 1U) * sizeof(*joined));
+        write += d - c - 1U;
+        for (uint32_t i = 0; i < count; ++i)
+            if ((i < a || i >= b) && (i < c || i >= d))
+                joined[write++] = commands[i];
+    }
+    if (write > capacity)
+        return AF_RESULT_LIMIT_EXCEEDED;
+    memcpy(output, joined, (size_t)write * sizeof(*output));
+    *out_count = write;
     return AF_RESULT_SUCCESS;
 }

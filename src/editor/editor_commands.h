@@ -15,9 +15,9 @@
 #define AF_EDITOR_COMMAND_MAX_TRACKS 64U
 #define AF_EDITOR_COMMAND_MAX_KEYFRAMES 256U
 #define AF_EDITOR_COMMAND_MAX_PATHS 8U
-#define AF_EDITOR_COMMAND_MAX_PATH_COMMANDS 512U
+#define AF_EDITOR_COMMAND_MAX_PATH_COMMANDS 4096U
 #define AF_EDITOR_HISTORY_MAX_COMMANDS 128U
-#define AF_EDITOR_HISTORY_DEFAULT_BYTES (4U * 1024U * 1024U)
+#define AF_EDITOR_HISTORY_DEFAULT_BYTES (16U * 1024U * 1024U)
 
 typedef enum AfEditorCommandType {
     AF_EDITOR_COMMAND_CREATE = 0,
@@ -126,6 +126,10 @@ AfResult af_editor_command_break_apart(AfProject *project, uint64_t node_id,
  * line contours; empty results return NOT_FOUND and leave the sources intact. */
 AfResult af_editor_command_boolean(AfProject *project, uint64_t primary_id, uint64_t other_id,
                                    AfPathBooleanOperation operation, AfEditorCommand *out_command);
+/* Outline expansion retains a visible source fill as a separate object. Offset replaces
+ * the selected closed fill; distance is measured in the object's local units. */
+AfResult af_editor_command_outline(AfProject *project, uint64_t id, bool offset, float distance,
+                                   AfEditorCommand *out_command);
 bool af_editor_can_reorder(const AfProject *project, uint64_t node_id, uint64_t target_id);
 AfResult af_editor_command_reorder(AfProject *project, uint64_t node_id, uint64_t target_id,
                                    bool after, AfEditorCommand *out_command);

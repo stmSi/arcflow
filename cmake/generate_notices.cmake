@@ -8,7 +8,8 @@ set(licenses
     "volk|third_party/volk/LICENSE.md"
     "FreeType|third_party/freetype/LICENSE.TXT"
     "HarfBuzz|third_party/harfbuzz/COPYING"
-    "Bundled test fonts|third_party/harfbuzz/test/COPYING")
+    "Bundled test fonts|third_party/harfbuzz/test/COPYING"
+    "Liberation document fonts|assets/fonts/LICENSE-Liberation.txt")
 set(notices "Arcflow ${PROJECT_VERSION} third-party notices\n")
 foreach(entry IN LISTS licenses)
     string(REPLACE "|" ";" fields "${entry}")

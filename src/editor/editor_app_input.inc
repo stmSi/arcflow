@@ -262,6 +262,8 @@ static void af_editor_timeline_box_select(AfEditorState *editor, int height) {
 }
 
 static bool af_editor_begin_path_drag(AfEditorState *editor, AfPath *path, AfEditorDragMode mode) {
+    if (af_editor_is_text(editor, editor->selected_id))
+        return false;
     const AfProjectTrack *track = af_editor_selected_track(editor);
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
@@ -1306,7 +1308,10 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
             if (hit_node != NULL && hit_node->polygon_sides == 0U &&
                 af_path_find_node_const(&editor->project.path_data, hit) != NULL) {
                 af_editor_select_only(editor, hit);
-                af_editor_convert_selected_to_path(editor);
+                if (af_editor_is_text(editor, hit))
+                    af_editor_open_text_panel(editor, width, height);
+                else
+                    af_editor_convert_selected_to_path(editor);
                 return;
             }
         }
@@ -1780,7 +1785,7 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
         editor->inspector_scrub_field = AF_EDITOR_INSPECTOR_NONE;
         editor->inspector_scrub_changed = false;
     } else if (editor->drag_mode == AF_EDITOR_DRAG_TOOL_CREATE) {
-        af_editor_finish_vector_tool_drag(editor);
+        af_editor_finish_vector_tool_drag(editor, width, height);
     } else if (editor->drag_mode == AF_EDITOR_DRAG_MOVE || editor->drag_mode == AF_EDITOR_DRAG_X ||
                editor->drag_mode == AF_EDITOR_DRAG_Y) {
         if (!af_editor_transform_key_drag_covers_selection(editor)) {
@@ -1823,6 +1828,8 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
 
 static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
                                   const SDL_MouseWheelEvent *event) {
+    if (editor->text_panel_open || editor->offset_panel_open)
+        return;
     const float direction = event->direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0F : 1.0F;
     const float scroll_x = event->x * direction;
     const float scroll_y = event->y * direction;
@@ -1906,6 +1913,25 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     const bool shift = (event->mod & SDL_KMOD_SHIFT) != 0U;
     const float nudge = (event->mod & SDL_KMOD_SHIFT) != 0U ? 10.0F : 1.0F;
     if (!event->down) {
+        return;
+    }
+    if (editor->text_panel_open) {
+        af_editor_text_panel_key(editor, event);
+        return;
+    }
+    if (editor->offset_panel_open) {
+        if (event->key == SDLK_ESCAPE)
+            editor->offset_panel_open = false;
+        else if (event->key == SDLK_RETURN || event->key == SDLK_KP_ENTER)
+            af_editor_apply_offset_panel(editor);
+        else if (event->key == SDLK_BACKSPACE) {
+            if (editor->offset_replace)
+                editor->offset_buffer[0] = '\0';
+            else
+                af_editor_backspace_utf8(editor->offset_buffer);
+            editor->offset_replace = false;
+        } else if (control && event->key == SDLK_A)
+            editor->offset_replace = true;
         return;
     }
     if (editor->inspector_field != AF_EDITOR_INSPECTOR_NONE) {
@@ -1996,6 +2022,10 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
             return;
         }
         if (event->key == SDLK_BACKSPACE) {
+            if (editor->tool_command_count <= editor->tool_pen_resume_count) {
+                af_editor_cancel_vector_tool(editor, "Path continuation cancelled");
+                return;
+            }
             --editor->tool_command_count;
             editor->tool_pen_has_outgoing = false;
             af_editor_status(editor, editor->tool_command_count == 0U ? "Pen path cancelled"
@@ -2019,6 +2049,12 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
             shortcut_tool = AF_EDITOR_TOOL_ELLIPSE;
         } else if (event->key == SDLK_L) {
             shortcut_tool = AF_EDITOR_TOOL_LINE;
+        } else if (event->key == SDLK_T) {
+            if (af_editor_is_text(editor, editor->selected_id))
+                af_editor_open_text_panel(editor, width, height);
+            else
+                af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_TEXT);
+            return;
         } else if (event->key == SDLK_P) {
             shortcut_tool = AF_EDITOR_TOOL_PEN;
         } else if (event->key == SDLK_B) {
@@ -2241,7 +2277,9 @@ static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int 
     } else if (event->type == SDL_EVENT_KEY_DOWN) {
         af_editor_key(editor, width, height, &event->key);
     } else if (event->type == SDL_EVENT_TEXT_INPUT) {
-        if (editor->inspector_field != AF_EDITOR_INSPECTOR_NONE) {
+        if (editor->text_panel_open) {
+            af_editor_text_panel_append(editor, event->text.text);
+        } else if (editor->inspector_field != AF_EDITOR_INSPECTOR_NONE) {
             af_editor_append_inspector_text(editor, event->text.text);
         } else if (!af_editor_workflow_text(editor, event->text.text)) {
             af_editor_append_text(editor, event->text.text);
@@ -2795,6 +2833,122 @@ static AfResult af_editor_boolean_smoke(AfEditorState *editor, int width, int he
     return AF_RESULT_SUCCESS;
 }
 
+static AfResult af_editor_vector_package_smoke(AfEditorState *editor, int width, int height) {
+#define VECTOR_CHECK(condition)                                                                    \
+    do {                                                                                           \
+        if (!(condition))                                                                          \
+            return af_editor_interaction_smoke_failure(editor, __LINE__);                          \
+    } while (0)
+    const AfVec2 center = af_editor_visible_center(editor, width, height);
+    af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_TEXT);
+    editor->tool_start = (AfVec2){center.x, center.y};
+    editor->tool_current = (AfVec2){center.x + 200, center.y + 80};
+    editor->drag_mode = AF_EDITOR_DRAG_TOOL_CREATE;
+    af_editor_finish_vector_tool_drag(editor, width, height);
+    VECTOR_CHECK(editor->text_panel_open &&
+                 editor->text_panel_draft.mode == AF_PROJECT_TEXT_PARAGRAPH);
+    VECTOR_CHECK(strcmp(editor->text_panel_numbers[1], "200") == 0);
+    af_editor_text_panel_key(editor, &(SDL_KeyboardEvent){.key = SDLK_ESCAPE, .down = true});
+    VECTOR_CHECK(!editor->text_panel_open);
+    AfPathCommand line[] = {{.type = AF_PATH_MOVE, .point = {center.x - 350, center.y - 180}},
+                            {.type = AF_PATH_CUBIC,
+                             .point = {center.x - 240, center.y - 180},
+                             .control1 = {center.x - 320, center.y - 240},
+                             .control2 = {center.x - 270, center.y - 120}}};
+    VECTOR_CHECK(af_editor_create_path_commands(editor, line, 2, false, "Continue") ==
+                 AF_RESULT_SUCCESS);
+    const uint64_t curve_id = editor->selected_id;
+    AfPath *path = af_editor_selected_path(editor);
+    AfPathCommand original[2];
+    memcpy(original, editor->project.path_data.commands + path->command_start, sizeof(original));
+    af_editor_path_selection_only(editor, 1);
+    af_editor_continue_path(editor);
+    VECTOR_CHECK(editor->tool_pen_resume_id == curve_id && editor->tool_command_count == 2);
+    af_editor_key(editor, width, height, &(SDL_KeyboardEvent){.key = SDLK_BACKSPACE, .down = true});
+    VECTOR_CHECK(editor->tool_pen_resume_id == 0 && path->command_count == 2);
+    af_editor_continue_path(editor);
+    editor->tool_commands[editor->tool_command_count++] =
+        (AfPathCommand){.type = AF_PATH_LINE, .point = {center.x - 140, center.y - 180}};
+    VECTOR_CHECK(af_editor_commit_pen_path(editor, false));
+    VECTOR_CHECK(af_editor_selected_path(editor)->command_count == 3);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    path = af_editor_selected_path(editor);
+    VECTOR_CHECK(memcmp(original, editor->project.path_data.commands + path->command_start,
+                        sizeof(original)) == 0);
+    VECTOR_CHECK(af_editor_history_redo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    af_editor_path_selection_only(editor, 0);
+    af_editor_path_selection_add(editor, 2);
+    af_editor_join_endpoints(editor);
+    VECTOR_CHECK(af_editor_selected_path(editor)->command_count == 4);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(af_editor_create_primitive_at(
+                     editor, AF_NODE_RECTANGLE,
+                     (AfEditorToolRect){{center.x - 350, center.y - 70}, {150, 100}}) ==
+                 AF_RESULT_SUCCESS);
+    AfStyle *style = af_project_find_node_style(&editor->project, editor->selected_id);
+    style->stroke.width = style->stroke.end_width = 12;
+    const uint32_t before = editor->project.scene.count;
+    VECTOR_CHECK(af_editor_expand_outline(editor, false, 0));
+    VECTOR_CHECK(editor->project.scene.count == before + 1);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(af_editor_history_redo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(af_editor_expand_outline(editor, true, 5));
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(af_editor_history_redo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    for (uint32_t mode = 1; mode <= 3; ++mode) {
+        af_editor_select_only(editor, 0);
+        af_editor_open_text_panel(editor, width, height);
+        editor->text_panel_position =
+            (AfVec2){center.x - 100, center.y - 200 + (float)(mode - 1) * 125};
+        editor->text_panel_draft.mode = (AfProjectTextMode)mode;
+        editor->text_panel_draft.font_family = mode == 1 ? 1 : 0;
+        editor->text_panel_draft.bold = mode == 1;
+        editor->text_panel_draft.italic = mode == 3;
+        af_editor_text_panel_append(editor, mode == 1   ? "Artistic text"
+                                            : mode == 2 ? "Paragraph text wraps into a frame."
+                                                        : "Text on a curve");
+        (void)snprintf(editor->text_panel_numbers[0], 32, "28");
+        (void)snprintf(editor->text_panel_numbers[1], 32, "280");
+        (void)snprintf(editor->text_panel_numbers[3], 32, "0.5");
+        (void)snprintf(editor->text_panel_numbers[4], 32, "1.4");
+        (void)snprintf(editor->text_panel_numbers[5], 32, "#FFCC66FF");
+        if (mode == 3) {
+            editor->text_panel_draft.guide_count = 2;
+            editor->text_panel_draft.guide[0] =
+                (AfPathCommand){.type = AF_PATH_MOVE, .point = {0, 70}};
+            editor->text_panel_draft.guide[1] = (AfPathCommand){.type = AF_PATH_CUBIC,
+                                                                .point = {400, 70},
+                                                                .control1 = {130, -50},
+                                                                .control2 = {270, -50}};
+        }
+        af_editor_apply_text_panel(editor);
+        VECTOR_CHECK(!editor->text_panel_open && af_editor_is_text(editor, editor->selected_id));
+        const AfStyle *text_style =
+            af_project_find_node_style(&editor->project, editor->selected_id);
+        VECTOR_CHECK(text_style->fill.solid.r == 1 &&
+                     fabsf(text_style->fill.solid.g - .8F) < .001F);
+        const AfProjectText *authored =
+            &editor->project.texts[af_project_find_index(&editor->project, editor->selected_id)];
+        VECTOR_CHECK(authored->bold == (mode == 1) && authored->italic == (mode == 3) &&
+                     authored->letter_spacing == .5F);
+        VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) ==
+                     AF_RESULT_SUCCESS);
+        VECTOR_CHECK(af_editor_history_redo(&editor->history, &editor->project) ==
+                     AF_RESULT_SUCCESS);
+        af_editor_open_text_panel(editor, width, height);
+        VECTOR_CHECK(editor->text_panel_id == editor->selected_id);
+        af_editor_text_panel_key(editor, &(SDL_KeyboardEvent){.key = SDLK_ESCAPE, .down = true});
+    }
+    VECTOR_CHECK(af_project_validate(&editor->project) == AF_RESULT_SUCCESS);
+    af_editor_update_preview(editor);
+    af_editor_status(editor, "Verified: join / continue, outline, offset, artistic / paragraph / "
+                             "path text, undo / redo");
+    if (editor->text_panel_smoke)
+        af_editor_open_text_panel(editor, width, height);
+#undef VECTOR_CHECK
+    return AF_RESULT_SUCCESS;
+}
+
 static AfResult af_editor_compound_smoke(AfEditorState *editor, int width, int height) {
     const uint32_t initial_count = editor->project.scene.count;
     const AfVec2 center = af_editor_visible_center(editor, width, height);
@@ -3082,6 +3236,14 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->compound_smoke = true;
             if (editor->maximum_frames == 0U)
                 editor->maximum_frames = 4U;
+        } else if (strcmp(arguments[index], "--text-panel-smoke") == 0) {
+            editor->text_panel_smoke = editor->vector_package_smoke = true;
+            if (editor->maximum_frames == 0U)
+                editor->maximum_frames = 4U;
+        } else if (strcmp(arguments[index], "--vector-package-smoke") == 0) {
+            editor->vector_package_smoke = true;
+            if (editor->maximum_frames == 0U)
+                editor->maximum_frames = 4U;
         } else if (strcmp(arguments[index], "--boolean-smoke") == 0) {
             editor->boolean_smoke = true;
             if (editor->maximum_frames == 0U)
@@ -3146,10 +3308,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->output_path[0] != '\0' || editor->sequence_prefix[0] != '\0' ||
         editor->resize_smoke || editor->context_smoke || editor->tooltip_smoke ||
         editor->selection_smoke || editor->outline_smoke || editor->vector_tools_smoke ||
-        editor->vector_preview_smoke || editor->pen_close_smoke || editor->compound_smoke || editor->boolean_smoke || editor->vfx_smoke ||
-        editor->particle_view_smoke ||
-        editor->vector_animation_smoke || editor->image_smoke || editor->menu_smoke ||
-        editor->workflow_smoke || editor->platform_smoke || editor->release_smoke ||
-        editor->onboarding_smoke;
+        editor->vector_preview_smoke || editor->pen_close_smoke || editor->compound_smoke ||
+        editor->boolean_smoke || editor->vector_package_smoke || editor->vfx_smoke ||
+        editor->particle_view_smoke || editor->vector_animation_smoke || editor->image_smoke ||
+        editor->menu_smoke || editor->workflow_smoke || editor->platform_smoke ||
+        editor->release_smoke || editor->onboarding_smoke;
     af_editor_derive_package_path(editor);
 }

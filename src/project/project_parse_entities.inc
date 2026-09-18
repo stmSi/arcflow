@@ -3,6 +3,67 @@ static bool af_project_parse_node_field(const char *line, AfProjectNodeSnapshot 
     const char *value = NULL;
     float values[4] = {0};
     uint64_t integer = 0U;
+    if ((value = af_project_value(line, "text_format")) != NULL) {
+        float v[6];
+        if (!af_project_set_field(fields, AF_PROJECT_FIELD_TEXT_FORMAT) ||
+            !af_project_parse_floats(value, v, 6))
+            return false;
+        for (uint32_t i = 0; i < 4; ++i)
+            if (v[i] < 0 || v[i] > (i == 0 || i == 3 ? 2 : 1) || floorf(v[i]) != v[i])
+                return false;
+        snapshot->text.font_family = (uint32_t)v[0];
+        snapshot->text.bold = v[1] != 0;
+        snapshot->text.italic = v[2] != 0;
+        snapshot->text.alignment = (uint32_t)v[3];
+        snapshot->text.letter_spacing = v[4];
+        snapshot->text.line_spacing = v[5];
+        return true;
+    }
+    if ((value = af_project_value(line, "text_settings")) != NULL) {
+        if (!af_project_set_field(fields, AF_PROJECT_FIELD_TEXT) ||
+            !af_project_parse_floats(value, values, 4U) || values[0] < 1 || values[0] > 3 ||
+            floorf(values[0]) != values[0])
+            return false;
+        snapshot->text.mode = (AfProjectTextMode)(uint32_t)values[0];
+        snapshot->text.font_size = values[1];
+        snapshot->text.width = values[2];
+        snapshot->text.offset = values[3];
+        return true;
+    }
+    if ((value = af_project_value(line, "text_utf8")) != NULL) {
+        if (!af_project_set_field(fields, AF_PROJECT_FIELD_TEXT_UTF8))
+            return false;
+        const size_t length = strlen(value);
+        if (length == 0 || length % 2 != 0 || length / 2 >= AF_PROJECT_TEXT_BYTES)
+            return false;
+        for (size_t i = 0; i < length / 2; ++i) {
+            unsigned int byte = 0;
+            for (size_t j = 0; j < 2; ++j) {
+                const char c = value[i * 2 + j];
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+                    return false;
+                byte = byte * 16U + (unsigned int)(c <= '9' ? c - '0' : c - 'a' + 10);
+            }
+            if (!byte)
+                return false;
+            snapshot->text.utf8[i] = (char)byte;
+        }
+        snapshot->text.utf8[length / 2] = '\0';
+        return true;
+    }
+    if ((value = af_project_value(line, "text_guide")) != NULL) {
+        float v[7];
+        if (snapshot->text.guide_count >= AF_PROJECT_TEXT_GUIDE_COMMANDS ||
+            !af_project_parse_floats(value, v, 7) || v[0] < 0 || v[0] > AF_PATH_CLOSE ||
+            floorf(v[0]) != v[0])
+            return false;
+        snapshot->text.guide[snapshot->text.guide_count++] =
+            (AfPathCommand){.type = (AfPathCommandType)(uint32_t)v[0],
+                            .point = {v[1], v[2]},
+                            .control1 = {v[3], v[4]},
+                            .control2 = {v[5], v[6]}};
+        return true;
+    }
     if ((value = af_project_value(line, "polygon")) != NULL) {
         if (!af_project_set_field(fields, AF_PROJECT_FIELD_POLYGON) ||
             !af_project_parse_floats(value, values, 2U) || values[0] < 0.0F || values[0] > 64.0F ||

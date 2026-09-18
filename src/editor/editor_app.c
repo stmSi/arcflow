@@ -12,6 +12,7 @@
 #include "editor/editor_inspector.h"
 #include "editor/editor_preferences.h"
 #include "editor/editor_recovery.h"
+#include "editor/editor_text.h"
 #include "editor/editor_vector_tools.h"
 #include "editor/editor_workflow.h"
 #include "onboarding/onboarding.h"
@@ -272,6 +273,7 @@ typedef struct AfEditorState {
     uint32_t *curve_order;
     AfPathTessellationScratch *path_scratch;
     AfTextEngine *text_engine;
+    AfFileData document_font_files[12];
     AfFileData font_file;
     AfGlyphPlacement *text_glyphs;
     AfTextLine *text_lines;
@@ -324,6 +326,23 @@ typedef struct AfEditorState {
     uint32_t tool_command_count;
     AfVec2 tool_pen_outgoing;
     bool tool_pen_has_outgoing;
+    bool text_panel_open;
+    bool text_panel_replace;
+    uint32_t text_panel_field;
+    uint64_t text_panel_id;
+    AfVec2 text_panel_position;
+    AfProjectText text_panel_draft;
+    char text_panel_numbers[6][32];
+    char text_panel_original_color[32];
+    bool offset_panel_open;
+    bool offset_replace;
+    char offset_buffer[32];
+    uint64_t tool_pen_resume_id;
+    uint64_t tool_pen_resume_generation;
+    uint32_t tool_pen_resume_start;
+    uint32_t tool_pen_resume_end;
+    uint32_t tool_pen_resume_count;
+    AfAffine2 tool_pen_resume_inverse;
     AfEditorInspectorField inspector_field;
     bool inspector_replace;
     bool inspector_ratio_locked;
@@ -364,6 +383,8 @@ typedef struct AfEditorState {
     bool pen_close_smoke;
     bool compound_smoke;
     bool boolean_smoke;
+    bool vector_package_smoke;
+    bool text_panel_smoke;
     bool vfx_smoke;
     bool particle_view_smoke;
     bool vector_animation_smoke;
@@ -484,7 +505,12 @@ static bool af_editor_selected_path_has_animation(const AfEditorState *editor);
 static bool af_editor_path_segment_hit(const AfEditorState *editor, int width, int height,
                                        AfVec2 mouse, uint32_t *out_command, float *out_t);
 static void af_editor_group_selection(AfEditorState *editor);
+static void af_editor_open_text_panel(AfEditorState *editor, int width, int height);
+static void af_editor_finish_text_tool(AfEditorState *editor, int width, int height);
+static bool af_editor_is_text(const AfEditorState *editor, uint64_t id);
 static AfPathCommand af_editor_pen_closing_segment(const AfEditorState *editor);
+static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_t count,
+                                                  bool closed);
 
 // clang-format off
 #include "editor/editor_app_core.inc"
@@ -499,6 +525,7 @@ static AfPathCommand af_editor_pen_closing_segment(const AfEditorState *editor);
 #include "editor/editor_app_canvas.inc"
 #include "editor/editor_app_animation.inc"
 #include "editor/editor_app_paths.inc"
+#include "editor/editor_app_text.inc"
 #include "editor/editor_app_properties.inc"
 #include "editor/editor_app_menus.inc"
 #include "editor/editor_app_workflow_core.inc"
@@ -772,6 +799,11 @@ int af_editor_run(int argument_count, char **arguments) {
         }
         if (editor.boolean_smoke && editor.rendered_frames == 0U) {
             result = af_editor_boolean_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS)
+                goto cleanup;
+        }
+        if (editor.vector_package_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_vector_package_smoke(&editor, width, height);
             if (result != AF_RESULT_SUCCESS)
                 goto cleanup;
         }
@@ -1454,6 +1486,8 @@ cleanup:
     SDL_DestroyCursor(editor.resize_vertical_cursor);
     af_platform_window_destroy(&editor.window);
     af_text_engine_destroy(editor.text_engine);
+    for (uint32_t i = 0; i < 12; ++i)
+        af_file_data_destroy(&editor.allocator, &editor.document_font_files[i]);
     af_file_data_destroy(&editor.allocator, &editor.font_file);
     af_deallocate(&editor.allocator, editor.text_lines);
     af_deallocate(&editor.allocator, editor.text_glyphs);

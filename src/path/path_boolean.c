@@ -275,16 +275,16 @@ static AfResult af_boolean_contours(AfBooleanScratch *scratch, uint32_t capacity
 AfResult af_path_boolean(AfAllocator *allocator, const AfPathData *data, const AfPath *a,
                          const AfPath *b, AfPathBooleanOperation operation, float tolerance,
                          AfPathCommand *output, uint32_t capacity, uint32_t *out_count) {
-    if (allocator == NULL || data == NULL || a == NULL || b == NULL || output == NULL ||
-        out_count == NULL || capacity > AF_MAX_PATH_COMMANDS_PER_PATH ||
-        operation > AF_PATH_BOOLEAN_INTERSECT || !isfinite(tolerance) || tolerance <= 0)
+    if (allocator == NULL || data == NULL || a == NULL || output == NULL || out_count == NULL ||
+        capacity > AF_MAX_PATH_COMMANDS_PER_PATH || operation > AF_PATH_BOOLEAN_INTERSECT ||
+        !isfinite(tolerance) || tolerance <= 0)
         return AF_RESULT_INVALID_ARGUMENT;
     AfBooleanScratch *scratch = af_allocate(allocator, sizeof(*scratch), alignof(AfBooleanScratch));
     if (scratch == NULL)
         return AF_RESULT_OUT_OF_MEMORY;
     memset(scratch, 0, sizeof(*scratch));
     AfResult result = af_boolean_flatten(scratch, data, a, 0U, tolerance);
-    if (result == AF_RESULT_SUCCESS)
+    if (result == AF_RESULT_SUCCESS && b != NULL)
         result = af_boolean_flatten(scratch, data, b, 1U, tolerance);
     if (result == AF_RESULT_SUCCESS && scratch->segment_count != 0U) {
         AfBooleanPoint minimum = scratch->segments[0].a, maximum = minimum;

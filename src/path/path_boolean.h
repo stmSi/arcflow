@@ -16,7 +16,8 @@ typedef enum AfPathBooleanOperation {
 /* Closed contours only. Cubics are flattened at the supplied local-coordinate tolerance.
  * Both input fill rules are respected. Output uses nonzero filling and contains closed
  * line contours. Empty results succeed with zero commands. Output/count are unchanged
- * on failure, including complexity/precision rejection; input and output may alias. */
+ * on failure, including complexity/precision rejection; input and output may alias.
+ * A NULL second operand is empty (UNION normalizes the first operand's boundaries). */
 AfResult af_path_boolean(AfAllocator *allocator, const AfPathData *data, const AfPath *a,
                          const AfPath *b, AfPathBooleanOperation operation, float tolerance,
                          AfPathCommand *output, uint32_t capacity, uint32_t *out_count);

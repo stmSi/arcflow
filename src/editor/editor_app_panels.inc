@@ -278,6 +278,12 @@ static void af_editor_render_tool_icon(AfEditorState *editor, AfEditorVectorTool
             memcpy(points, rounded, sizeof(rounded));
             count = 8U;
         }
+    } else if (tool == AF_EDITOR_TOOL_TEXT) {
+        af_editor_add_line(editor, (AfVec2){x + 2, y + 1}, (AfVec2){x + 18, y + 1}, 2, color,
+                           100125);
+        af_editor_add_line(editor, (AfVec2){x + 10, y + 1}, (AfVec2){x + 10, y + 18}, 2, color,
+                           100125);
+        return;
     } else if (tool == AF_EDITOR_TOOL_SELECT) {
         const AfVec2 cursor[] = {{3, 0}, {3, 17}, {8, 12}, {12, 19}, {15, 17}, {11, 10}, {18, 10}};
         memcpy(points, cursor, sizeof(cursor));
@@ -734,7 +740,8 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
                                               : (AfColor){0.16F, 0.23F, 0.32F, 1.0F},
                                       100120);
             af_editor_add_text(editor, x + 10.0F, AF_EDITOR_CONVERT_PATH_Y + 8.0F,
-                               selected->type == AF_NODE_PATH && selected->polygon_sides == 0U
+                               af_editor_is_text(editor, selected->id) ? "CONVERT TEXT TO PATH"
+                               : selected->type == AF_NODE_PATH && selected->polygon_sides == 0U
                                    ? "EDIT VECTOR POINTS"
                                    : "CONVERT TO PATH",
                                0.7F, editor->right_width - 56.0F,

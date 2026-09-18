@@ -26,6 +26,7 @@ typedef enum AfEditorVectorTool {
     AF_EDITOR_TOOL_STAR,
     AF_EDITOR_TOOL_ARC,
     AF_EDITOR_TOOL_SPIRAL,
+    AF_EDITOR_TOOL_TEXT,
     AF_EDITOR_TOOL_COUNT
 } AfEditorVectorTool;
 
@@ -59,6 +60,14 @@ uint32_t af_editor_vector_tool_spiral(AfVec2 size, uint32_t turns, AfPathCommand
                                       uint32_t capacity);
 uint32_t af_editor_vector_tool_simplify(const AfVec2 *points, uint32_t point_count, float tolerance,
                                         AfVec2 *out_points, uint32_t capacity);
+
+/* Join two open contour endpoints, preserving cubic handles and other contours.
+ * Endpoints on the same contour close it. Output may alias input; failure is atomic. */
+AfResult af_editor_vector_join(const AfPathCommand *commands, uint32_t count, uint32_t first,
+                               uint32_t second, AfPathCommand *output, uint32_t capacity,
+                               uint32_t *out_count);
+void af_editor_vector_reverse_open(const AfPathCommand *commands, uint32_t count,
+                                   AfPathCommand *output);
 
 /* Cuts at most once per source segment, including implicit closing edges. Coordinates are local
  * to the path. Closed contours open at the cut instead of acquiring a seam at the original MOVE.

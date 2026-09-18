@@ -18,11 +18,13 @@
 #include "editor/editor_commands.h"
 #include "editor/editor_gizmo.h"
 #include "editor/editor_inspector.h"
+#include "editor/editor_text.h"
 #include "editor/editor_vector_tools.h"
 #include "interaction/interaction.h"
 #include "layout/layout.h"
 #include "particle/particle.h"
 #include "path/path.h"
+#include "path/path_offset.h"
 #include "project/image_import.h"
 #include "project/interchange.h"
 #include "project/project.h"
@@ -78,6 +80,8 @@ typedef struct AfTestFixture {
 #include "test_editor_conversion.inc"
 #include "test_editor_compound.inc"
 #include "test_path_boolean.inc"
+#include "test_vector_expansion.inc"
+#include "test_editor_text.inc"
 #include "test_editor_boolean.inc"
 #include "test_gpu.inc"
 // clang-format on
@@ -128,6 +132,10 @@ int main(void) {
         {"knife limits", af_test_editor_knife_limits},
         {"knife persistence", af_test_editor_knife_persistence},
         {"editor vector tools", af_test_editor_vector_tools},
+        {"vector expansion", af_test_vector_expansion},
+        {"expansion commands", af_test_expansion_commands},
+        {"editable text", af_test_editor_text},
+        {"document fonts", af_test_document_fonts},
         {"editor commands", af_test_editor_commands},
         {"Vulkan pipeline smoke", af_test_gpu_smoke}};
     size_t index = 0U;

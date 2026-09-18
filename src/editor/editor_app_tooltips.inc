@@ -73,9 +73,11 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                 "Drag a six-sided editable polygon.",
                 "Drag a five-point editable star.",
                 "Drag an open three-quarter Bézier arc.",
-                "Drag a bounded three-turn editable spiral."};
+                "Drag a bounded three-turn editable spiral.",
+                "Click for artistic text, drag a paragraph frame, or click existing text to edit."};
             static const char *const shortcuts[AF_EDITOR_TOOL_COUNT] = {
-                "V", "Shift+V", "X", "D", "J", "R", "Shift+R", "O", "L", "P", "B", "Y", "A", "C", "I"};
+                "V", "Shift+V", "X", "D", "J", "R", "Shift+R", "O",
+                "L", "P",       "B", "Y", "A", "C", "I",       "T"};
             if (tool < AF_EDITOR_TOOL_COUNT && local_x < button_x + 38.0F) {
                 return (AfEditorTooltip){
                     .id = 10U + tool,
@@ -253,6 +255,14 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
         }
         if (af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_CONVERT_PATH_Y,
                                     editor->right_width - 36.0F, 26.0F)) {
+            if (af_editor_is_text(editor, editor->selected_id))
+                return (AfEditorTooltip){
+                    .id = UINT64_C(0x20030),
+                    .title = "Convert text to path",
+                    .summary = "Replace editable text with editable glyph outlines.",
+                    .details =
+                        "Ctrl+Z restores text. Use T or double-click to edit the text content.",
+                    .shortcut = "T edits text"};
             return (AfEditorTooltip){
                 .id = UINT64_C(0x20030),
                 .title = "Vector geometry",

@@ -45,6 +45,7 @@ typedef struct AfTextRequest {
     float font_size;
     float maximum_width;
     float line_spacing;
+    float letter_spacing;
     uint32_t maximum_lines;
     AfTextDirection direction;
     AfTextAlignment alignment;
@@ -93,6 +94,7 @@ typedef struct AfTextRunCache {
 
 typedef struct AfTextEngine AfTextEngine;
 
+bool af_text_utf8_valid(const char *text, uint32_t size);
 AfResult af_text_engine_create(AfAllocator *allocator, AfTextEngine **out_engine);
 void af_text_engine_destroy(AfTextEngine *engine);
 AfResult af_text_font_load_memory(AfTextEngine *engine, uint64_t font_id, const void *data,

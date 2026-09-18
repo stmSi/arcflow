@@ -237,7 +237,7 @@ static bool af_test_editor_compound_rejections(void) {
     dependent->parent_style_id = 0U;
     dependent->inherit_flags = 0U;
     /* More contours than an undo command can represent must not partially split a path. */
-    AfPathCommand points[513] = {0};
+    AfPathCommand points[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS] = {0};
     for (uint32_t i = 0; i < 9U; ++i) {
         points[i * 2U] = (AfPathCommand){.type = AF_PATH_MOVE, .point = {(float)i * 10, 0}};
         points[i * 2U + 1U] =
@@ -250,12 +250,12 @@ static bool af_test_editor_compound_rejections(void) {
     CHECK(project.path_data.command_count == 18U && project.scene.count == 2U);
     CHECK(af_project_remove_path_exact(&project, 51U) == AF_RESULT_SUCCESS);
     points[0] = (AfPathCommand){.type = AF_PATH_MOVE, .point = {0, 0}};
-    for (uint32_t i = 1U; i < 513U; ++i)
+    for (uint32_t i = 1U; i < AF_EDITOR_COMMAND_MAX_PATH_COMMANDS; ++i)
         points[i] = (AfPathCommand){.type = AF_PATH_LINE, .point = {(float)i, (float)(i % 2U)}};
-    path.command_count = 513U;
+    path.command_count = AF_EDITOR_COMMAND_MAX_PATH_COMMANDS;
     CHECK(af_project_add_path(&project, &path, points) == AF_RESULT_SUCCESS);
     CHECK(af_editor_command_combine(&project, ids, 2U, 2U, &command) == AF_RESULT_LIMIT_EXCEEDED);
-    CHECK(project.path_data.command_count == 513U && project.next_id == next);
+    CHECK(project.path_data.command_count == AF_EDITOR_COMMAND_MAX_PATH_COMMANDS && project.next_id == next);
     CHECK(af_project_validate(&project) == AF_RESULT_SUCCESS);
     af_project_destroy(&project);
     return true;

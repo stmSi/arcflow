@@ -1,3 +1,40 @@
+bool af_project_text_valid(const AfProjectText *text) {
+    if (!text || text->mode > AF_PROJECT_TEXT_ON_PATH)
+        return false;
+    if (text->mode == AF_PROJECT_TEXT_NONE)
+        return true;
+    if (!memchr(text->utf8, '\0', sizeof(text->utf8)) || !text->utf8[0] ||
+        !isfinite(text->font_size) || text->font_size < 1 || text->font_size > 1000 ||
+        !isfinite(text->width) || text->width < 1 || text->width > 1000000 ||
+        !isfinite(text->offset) || fabsf(text->offset) > 1000000 ||
+        text->guide_count > AF_PROJECT_TEXT_GUIDE_COMMANDS)
+        return false;
+    if (text->font_family > 2U || text->alignment > 2U || !isfinite(text->letter_spacing) ||
+        fabsf(text->letter_spacing) > 1000 || !isfinite(text->line_spacing) ||
+        text->line_spacing < 0 || text->line_spacing > 10)
+        return false;
+    if (!af_text_utf8_valid(text->utf8, (uint32_t)strlen(text->utf8)))
+        return false;
+    if (text->mode != AF_PROJECT_TEXT_ON_PATH)
+        return text->guide_count == 0;
+    if (text->guide_count < 2)
+        return false;
+    AfPath path = {
+        .id = 1, .node_id = 1, .geometry_generation = 1, .command_count = text->guide_count};
+    const AfPathData data = {.paths = &path,
+                             .path_count = 1,
+                             .path_capacity = 1,
+                             .commands = (AfPathCommand *)text->guide,
+                             .command_count = text->guide_count,
+                             .command_capacity = AF_PROJECT_TEXT_GUIDE_COMMANDS};
+    if (af_path_data_validate(&data) != AF_RESULT_SUCCESS)
+        return false;
+    for (uint32_t i = 1; i < text->guide_count; ++i)
+        if (text->guide[i].type == AF_PATH_MOVE)
+            return false;
+    return true;
+}
+
 static bool af_project_name_valid(const char *name) {
     size_t length = 0U;
     if (name == NULL || name[0] == '\0') {
@@ -18,6 +55,7 @@ static bool af_project_name_valid(const char *name) {
 
 AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t capacity) {
     AfSceneNode *nodes = NULL;
+    AfProjectText *texts = NULL;
     char (*names)[AF_PROJECT_NAME_CAPACITY] = NULL;
     AfProjectClip *clips = NULL;
     AfProjectTrack *tracks = NULL;
@@ -35,6 +73,7 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
     }
     *project = (AfProject){0};
     project->allocator = allocator;
+    texts = af_allocate_array(allocator, capacity, sizeof(*texts), alignof(AfProjectText));
     nodes = af_allocate_array(allocator, capacity, sizeof(*nodes), alignof(AfSceneNode));
     names = af_allocate_array(allocator, capacity, sizeof(*names), alignof(char));
     clips =
@@ -57,9 +96,9 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
                                         alignof(AfBindingTarget));
     validation_ids = af_allocate_array(allocator, AF_PROJECT_VALIDATION_ID_CAPACITY,
                                        sizeof(*validation_ids), alignof(uint64_t));
-    if (nodes == NULL || names == NULL || clips == NULL || tracks == NULL || keyframes == NULL ||
-        paths == NULL || path_commands == NULL || styles == NULL || layouts == NULL ||
-        emitters == NULL || properties == NULL || binding_targets == NULL ||
+    if (texts == NULL || nodes == NULL || names == NULL || clips == NULL || tracks == NULL ||
+        keyframes == NULL || paths == NULL || path_commands == NULL || styles == NULL ||
+        layouts == NULL || emitters == NULL || properties == NULL || binding_targets == NULL ||
         validation_ids == NULL) {
         af_deallocate(allocator, validation_ids);
         af_deallocate(allocator, binding_targets);
@@ -73,9 +112,11 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
         af_deallocate(allocator, tracks);
         af_deallocate(allocator, clips);
         af_deallocate(allocator, names);
+        af_deallocate(allocator, texts);
         af_deallocate(allocator, nodes);
         return AF_RESULT_OUT_OF_MEMORY;
     }
+    memset(texts, 0, (size_t)capacity * sizeof(*texts));
     memset(nodes, 0, (size_t)capacity * sizeof(*nodes));
     memset(names, 0, (size_t)capacity * sizeof(*names));
     memset(clips, 0, AF_PROJECT_MAX_CLIPS * sizeof(*clips));
@@ -92,6 +133,7 @@ AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t 
     af_scene_init(&project->scene, nodes, capacity);
     af_project_metadata_default(&project->metadata);
     project->names = names;
+    project->texts = texts;
     project->canvas_size = (AfVec2){1280.0F, 720.0F};
     project->next_id = 1U;
     project->clips = clips;
@@ -148,6 +190,7 @@ void af_project_destroy(AfProject *project) {
         af_deallocate(project->allocator, project->keyframes);
         af_deallocate(project->allocator, project->tracks);
         af_deallocate(project->allocator, project->clips);
+        af_deallocate(project->allocator, project->texts);
         af_deallocate(project->allocator, project->names);
         af_deallocate(project->allocator, project->scene.nodes);
     }
@@ -214,14 +257,14 @@ AfResult af_project_validate(const AfProject *project) {
     uint64_t maximum_id = 0U;
     uint64_t maximum_animation_id = 0U;
     uint64_t maximum_asset_id = 0U;
-    if (project == NULL || project->names == NULL || project->scene.nodes == NULL ||
-        project->allocator == NULL || !isfinite(project->canvas_size.x) ||
-        !isfinite(project->canvas_size.y) || project->canvas_size.x <= 0.0F ||
-        project->canvas_size.y <= 0.0F || project->canvas_size.x > 1000000.0F ||
-        project->canvas_size.y > 1000000.0F || project->next_id == 0U ||
-        project->next_id == AF_INVALID_NODE_ID || project->clips == NULL ||
-        project->tracks == NULL || project->keyframes == NULL || project->validation_ids == NULL ||
-        project->clip_count > project->clip_capacity ||
+    if (project == NULL || project->names == NULL || project->texts == NULL ||
+        project->scene.nodes == NULL || project->allocator == NULL ||
+        !isfinite(project->canvas_size.x) || !isfinite(project->canvas_size.y) ||
+        project->canvas_size.x <= 0.0F || project->canvas_size.y <= 0.0F ||
+        project->canvas_size.x > 1000000.0F || project->canvas_size.y > 1000000.0F ||
+        project->next_id == 0U || project->next_id == AF_INVALID_NODE_ID ||
+        project->clips == NULL || project->tracks == NULL || project->keyframes == NULL ||
+        project->validation_ids == NULL || project->clip_count > project->clip_capacity ||
         project->clip_capacity > AF_PROJECT_MAX_CLIPS ||
         project->track_count > project->track_capacity ||
         project->track_capacity > AF_PROJECT_MAX_TRACKS ||
@@ -243,7 +286,10 @@ AfResult af_project_validate(const AfProject *project) {
     memset(project->validation_ids, 0,
            AF_PROJECT_VALIDATION_ID_CAPACITY * sizeof(*project->validation_ids));
     for (index = 0U; index < project->scene.count; ++index) {
-        if (!af_project_name_valid(project->names[index]) ||
+        if (!af_project_text_valid(&project->texts[index]) ||
+            (project->texts[index].mode != AF_PROJECT_TEXT_NONE &&
+             project->scene.nodes[index].type != AF_NODE_PATH) ||
+            !af_project_name_valid(project->names[index]) ||
             project->scene.nodes[index].id >= AF_INVALID_NODE_ID - 1U) {
             return AF_RESULT_INVALID_ARGUMENT;
         }
@@ -415,6 +461,7 @@ AfResult af_project_add_node(AfProject *project, const AfSceneNode *node, const 
     if (result != AF_RESULT_SUCCESS) {
         return result;
     }
+    project->texts[project->scene.count - 1U] = (AfProjectText){0};
     (void)snprintf(project->names[project->scene.count - 1U], AF_PROJECT_NAME_CAPACITY, "%s", name);
     if (af_scene_validate(&project->scene) != AF_RESULT_SUCCESS) {
         --project->scene.count;
@@ -450,8 +497,10 @@ static bool af_project_snapshot_image_valid(const AfProject *project,
 AfResult af_project_insert_snapshot(AfProject *project, const AfProjectNodeSnapshot *snapshot) {
     uint32_t index = 0U;
     AfStyle style;
-    if (project == NULL || snapshot == NULL || !af_project_name_valid(snapshot->name) ||
-        snapshot->index > project->scene.count || project->scene.count >= project->scene.capacity ||
+    if (project == NULL || snapshot == NULL || !af_project_text_valid(&snapshot->text) ||
+        (snapshot->text.mode != AF_PROJECT_TEXT_NONE && snapshot->node.type != AF_NODE_PATH) ||
+        !af_project_name_valid(snapshot->name) || snapshot->index > project->scene.count ||
+        project->scene.count >= project->scene.capacity ||
         af_project_find_index(project, snapshot->node.id) != UINT32_MAX ||
         snapshot->node.id == 0U || snapshot->node.id >= AF_INVALID_NODE_ID - 1U ||
         project->style_data.count >= project->style_data.capacity ||
@@ -470,9 +519,11 @@ AfResult af_project_insert_snapshot(AfProject *project, const AfProjectNodeSnaps
         style = af_style_default(snapshot->node.id, snapshot->node.id, snapshot->node.fill);
     }
     for (index = project->scene.count; index > snapshot->index; --index) {
+        project->texts[index] = project->texts[index - 1U];
         project->scene.nodes[index] = project->scene.nodes[index - 1U];
         memcpy(project->names[index], project->names[index - 1U], AF_PROJECT_NAME_CAPACITY);
     }
+    project->texts[snapshot->index] = snapshot->text;
     project->scene.nodes[snapshot->index] = snapshot->node;
     memcpy(project->names[snapshot->index], snapshot->name, AF_PROJECT_NAME_CAPACITY);
     ++project->scene.count;
@@ -507,6 +558,7 @@ AfResult af_project_remove_node_exact(AfProject *project, uint64_t id) {
         return AF_RESULT_NOT_FOUND;
     }
     for (; index + 1U < project->scene.count; ++index) {
+        project->texts[index] = project->texts[index + 1U];
         project->scene.nodes[index] = project->scene.nodes[index + 1U];
         memcpy(project->names[index], project->names[index + 1U], AF_PROJECT_NAME_CAPACITY);
     }
@@ -603,6 +655,7 @@ AfResult af_project_collect_subtree(const AfProject *project, uint64_t id,
                     snapshots[count].has_image_binding = true;
                 }
             }
+            snapshots[count].text = project->texts[index];
             memcpy(snapshots[count].name, project->names[index], AF_PROJECT_NAME_CAPACITY);
             ++count;
         }
@@ -622,6 +675,7 @@ AfResult af_project_delete_subtree(AfProject *project, uint64_t id) {
             continue;
         }
         if (write_index != index) {
+            project->texts[write_index] = project->texts[index];
             project->scene.nodes[write_index] = project->scene.nodes[index];
             memcpy(project->names[write_index], project->names[index], AF_PROJECT_NAME_CAPACITY);
         }
@@ -679,6 +733,7 @@ AfResult af_project_snapshot(const AfProject *project, uint64_t id,
         return AF_RESULT_NOT_FOUND;
     }
     *out_snapshot = (AfProjectNodeSnapshot){.node = project->scene.nodes[index], .index = index};
+    out_snapshot->text = project->texts[index];
     out_snapshot->vfx_lod = project->particle_data.lod;
     out_snapshot->style = *af_style_find_node_const(&project->style_data, id);
     {

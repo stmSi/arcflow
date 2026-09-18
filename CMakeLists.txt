@@ -183,6 +183,7 @@ set(ARCFLOW_PROJECT_SOURCES
     src/animation/advanced_animation.c
     src/path/path.c
     src/path/path_boolean.c
+    src/path/path_offset.c
     src/style/style.c
     src/layout/layout.c
     src/text/text.c
@@ -243,6 +244,7 @@ target_link_libraries(arcflow_project PUBLIC arcflow_core PRIVATE SDL3::SDL3-sta
 
 add_library(arcflow_editor_core STATIC
     src/editor/editor_commands.c
+    src/editor/editor_text.c
     src/editor/editor_compound.c
     src/editor/editor_actions.c
     src/editor/editor_gizmo.c
@@ -354,6 +356,7 @@ add_executable(arcflow_editor
 )
 target_include_directories(arcflow_editor PRIVATE src)
 target_compile_definitions(arcflow_editor PRIVATE
+    ARCFLOW_DOCUMENT_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts"
     ARCFLOW_EDITOR_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/test/api/fonts/NotoSans-Bold.ttf"
 )
 target_link_libraries(arcflow_editor PRIVATE arcflow_renderer arcflow_editor_core arcflow_update)
@@ -365,6 +368,8 @@ target_compile_definitions(arcflow_tests PRIVATE
     VK_NO_PROTOTYPES
     ARCFLOW_TEST_VERTEX_SHADER="${ARCFLOW_SHADER_DIR}/analytic.vert.spv"
     ARCFLOW_TEST_FRAGMENT_SHADER="${ARCFLOW_SHADER_DIR}/analytic.frag.spv"
+    ARCFLOW_TEST_DOCUMENT_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts"
+    ARCFLOW_TEST_DOCUMENT_FONT="${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/test/api/fonts/NotoSans-Bold.ttf"
     ARCFLOW_TEST_FONT="${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/test/shape/data/in-house/fonts/NotoNastaliqUrdu-Regular.ttf"
     $<$<BOOL:${ARCFLOW_BUILD_GPU_TESTS}>:AF_BUILD_GPU_TESTS=1>
 )
@@ -566,6 +571,8 @@ add_custom_command(
         third_party/freetype/LICENSE.TXT
         third_party/harfbuzz/COPYING
         third_party/harfbuzz/test/COPYING
+        assets/fonts/LICENSE-Liberation.txt
+        cmake/generate_notices.cmake
     VERBATIM)
 add_custom_target(arcflow_notices ALL DEPENDS "${ARCFLOW_NOTICE_FILE}")
 add_dependencies(arcflow_ci arcflow_notices)
@@ -597,6 +604,7 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/examples/runtime_sample.c"
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/test/api/fonts/NotoSans-Bold.ttf"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/fonts")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/" DESTINATION "${CMAKE_INSTALL_BINDIR}/fonts")
 install(FILES "${ARCFLOW_NOTICE_FILE}" DESTINATION ".")
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/arcflow")

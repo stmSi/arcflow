@@ -1,5 +1,6 @@
 #include "editor/editor_commands.h"
 #include "editor/editor_vector_tools.h"
+#include "path/path_offset.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -12,6 +13,8 @@ static AfResult af_compound_source(const AfProject *project, uint64_t id,
     AfResult result = af_project_snapshot(project, id, snapshot);
     if (result != AF_RESULT_SUCCESS)
         return result;
+    if (snapshot->text.mode != AF_PROJECT_TEXT_NONE)
+        return AF_RESULT_UNSUPPORTED_FEATURE;
     const AfSceneNode *node = &snapshot->node;
     if (node->type < AF_NODE_RECTANGLE || node->type > AF_NODE_PATH || snapshot->has_emitter ||
         snapshot->has_image_binding)
@@ -84,6 +87,22 @@ static void af_compound_bound(AfVec2 point, AfVec2 *minimum, AfVec2 *maximum) {
 static AfResult af_compound_output(const AfProject *project, const AfProjectNodeSnapshot *source,
                                    uint64_t id, AfPathCommand *commands, uint32_t count,
                                    AfProjectNodeSnapshot *output) {
+    AfVec2 flat_points[AF_MAX_PATH_FLATTENED_POINTS];
+    AfPathContour contours[AF_MAX_PATH_CONTOURS];
+    AfPath render_path = {.id = 1, .node_id = 1, .geometry_generation = 1, .command_count = count};
+    AfPathData render_data = {.paths = &render_path,
+                              .path_count = 1,
+                              .path_capacity = 1,
+                              .commands = commands,
+                              .command_count = count,
+                              .command_capacity = count};
+    AfFlattenedPath flat = {.points = flat_points,
+                            .point_capacity = AF_MAX_PATH_FLATTENED_POINTS,
+                            .contours = contours,
+                            .contour_capacity = AF_MAX_PATH_CONTOURS};
+    AfResult flatten_result = af_path_flatten(&render_data, &render_path, .25F, &flat);
+    if (flatten_result != AF_RESULT_SUCCESS)
+        return flatten_result;
     AfVec2 minimum = commands[0].point, maximum = minimum;
     for (uint32_t i = 0; i < count; ++i) {
         if (commands[i].type != AF_PATH_CLOSE)
@@ -379,5 +398,125 @@ AfResult af_editor_command_boolean(AfProject *project, uint64_t primary_id, uint
     out_command->path_command_after_count = count;
     out_command->path_after[0].path.command_count = count;
     out_command->path_after[0].path.fill_rule = AF_PATH_FILL_NON_ZERO;
+    return AF_RESULT_SUCCESS;
+}
+
+AfResult af_editor_command_outline(AfProject *project, uint64_t id, bool offset, float distance,
+                                   AfEditorCommand *command) {
+    if (!project || !command)
+        return AF_RESULT_INVALID_ARGUMENT;
+    AfResult result = af_layout_evaluate_scene(&project->scene);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
+    AfProjectNodeSnapshot source;
+    result = af_compound_source(project, id, &source);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
+    AfStyle style;
+    result = af_style_resolve(&project->style_data, &source.style, &style);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
+    if (!offset &&
+        (!style.stroke.enabled || style.stroke_opacity == 0 || style.stroke_paint.solid.a == 0))
+        return AF_RESULT_INVALID_ARGUMENT;
+    *command = (AfEditorCommand){.type = AF_EDITOR_COMMAND_COMPOUND,
+                                 .target_id = id,
+                                 .before_count = 1U,
+                                 .after_count = 1U,
+                                 .before = {source}};
+    result = af_compound_capture_path(project, id, command);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
+    const AfPath *original = af_path_find_node_const(&project->path_data, id);
+    AfPathCommand input[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    uint32_t count =
+        original ? original->command_count
+                 : af_editor_vector_primitive_path(source.node.type, source.node.resolved_bounds,
+                                                   source.node.corner_radius, input,
+                                                   AF_EDITOR_COMMAND_MAX_PATH_COMMANDS);
+    if (!count || count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS)
+        return AF_RESULT_LIMIT_EXCEEDED;
+    if (original)
+        memcpy(input, project->path_data.commands + original->command_start,
+               count * sizeof(*input));
+    AfPath path = {.id = 1U,
+                   .node_id = 1U,
+                   .geometry_generation = 1U,
+                   .command_count = count,
+                   .fill_rule = original ? original->fill_rule : AF_PATH_FILL_NON_ZERO};
+    AfPathData data = {.paths = &path,
+                       .path_count = 1U,
+                       .path_capacity = 1U,
+                       .commands = input,
+                       .command_count = count,
+                       .command_capacity = count};
+    const AfAffine2 world = source.node.world_transform;
+    const float tolerance =
+        0.1F / fmaxf(0.0001F, sqrtf(world.m00 * world.m00 + world.m01 * world.m01 +
+                                    world.m10 * world.m10 + world.m11 * world.m11));
+    uint32_t output_count = 0U;
+    result = offset
+                 ? af_path_offset(project->allocator, &data, &path, distance, style.stroke.join,
+                                  style.stroke.miter_limit, tolerance, command->path_command_after,
+                                  AF_EDITOR_COMMAND_MAX_PATH_COMMANDS, &output_count)
+                 : af_path_outline(project->allocator, &data, &path, &style.stroke, tolerance,
+                                   command->path_command_after, AF_EDITOR_COMMAND_MAX_PATH_COMMANDS,
+                                   &output_count);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
+    if (!output_count)
+        return AF_RESULT_NOT_FOUND;
+    const bool keep_fill = !offset && style.fill_opacity > 0 && style.fill.solid.a > 0;
+    const uint64_t output_id = keep_fill ? af_compound_free_id(project, project->next_id) : id;
+    const uint64_t path_id = keep_fill  ? output_id
+                             : original ? original->id
+                                        : af_compound_free_id(project, project->next_id);
+    if (!path_id || !output_id || (original && original->geometry_generation == UINT64_MAX))
+        return AF_RESULT_LIMIT_EXCEEDED;
+    const uint32_t output_index = keep_fill ? 1U : 0U;
+    AfProjectNodeSnapshot *expanded = &command->after[output_index];
+    result = af_compound_output(project, &source, output_id, command->path_command_after,
+                                output_count, expanded);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
+    if (!offset) {
+        expanded->style.fill = style.stroke_paint;
+        expanded->style.fill_opacity = style.stroke_opacity;
+        expanded->style.stroke.enabled = false;
+        expanded->node.fill = style.stroke_paint.solid;
+        (void)af_style_mark_paint_changed(&expanded->style);
+        (void)af_style_mark_stroke_geometry_changed(&expanded->style);
+        (void)snprintf(expanded->name, sizeof(expanded->name), "Outline %llu",
+                       (unsigned long long)output_id);
+    }
+    command->path_after_count = 1U;
+    command->path_command_after_count = output_count;
+    command->path_after[0] = (AfProjectPathSnapshot){
+        .path = {.id = path_id,
+                 .node_id = output_id,
+                 .command_count = output_count,
+                 .fill_rule = AF_PATH_FILL_NON_ZERO,
+                 .geometry_generation = original ? original->geometry_generation + 1U : 1U},
+        .index = project->path_data.path_count - command->path_before_count};
+    if (keep_fill) {
+        command->after[0] = source;
+        command->after[0].style = style;
+        command->after[0].style.parent_style_id = 0U;
+        command->after[0].style.inherit_flags = 0U;
+        command->after[0].style.stroke.enabled = false;
+        (void)af_style_mark_stroke_geometry_changed(&command->after[0].style);
+        command->after_count = 2U;
+        expanded->index = source.index + 1U;
+        if (original) {
+            if (output_count + count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS)
+                return AF_RESULT_LIMIT_EXCEEDED;
+            command->path_after[1] = command->path_before[0];
+            command->path_after[1].command_offset = output_count;
+            command->path_after[1].index = command->path_after[0].index + 1U;
+            memcpy(command->path_command_after + output_count, input, count * sizeof(*input));
+            command->path_command_after_count += count;
+            command->path_after_count = 2U;
+        }
+    }
     return AF_RESULT_SUCCESS;
 }

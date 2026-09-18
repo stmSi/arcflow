@@ -610,6 +610,31 @@ static void af_editor_render_workflow(AfEditorState *editor, int width, int heig
     af_editor_render_recent_projects(editor, width, height);
     af_editor_render_export(editor, width, height);
     af_editor_render_onboarding(editor, width, height);
+    af_editor_render_text_panel(editor, width, height);
+    if (editor->offset_panel_open) {
+        const float x = ((float)width - 540.0F) * 0.5F, y = ((float)height - 210.0F) * 0.5F;
+        af_editor_add_rect(editor, 0, 0, (float)width, (float)height, (AfColor){0, 0, 0, 0.6F},
+                           260000);
+        af_editor_add_rect(editor, x, y, 540, 210, (AfColor){0.08F, 0.1F, 0.14F, 1}, 260001);
+        af_editor_add_text(editor, x + 20, y + 20, "CONTOUR / OFFSET", 1.2F, 500,
+                           (AfColor){0.7F, 0.85F, 1, 1}, 260002);
+        af_editor_add_text(editor, x + 20, y + 58, "Distance in object units: + expands, - insets",
+                           0.85F, 500, (AfColor){1, 1, 1, 1}, 260002);
+        af_editor_add_rect(editor, x + 20, y + 88, 500, 36, (AfColor){0.15F, 0.2F, 0.28F, 1},
+                           260002);
+        af_editor_add_text(editor, x + 28, y + 97, editor->offset_buffer, 1.0F, 480,
+                           (AfColor){1, 1, 1, 1}, 260003);
+        af_editor_add_text(editor, x + 20, y + 140, "Uses the outline join style and miter limit",
+                           0.8F, 500, (AfColor){0.7F, 0.75F, 0.8F, 1}, 260002);
+        af_editor_add_rect(editor, x + 20, y + 166, 240, 36, (AfColor){.18F, .35F, .52F, 1},
+                           260002);
+        af_editor_add_rect(editor, x + 280, y + 166, 240, 36, (AfColor){.13F, .17F, .23F, 1},
+                           260002);
+        af_editor_add_text(editor, x + 28, y + 178, "APPLY (Enter)", .9F, 220,
+                           (AfColor){1, 1, 1, 1}, 260003);
+        af_editor_add_text(editor, x + 288, y + 178, "CANCEL (Esc)", .9F, 220,
+                           (AfColor){1, 1, 1, 1}, 260003);
+    }
 }
 
 static void af_editor_render_canvas_workflow(AfEditorState *editor, int width, int height,

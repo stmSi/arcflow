@@ -12,13 +12,40 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AF_PROJECT_FORMAT_VERSION 13U
+#define AF_PROJECT_FORMAT_VERSION 14U
 #define AF_PROJECT_MAX_FILE_SIZE (32U * 1024U * 1024U)
 #define AF_PROJECT_NAME_CAPACITY 64U
 #define AF_PROJECT_MAX_CLIPS 64U
 #define AF_PROJECT_MAX_TRACKS 1024U
 #define AF_PROJECT_MAX_KEYFRAMES 16384U
 #define AF_PROJECT_VALIDATION_ID_CAPACITY 32768U
+#define AF_PROJECT_TEXT_BYTES 512U
+#define AF_PROJECT_TEXT_GUIDE_COMMANDS 32U
+
+typedef enum AfProjectTextMode {
+    AF_PROJECT_TEXT_NONE = 0,
+    AF_PROJECT_TEXT_ARTISTIC,
+    AF_PROJECT_TEXT_PARAGRAPH,
+    AF_PROJECT_TEXT_ON_PATH
+} AfProjectTextMode;
+
+/* Authoring metadata; runtime/export uses the cached glyph outlines. The guide is a
+ * captured local path, so deleting or modifying the source cannot invalidate text. */
+typedef struct AfProjectText {
+    AfProjectTextMode mode;
+    char utf8[AF_PROJECT_TEXT_BYTES];
+    float font_size;
+    float width;
+    float offset;
+    uint32_t font_family; /* Liberation Sans, Serif, Mono. */
+    bool bold;
+    bool italic;
+    uint32_t alignment;
+    float letter_spacing;
+    float line_spacing; /* Zero uses the default 1.2 multiplier. */
+    uint32_t guide_count;
+    AfPathCommand guide[AF_PROJECT_TEXT_GUIDE_COMMANDS];
+} AfProjectText;
 
 typedef struct AfProjectClip {
     uint64_t id;
@@ -47,6 +74,7 @@ typedef struct AfProject {
     AfScene scene;
     AfProjectMetadata metadata;
     char (*names)[AF_PROJECT_NAME_CAPACITY];
+    AfProjectText *texts;
     AfVec2 canvas_size;
     uint64_t next_id;
     AfProjectClip *clips;
@@ -72,6 +100,7 @@ typedef struct AfProject {
 
 typedef struct AfProjectNodeSnapshot {
     AfSceneNode node;
+    AfProjectText text;
     AfStyle style;
     AfLayoutNode layout;
     AfParticleEmitter emitter;
@@ -108,6 +137,7 @@ typedef struct AfProjectPathSnapshot {
 AfResult af_project_create(AfProject *project, AfAllocator *allocator, uint32_t capacity);
 void af_project_destroy(AfProject *project);
 AfResult af_project_validate(const AfProject *project);
+bool af_project_text_valid(const AfProjectText *text);
 AfResult af_project_add_node(AfProject *project, const AfSceneNode *node, const char *name);
 AfResult af_project_insert_snapshot(AfProject *project, const AfProjectNodeSnapshot *snapshot);
 AfResult af_project_remove_node_exact(AfProject *project, uint64_t id);

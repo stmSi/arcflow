@@ -93,7 +93,7 @@ path into individual contour objects; holes become filled objects. Each action i
 Bézier controls retain their geometry under transforms. This first slice accepts static leaf
 shapes with solid paint and no bindings, emitters, dependent styles, or parent flow layout;
 resolved layout becomes fixed placement. Existing undo limits apply (8 source/result paths and
-512 total path commands per side).
+4,096 total path commands per side; rendering and topology tools have their own lower bounds).
 **Shape > Weld**, **Trim Primary**, and **Intersect** operate on two closed shapes. Weld produces
 their combined filled region, Trim subtracts the other shape from the last-selected shape, and
 Intersect retains their overlap. Both originals are replaced in one undo step, retaining the
@@ -101,6 +101,30 @@ primary object's appearance; undo restores the originals, including their curves
 leave both originals intact. These operations respect each input's fill rule and approximate curves
 with editable line contours (target tolerance 0.1 canvas unit). The same static-source restrictions
 apply. Dense intersections or details below the clipping precision are rejected without editing.
+**Shape > Join Endpoints** connects two selected open endpoints in the Node tool. Combine separate
+objects first; selecting the two ends of one contour closes it. **Continue Path** resumes Pen drawing
+from either end of an open contour. Enter commits once, and Escape leaves the original intact.
+**Outline to Object** expands the visible stroke into a filled path, retaining a visible original fill
+as a separate object. **Contour / Offset** accepts a signed distance in object units: positive expands,
+negative insets. It uses the current outline join and miter settings. These are destructive, undoable
+operations on static solid shapes; curves are approximated, and empty or over-capacity results leave
+the original intact.
+
+The **Text tool** (`T`) creates artistic text with a click and paragraph text with a dragged frame.
+Click existing text with the tool, double-click it with Pick, or use **Shape > Create / Edit Text**
+to reopen its editor. Choose Liberation Sans, Serif or Mono and real Regular/Bold/Italic/Bold Italic
+faces, font size, fill color (`#RRGGBB` or `#RRGGBBAA`), alignment, letter spacing and line spacing.
+Click the font control or press `Ctrl+F` to cycle families; `Ctrl+B/I` toggles styles. Tab changes fields,
+`Ctrl+A` replaces a field, clipboard copy/paste works, and `Shift+Enter` adds a line break. Enter applies
+one undoable edit; Escape cancels. The normal fill/outline inspector also styles text.
+For text on a curve, select a single-contour path, open the text editor, and choose **On Path**. The
+baseline is copied, with start distance and alignment controls. Editing or deleting the source does
+not change the copied baseline. **Convert Text to Path** enables glyph node editing; undo restores
+editable text. Project format 14 stores content and formatting alongside cached outlines, so native
+playback and SVG export need no installed fonts. Limits: 511 UTF-8 bytes, 32 baseline commands and
+bounded glyph geometry. Per-character formatting, arbitrary/system fonts, canvas caret/IME editing,
+live baseline links and typography animation remain planned in the vector milestones.
+
 Timeline edits share bounded `Ctrl+Z`/`Ctrl+Y` history with scene edits. Scene shortcuts include
 `1`–`4`, `F2`, arrows, `Q`/`E`, `-`/`+`, brackets, `U`, `Ctrl+S`, and `F5`. `4` creates an editable
 path. Selecting a point opens a canvas action bar for point keys, line/curve conversion, insertion,

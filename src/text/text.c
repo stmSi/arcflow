@@ -147,6 +147,7 @@ static bool af_text_request_valid(const AfTextEngine *engine, const AfTextReques
         request->byte_count == 0U || request->byte_count > AF_MAX_TEXT_BYTES ||
         memchr(request->utf8, '\0', request->byte_count) != NULL || request->font_count == 0U ||
         request->font_count > AF_MAX_TEXT_FALLBACKS || !isfinite(request->font_size) ||
+        !isfinite(request->letter_spacing) || fabsf(request->letter_spacing) > 1000 ||
         !isfinite(request->maximum_width) || !isfinite(request->line_spacing) ||
         request->font_size <= 0.0F || request->font_size > 1024.0F ||
         request->maximum_width < 0.0F || request->maximum_width > 1000000.0F ||
@@ -191,7 +192,9 @@ static uint32_t af_text_utf8_codepoint(const char *text, uint32_t size, uint32_t
     return UINT32_MAX;
 }
 
-static bool af_text_utf8_valid(const char *text, uint32_t size) {
+bool af_text_utf8_valid(const char *text, uint32_t size) {
+    if (text == NULL)
+        return false;
     uint32_t offset = 0U;
     while (offset < size) {
         const uint8_t first = (uint8_t)text[offset];
@@ -434,6 +437,8 @@ AfResult af_text_shape(AfTextEngine *engine, const AfTextRequest *request, AfTex
     uint32_t pixel_size = 0U;
     float pen_x = 0.0F;
     float baseline = 0.0F;
+    uint32_t word_start = UINT32_MAX;
+    float word_x = 0.0F;
     if (!af_text_request_valid(engine, request, layout) ||
         !af_text_utf8_valid(request->utf8, request->byte_count) ||
         (primary = af_text_find_font(engine, request->font_ids[0])) == NULL) {
@@ -479,6 +484,24 @@ AfResult af_text_shape(AfTextEngine *engine, const AfTextRequest *request, AfTex
         float advance_x = (float)positions[index].x_advance / 64.0F;
         float advance_y = (float)positions[index].y_advance / 64.0F;
         AfGlyphCacheEntry *cache_entry = NULL;
+        if (codepoint == '\r')
+            continue;
+        if (codepoint == '\n') {
+            if ((request->maximum_lines && layout->line_count >= request->maximum_lines) ||
+                layout->line_count >= layout->line_capacity) {
+                if (!request->truncate)
+                    return AF_RESULT_LIMIT_EXCEEDED;
+                layout->truncated = true;
+                break;
+            }
+            layout->lines[layout->line_count - 1U].width = pen_x;
+            pen_x = 0;
+            baseline += request->font_size * request->line_spacing;
+            layout->lines[layout->line_count++] =
+                (AfTextLine){.glyph_start = layout->glyph_count, .baseline = baseline};
+            word_start = UINT32_MAX;
+            continue;
+        }
         if (glyph_id == 0U && codepoint != UINT32_MAX) {
             AfTextFont *fallback = af_text_fallback_font(engine, request, codepoint, &glyph_id);
             if (fallback != NULL) {
@@ -490,20 +513,43 @@ AfResult af_text_shape(AfTextEngine *engine, const AfTextRequest *request, AfTex
                 }
             }
         }
+        const bool last_in_cluster =
+            index + 1U == count || infos[index + 1U].cluster != infos[index].cluster;
+        const bool has_next =
+            index + 1U < count && af_text_utf8_codepoint(request->utf8, request->byte_count,
+                                                         infos[index + 1U].cluster) != '\n';
+        if (last_in_cluster && has_next)
+            advance_x = fmaxf(0.0F, fabsf(advance_x) + request->letter_spacing);
         if (request->wrap != AF_TEXT_WRAP_NONE && request->maximum_width > 0.0F &&
             pen_x + fabsf(advance_x) > request->maximum_width &&
             layout->lines[layout->line_count - 1U].glyph_count != 0U) {
             if ((request->maximum_lines != 0U && layout->line_count >= request->maximum_lines) ||
                 layout->line_count >= layout->line_capacity) {
-                layout->truncated = request->truncate;
+                if (!request->truncate)
+                    return AF_RESULT_LIMIT_EXCEEDED;
+                layout->truncated = true;
                 break;
             }
-            layout->lines[layout->line_count - 1U].width = pen_x;
-            pen_x = 0.0F;
+            AfTextLine *previous_line = &layout->lines[layout->line_count - 1U];
             baseline += request->font_size * request->line_spacing;
-            layout->lines[layout->line_count] =
-                (AfTextLine){.glyph_start = layout->glyph_count, .baseline = baseline};
-            ++layout->line_count;
+            const bool move_word = request->wrap == AF_TEXT_WRAP_WORD && word_start != UINT32_MAX &&
+                                   word_start > previous_line->glyph_start &&
+                                   word_start < layout->glyph_count;
+            const uint32_t start = move_word ? word_start : layout->glyph_count;
+            previous_line->width = move_word ? word_x : pen_x;
+            previous_line->glyph_count = start - previous_line->glyph_start;
+            for (uint32_t g = start; g < layout->glyph_count; ++g) {
+                layout->glyphs[g].position.x -= word_x;
+                layout->glyphs[g].position.y += request->font_size * request->line_spacing;
+            }
+            pen_x = move_word ? pen_x - word_x : 0;
+            layout->lines[layout->line_count++] =
+                (AfTextLine){.glyph_start = start,
+                             .glyph_count = layout->glyph_count - start,
+                             .baseline = baseline};
+            word_start = UINT32_MAX;
+            if (!move_word && (codepoint == ' ' || codepoint == '\t'))
+                continue;
         }
         cache_entry = af_text_cache_glyph(engine, font, glyph_id, pixel_size);
         if (cache_entry == NULL) {
@@ -526,6 +572,10 @@ AfResult af_text_shape(AfTextEngine *engine, const AfTextRequest *request, AfTex
         ++layout->glyph_count;
         ++layout->lines[layout->line_count - 1U].glyph_count;
         pen_x += fabsf(advance_x);
+        if (codepoint == ' ' || codepoint == '\t') {
+            word_start = layout->glyph_count;
+            word_x = pen_x;
+        }
     }
     layout->lines[layout->line_count - 1U].width = pen_x;
     for (uint32_t line = 0U; line < layout->line_count; ++line) {
@@ -542,6 +592,7 @@ static uint64_t af_text_request_hash(const AfTextRequest *request) {
     hash ^= af_hash_bytes(&request->font_size, sizeof(request->font_size));
     hash ^= af_hash_bytes(&request->maximum_width, sizeof(request->maximum_width));
     hash ^= af_hash_bytes(&request->line_spacing, sizeof(request->line_spacing));
+    hash ^= af_hash_bytes(&request->letter_spacing, sizeof(request->letter_spacing));
     hash ^= af_hash_bytes(&request->maximum_lines, sizeof(request->maximum_lines));
     hash ^= ((uint64_t)(uint32_t)request->direction << 1U) ^
             ((uint64_t)(uint32_t)request->alignment << 5U) ^

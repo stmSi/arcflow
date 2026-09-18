@@ -1,5 +1,19 @@
 static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int height, float x,
                                           float y) {
+    if (editor->text_panel_open) {
+        af_editor_text_panel_mouse(editor, width, height, x, y);
+        return true;
+    }
+    if (editor->offset_panel_open) {
+        const float left = ((float)width - 540.0F) * 0.5F, top = ((float)height - 210.0F) * 0.5F;
+        if (y >= top + 166 && y <= top + 204 && x >= left && x <= left + 540) {
+            if (x < left + 270)
+                af_editor_apply_offset_panel(editor);
+            else
+                editor->offset_panel_open = false;
+        }
+        return true;
+    }
     if (af_editor_onboarding_mouse_down(editor, width, height, x, y)) {
         return true;
     }
@@ -447,6 +461,14 @@ static bool af_editor_append_workflow_text(char *buffer, size_t capacity, const 
 }
 
 static bool af_editor_workflow_text(AfEditorState *editor, const char *text) {
+    if (editor->offset_panel_open) {
+        if (editor->offset_replace)
+            editor->offset_buffer[0] = '\0';
+        editor->offset_replace = false;
+        (void)af_editor_append_workflow_text(editor->offset_buffer, sizeof(editor->offset_buffer),
+                                             text);
+        return true;
+    }
     if (editor->command_palette.open) {
         (void)af_editor_append_workflow_text(editor->command_palette.query,
                                              sizeof(editor->command_palette.query), text);

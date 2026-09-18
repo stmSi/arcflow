@@ -243,7 +243,18 @@ AfResult af_project_deserialize_versioned(const void *data, size_t size, AfAlloc
             const uint32_t required_fields = format_version >= 12U
                                                  ? AF_PROJECT_REQUIRED_FIELDS
                                                  : AF_PROJECT_LEGACY_REQUIRED_FIELDS;
-            if (!in_node || (fields & ~(uint32_t)AF_PROJECT_FIELD_POLYGON) != required_fields ||
+            if (!in_node ||
+                (fields & ~(uint32_t)(AF_PROJECT_FIELD_POLYGON | AF_PROJECT_FIELD_TEXT |
+                                      AF_PROJECT_FIELD_TEXT_UTF8 | AF_PROJECT_FIELD_TEXT_FORMAT)) !=
+                    required_fields ||
+                ((fields & (AF_PROJECT_FIELD_TEXT | AF_PROJECT_FIELD_TEXT_UTF8 |
+                            AF_PROJECT_FIELD_TEXT_FORMAT)) != 0U &&
+                 (format_version < 14U ||
+                  (fields & (AF_PROJECT_FIELD_TEXT | AF_PROJECT_FIELD_TEXT_UTF8 |
+                             AF_PROJECT_FIELD_TEXT_FORMAT)) !=
+                      (AF_PROJECT_FIELD_TEXT | AF_PROJECT_FIELD_TEXT_UTF8 |
+                       AF_PROJECT_FIELD_TEXT_FORMAT))) ||
+                (node.text.guide_count != 0U && node.text.mode != AF_PROJECT_TEXT_ON_PATH) ||
                 (format_version < 13U && (fields & AF_PROJECT_FIELD_POLYGON) != 0U) ||
                 af_project_insert_snapshot(&project, &node) != AF_RESULT_SUCCESS) {
                 goto cleanup;

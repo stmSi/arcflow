@@ -87,6 +87,7 @@ static AfResult af_editor_modify(AfProject *project, const AfProjectNodeSnapshot
         }
         project->scene.nodes[project_index] = snapshots[index].node;
         project->particle_data.lod = snapshots[index].vfx_lod;
+        project->texts[project_index] = snapshots[index].text;
         memcpy(project->names[project_index], snapshots[index].name, AF_PROJECT_NAME_CAPACITY);
         *af_project_find_node_style(project, snapshots[index].node.id) = snapshots[index].style;
         if (snapshots[index].has_layout) {
@@ -107,6 +108,7 @@ static AfResult af_editor_modify(AfProject *project, const AfProjectNodeSnapshot
             if (project_index != UINT32_MAX) {
                 project->scene.nodes[project_index] = rollback[index].node;
                 project->particle_data.lod = rollback[index].vfx_lod;
+                project->texts[project_index] = rollback[index].text;
                 memcpy(project->names[project_index], rollback[index].name,
                        AF_PROJECT_NAME_CAPACITY);
                 *af_project_find_node_style(project, rollback[index].node.id) =
@@ -323,7 +325,7 @@ static AfResult af_editor_command_apply_side(AfProject *project, const AfEditorC
         const uint32_t insert_points =
             forward ? command->path_command_after_count : command->path_command_before_count;
         uint32_t remove_layouts = 0U, insert_layouts = 0U;
-        if (remove_count == 0U || insert_count == 0U)
+        if (remove_count == 0U && insert_count == 0U)
             return AF_RESULT_INVALID_ARGUMENT;
         for (uint32_t i = 0; i < remove_count; ++i) {
             if (af_scene_find_const(&project->scene, remove[i].node.id) == NULL)
@@ -352,7 +354,8 @@ static AfResult af_editor_command_apply_side(AfProject *project, const AfEditorC
         /* Builders accept only independent leaves. No invalid intermediate state is rendered. */
         for (uint32_t i = remove_count; i > 0U; --i)
             (void)af_project_remove_node_exact(project, remove[i - 1U].node.id);
-        AfResult result = af_editor_restore(project, insert, insert_count);
+        AfResult result =
+            insert_count ? af_editor_restore(project, insert, insert_count) : AF_RESULT_SUCCESS;
         const bool inserted = result == AF_RESULT_SUCCESS;
         if (inserted)
             result = af_editor_path_restore(project, command, !forward);
@@ -457,20 +460,26 @@ static AfResult af_editor_command_apply_side(AfProject *project, const AfEditorC
                 return result;
         }
         AfSceneNode node = project->scene.nodes[from];
+        const AfProjectText text = project->texts[from];
         char name[AF_PROJECT_NAME_CAPACITY];
         memcpy(name, project->names[from], sizeof(name));
         if (to > from) {
             memmove(project->scene.nodes + from, project->scene.nodes + from + 1U,
                     (size_t)(to - from) * sizeof(node));
+            memmove(project->texts + from, project->texts + from + 1U,
+                    (size_t)(to - from) * sizeof(text));
             memmove(project->names + from, project->names + from + 1U,
                     (size_t)(to - from) * sizeof(name));
         } else if (to < from) {
             memmove(project->scene.nodes + to + 1U, project->scene.nodes + to,
                     (size_t)(from - to) * sizeof(node));
+            memmove(project->texts + to + 1U, project->texts + to,
+                    (size_t)(from - to) * sizeof(text));
             memmove(project->names + to + 1U, project->names + to,
                     (size_t)(from - to) * sizeof(name));
         }
         node.layer_order = snapshot->node.layer_order;
+        project->texts[to] = text;
         project->scene.nodes[to] = node;
         memcpy(project->names[to], name, sizeof(name));
         return AF_RESULT_SUCCESS;
@@ -513,7 +522,8 @@ AfResult af_editor_command_convert_path(const AfProject *project, uint64_t node_
     const AfSceneNode *node =
         project == NULL ? NULL : af_scene_find_const(&project->scene, node_id);
     if (node != NULL && out_command != NULL && node->type == AF_NODE_PATH &&
-        node->polygon_sides != 0U) {
+        (node->polygon_sides != 0U ||
+         project->texts[af_project_find_index(project, node_id)].mode != AF_PROJECT_TEXT_NONE)) {
         AfProjectNodeSnapshot before = {0}, after = {0};
         AfResult result = af_project_snapshot(project, node_id, &before);
         if (result != AF_RESULT_SUCCESS)
@@ -521,6 +531,7 @@ AfResult af_editor_command_convert_path(const AfProject *project, uint64_t node_
         after = before;
         after.node.polygon_sides = 0U;
         after.node.polygon_inset = 0.0F;
+        after.text = (AfProjectText){0};
         return af_editor_command_modify(&before, &after, AF_EDITOR_MERGE_NONE, out_command);
     }
     if (node == NULL || out_command == NULL ||

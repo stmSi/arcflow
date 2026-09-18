@@ -40,9 +40,16 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
     AfProjectTextWriter writer = {0};
     uint32_t index = 0U;
     AfResult result = AF_RESULT_SUCCESS;
+    uint32_t text_count = 0U;
+    if (project != NULL && project->texts != NULL &&
+        project->scene.count <= project->scene.capacity && project->scene.capacity <= AF_MAX_NODES)
+        for (uint32_t i = 0; i < project->scene.count; ++i)
+            text_count += project->texts[i].mode != AF_PROJECT_TEXT_NONE;
     if (allocator == NULL || out_text == NULL ||
         af_project_validate(project) != AF_RESULT_SUCCESS ||
         af_size_mul_overflow(project->scene.count, 640U, &capacity) ||
+        af_size_mul_overflow(text_count, 8192U, &animation_capacity) ||
+        af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_mul_overflow(project->clip_count, 256U, &animation_capacity) ||
         af_size_add_overflow(capacity, animation_capacity, &capacity) ||
         af_size_mul_overflow(project->track_count, 256U, &animation_capacity) ||
@@ -120,7 +127,7 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
             "node\nid %llu\nparent %s\ntype %s\nname %s\nposition %.9g %.9g\nrotation "
             "%.9g\nscale %.9g %.9g\nskew %.9g %.9g\nbounds %.9g %.9g\nfill %.9g %.9g %.9g "
             "%.9g\nopacity "
-            "%.9g\ncorner_radius %.9g\nlayer %d\nvisible %u\npolygon %u %.9g\nend\n",
+            "%.9g\ncorner_radius %.9g\nlayer %d\nvisible %u\npolygon %u %.9g\n",
             (unsigned long long)node->id, parent, af_project_type_name(node->type),
             project->names[index], node->local_transform.position.x,
             node->local_transform.position.y, node->local_transform.rotation,
@@ -129,6 +136,31 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
             node->bounds.y, node->fill.r, node->fill.g, node->fill.b, node->fill.a, node->opacity,
             node->corner_radius, node->layer_order, node->visible ? 1U : 0U, node->polygon_sides,
             node->polygon_inset);
+        const AfProjectText *text = &project->texts[index];
+        if (result == AF_RESULT_SUCCESS && text->mode != AF_PROJECT_TEXT_NONE) {
+            result = af_project_writer_append(
+                &writer, "text_settings %u %.9g %.9g %.9g\ntext_utf8 ", (unsigned int)text->mode,
+                (double)text->font_size, (double)text->width, (double)text->offset);
+            for (size_t i = 0; result == AF_RESULT_SUCCESS && text->utf8[i]; ++i)
+                result = af_project_writer_append(&writer, "%02x",
+                                                  (unsigned int)(unsigned char)text->utf8[i]);
+            if (result == AF_RESULT_SUCCESS)
+                result = af_project_writer_append(&writer, "\n");
+            if (result == AF_RESULT_SUCCESS)
+                result = af_project_writer_append(
+                    &writer, "text_format %u %u %u %u %.9g %.9g\n", text->font_family,
+                    text->bold ? 1U : 0U, text->italic ? 1U : 0U, text->alignment,
+                    (double)text->letter_spacing, (double)text->line_spacing);
+            for (uint32_t i = 0; result == AF_RESULT_SUCCESS && i < text->guide_count; ++i) {
+                const AfPathCommand c = text->guide[i];
+                result = af_project_writer_append(
+                    &writer, "text_guide %u %.9g %.9g %.9g %.9g %.9g %.9g\n", (unsigned int)c.type,
+                    (double)c.point.x, (double)c.point.y, (double)c.control1.x,
+                    (double)c.control1.y, (double)c.control2.x, (double)c.control2.y);
+            }
+        }
+        if (result == AF_RESULT_SUCCESS)
+            result = af_project_writer_append(&writer, "end\n");
     }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->style_data.count; ++index) {
         const AfStyle *style = &project->style_data.styles[index];
