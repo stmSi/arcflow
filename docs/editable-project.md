@@ -1,7 +1,7 @@
 # Editable projects
 
 Arcflow editable projects use the `.afproj` extension and a bounded, line-oriented text format.
-The current format is version 14 and starts with `arcflow_project 14`. It declares reference-canvas
+The current format is version 15 and starts with `arcflow_project 15`. It declares reference-canvas
 and stable-ID counters, stores nodes in `node`/`end` blocks, paths in typed `path`/`end_path` blocks,
 and clips, tracks, and keys in typed animation blocks. Earlier supported versions are migrated by
 loading their known fields and applying bounded defaults for fields introduced later. Saving always
@@ -39,7 +39,7 @@ package bytes and normalized editable-project data as the source. Project-relati
 available relative to the destination; keep the output beside the source or copy its asset directory
 first.
 
-## Editable text (format 14)
+## Editable text (formats 14–15)
 
 A path node may include `text_settings` (mode, font size, paragraph width, path offset),
 `text_utf8` (lowercase hex-encoded UTF-8), and `text_format` (font family, bold, italic, alignment,
@@ -49,6 +49,12 @@ paragraph and path text; font families 0/1/2 are bundled Liberation Sans/Serif/M
 stores up to 32 `text_guide` commands (type, endpoint, control1, control2) as a copied single contour.
 Text content is limited to 511 UTF-8 bytes. Font size is 1–1000; letter spacing is bounded to
 ±1000 object units, and line spacing to 10 times the font size.
+
+Format 15 adds optional `text_font`: a nonempty lowercase hex-encoded UTF-8 installed family name
+(up to 127 bytes). Empty names are omitted and retain the format-14 bundled family index. The family
+name is independent of catalog order and filesystem paths; bold/italic select a real matching face.
+Duplicate, malformed, or pre-format-15 `text_font` fields are rejected. A missing installed font does
+not invalidate saved outlines or silently substitute a different family when editing.
 
 Normal path blocks hold the generated glyph outlines. Rendering and runtime compilation consume
 those outlines without a font dependency. Editing regenerates geometry and text metadata together;

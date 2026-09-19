@@ -245,8 +245,10 @@ AfResult af_project_deserialize_versioned(const void *data, size_t size, AfAlloc
                                                  : AF_PROJECT_LEGACY_REQUIRED_FIELDS;
             if (!in_node ||
                 (fields & ~(uint32_t)(AF_PROJECT_FIELD_POLYGON | AF_PROJECT_FIELD_TEXT |
-                                      AF_PROJECT_FIELD_TEXT_UTF8 | AF_PROJECT_FIELD_TEXT_FORMAT)) !=
-                    required_fields ||
+                                      AF_PROJECT_FIELD_TEXT_UTF8 | AF_PROJECT_FIELD_TEXT_FORMAT |
+                                      AF_PROJECT_FIELD_TEXT_FONT)) != required_fields ||
+                ((fields & AF_PROJECT_FIELD_TEXT_FONT) &&
+                 (format_version < 15U || !(fields & AF_PROJECT_FIELD_TEXT))) ||
                 ((fields & (AF_PROJECT_FIELD_TEXT | AF_PROJECT_FIELD_TEXT_UTF8 |
                             AF_PROJECT_FIELD_TEXT_FORMAT)) != 0U &&
                  (format_version < 14U ||

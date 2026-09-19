@@ -111,19 +111,32 @@ operations on static solid shapes; curves are approximated, and empty or over-ca
 the original intact.
 
 The **Text tool** (`T`) creates artistic text with a click and paragraph text with a dragged frame.
-Click existing text with the tool, double-click it with Pick, or use **Shape > Create / Edit Text**
-to reopen its editor. Choose Liberation Sans, Serif or Mono and real Regular/Bold/Italic/Bold Italic
-faces, font size, fill color (`#RRGGBB` or `#RRGGBBAA`), alignment, letter spacing and line spacing.
-Click the font control or press `Ctrl+F` to cycle families; `Ctrl+B/I` toggles styles. Tab changes fields,
-`Ctrl+A` replaces a field, clipboard copy/paste works, and `Shift+Enter` adds a line break. Enter applies
-one undoable edit; Escape cancels. The normal fill/outline inspector also styles text.
-For text on a curve, select a single-contour path, open the text editor, and choose **On Path**. The
-baseline is copied, with start distance and alignment controls. Editing or deleting the source does
-not change the copied baseline. **Convert Text to Path** enables glyph node editing; undo restores
-editable text. Project format 14 stores content and formatting alongside cached outlines, so native
-playback and SVG export need no installed fonts. Limits: 511 UTF-8 bytes, 32 baseline commands and
-bounded glyph geometry. Per-character formatting, arbitrary/system fonts, canvas caret/IME editing,
-live baseline links and typography animation remain planned in the vector milestones.
+Click existing text with the tool or double-click it with Pick to edit directly on the canvas.
+The contextual formatting bar provides font family, size, bold/italic, alignment, fill color,
+letter/line spacing, paragraph width, and path start distance. The searchable font dropdown
+(`Ctrl+F`) lists scalable TTF/OTF/TTC/OTC families from standard system and user font directories;
+Liberation Sans, Serif and Mono remain bundled. Type to filter, scroll or use Up/Down, and select
+with a click or Enter. Real installed bold/italic faces are used; missing faces are reported.
+
+Click or drag on text to position the caret or select a range. Arrow keys, Home/End, Shift-selection,
+Backspace/Delete and clipboard cut/copy/paste work with UTF-8. Enter inserts a line break;
+**Ctrl+Enter / Done** saves one undoable edit, and **Escape** cancels. `Ctrl+B/I` changes the whole
+object's style. Tab traverses content and formatting fields. Formatting applies to the whole object,
+including when a text range is selected. The live preview keeps existing gradient fills and outlines.
+For text on a curve, select a single-contour path, use **Shape > Create / Edit Text**, and choose
+**On path**. The baseline is copied; changing its source does not change the copy. **Convert Text
+to Path** enables glyph node editing, and undo restores editable text. Project format 15 saves
+installed family names alongside content, formatting, and cached outlines. Saved artwork remains
+renderable if its font is absent; editing requires choosing an available family. Limits remain
+511 UTF-8 bytes, 32 baseline commands, and bounded glyph geometry. Per-range formatting, full
+IME/bidi editing, live baseline links, font axes and typography animation remain planned.
+
+Select an object with Pick to access the contextual **Fill** controls. Cycle Solid / Linear /
+Radial / Conic, add or delete stops (2–16), select a stop, and use the inspector color picker or
+hex field for its color and alpha. Adjust stop position, reverse the gradient, and change its
+angle or radius. Drag the canvas handles to position the gradient; Escape cancels the drag.
+Each edit supports undo/redo, and gradients persist in native projects and playback. Constrained
+export formats retain their existing gradient compatibility limitations.
 
 Timeline edits share bounded `Ctrl+Z`/`Ctrl+Y` history with scene edits. Scene shortcuts include
 `1`–`4`, `F2`, arrows, `Q`/`E`, `-`/`+`, brackets, `U`, `Ctrl+S`, and `F5`. `4` creates an editable

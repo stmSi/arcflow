@@ -151,6 +151,14 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
                     &writer, "text_format %u %u %u %u %.9g %.9g\n", text->font_family,
                     text->bold ? 1U : 0U, text->italic ? 1U : 0U, text->alignment,
                     (double)text->letter_spacing, (double)text->line_spacing);
+            if (result == AF_RESULT_SUCCESS && text->font_name[0]) {
+                result = af_project_writer_append(&writer, "text_font ");
+                for (size_t i = 0; result == AF_RESULT_SUCCESS && text->font_name[i]; ++i)
+                    result = af_project_writer_append(
+                        &writer, "%02x", (unsigned int)(unsigned char)text->font_name[i]);
+                if (result == AF_RESULT_SUCCESS)
+                    result = af_project_writer_append(&writer, "\n");
+            }
             for (uint32_t i = 0; result == AF_RESULT_SUCCESS && i < text->guide_count; ++i) {
                 const AfPathCommand c = text->guide[i];
                 result = af_project_writer_append(

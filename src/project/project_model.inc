@@ -9,6 +9,10 @@ bool af_project_text_valid(const AfProjectText *text) {
         !isfinite(text->offset) || fabsf(text->offset) > 1000000 ||
         text->guide_count > AF_PROJECT_TEXT_GUIDE_COMMANDS)
         return false;
+    if (!memchr(text->font_name, '\0', sizeof(text->font_name)) ||
+        (text->font_name[0] &&
+         !af_text_utf8_valid(text->font_name, (uint32_t)strlen(text->font_name))))
+        return false;
     if (text->font_family > 2U || text->alignment > 2U || !isfinite(text->letter_spacing) ||
         fabsf(text->letter_spacing) > 1000 || !isfinite(text->line_spacing) ||
         text->line_spacing < 0 || text->line_spacing > 10)

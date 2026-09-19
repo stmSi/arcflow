@@ -1,4 +1,13 @@
+#include "editor/editor_fonts.h"
+
 static bool af_test_editor_text(void) {
+    AfEditorFontCatalog catalog = {0};
+    CHECK(af_editor_fonts_discover(&catalog, ARCFLOW_TEST_DOCUMENT_FONT_DIR));
+    CHECK(catalog.count >= 12);
+    CHECK(af_editor_fonts_find(&catalog, "Liberation Sans", false, false));
+    CHECK(af_editor_fonts_find(&catalog, "Liberation Sans", true, true));
+    CHECK(!af_editor_fonts_find(&catalog, "Arcflow Missing Font Test", false, false));
+    af_editor_fonts_destroy(&catalog);
     AfAllocator allocator;
     af_allocator_init_default(&allocator);
     AfFileData font = {0};
@@ -22,6 +31,7 @@ static bool af_test_editor_text(void) {
         text.bold = mode == 1;
         text.italic = mode == 3;
         text.alignment = mode % 3;
+        (void)snprintf(text.font_name, sizeof(text.font_name), "Installed family café %u", mode);
         text.letter_spacing = .5F;
         text.line_spacing = 1.4F;
         if (mode == 3) {

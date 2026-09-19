@@ -480,6 +480,7 @@ static bool af_editor_vector_tool_mouse_down(AfEditorState *editor, int width, i
         if (af_editor_is_text(editor, hit)) {
             af_editor_select_only(editor, hit);
             af_editor_open_text_panel(editor, width, height);
+            af_editor_text_panel_mouse(editor, width, height, event->x, event->y);
             return true;
         }
     }

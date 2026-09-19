@@ -100,6 +100,8 @@ static AfColor af_editor_inspector_color(const AfEditorState *editor, const AfSc
     if (editor->color_target_outline && style != NULL) {
         return style->stroke_paint.solid;
     }
+    if (style && style->fill.type != AF_PAINT_SOLID && style->fill.stop_count)
+        return style->fill.stops[af_editor_gradient_stop(editor, &style->fill)].color;
     return node == NULL ? (AfColor){0.5F, 0.5F, 0.5F, 1.0F} : node->fill;
 }
 
@@ -131,7 +133,11 @@ static void af_editor_apply_fill(AfEditorState *editor, AfColor color) {
             AfStyle *style = af_project_find_node_style(&editor->project, node->id);
             node->fill = color;
             if (style != NULL) {
-                style->fill = af_paint_solid(color);
+                if (style->fill.type != AF_PAINT_SOLID && style->fill.stop_count)
+                    style->fill.stops[af_editor_gradient_stop(editor, &style->fill)].color = color;
+                else
+                    style->fill = af_paint_solid(color);
+                style->inherit_flags &= ~(uint32_t)AF_STYLE_INHERIT_FILL;
                 (void)af_style_mark_paint_changed(style);
             }
         }
@@ -403,7 +409,10 @@ static AfEditorMergeKey af_editor_inspector_merge_key(AfEditorInspectorField fie
 }
 
 static bool af_editor_apply_inspector_color(AfEditorState *editor, AfColor color) {
-    const bool animatable = !editor->color_target_outline;
+    const AfStyle *selected_style =
+        af_project_find_node_style(&editor->project, editor->selected_id);
+    const bool animatable = !editor->color_target_outline &&
+                            (!selected_style || selected_style->fill.type == AF_PAINT_SOLID);
     if (editor->selected_id == 0U) {
         return false;
     }
@@ -1440,7 +1449,10 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
         if (editor->selection_drag_count == 0U) {
             return;
         }
-        if (!editor->color_target_outline) {
+        const AfStyle *fill_style =
+            af_project_find_node_style(&editor->project, editor->selected_id);
+        if (!editor->color_target_outline &&
+            (!fill_style || fill_style->fill.type == AF_PAINT_SOLID)) {
             editor->selected_property = AF_PROPERTY_FILL_COLOR;
             af_editor_begin_transform_key_drag(editor, AF_PROPERTY_FILL_COLOR);
         }

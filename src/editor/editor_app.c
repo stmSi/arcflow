@@ -8,6 +8,7 @@
 #include "core/log.h"
 #include "editor/editor_actions.h"
 #include "editor/editor_commands.h"
+#include "editor/editor_fonts.h"
 #include "editor/editor_gizmo.h"
 #include "editor/editor_inspector.h"
 #include "editor/editor_preferences.h"
@@ -274,6 +275,22 @@ typedef struct AfEditorState {
     AfPathTessellationScratch *path_scratch;
     AfTextEngine *text_engine;
     AfFileData document_font_files[12];
+    AfEditorFontCatalog font_catalog;
+    AfTextEngine *system_font_engine;
+    AfFileData system_font_file;
+    const AfEditorFontFace *system_font_face;
+    AfEditorCommand *text_preview;
+    AfStyleData text_preview_styles;
+    uint64_t text_preview_hash;
+    bool text_preview_valid;
+    size_t text_caret, text_anchor;
+    char font_search[128];
+    uint32_t font_scroll;
+    AfVec2 text_carets[AF_PROJECT_TEXT_BYTES];
+    AfVec2 text_caret_tops[AF_PROJECT_TEXT_BYTES];
+    bool text_caret_valid[AF_PROJECT_TEXT_BYTES];
+    float text_caret_height;
+
     AfFileData font_file;
     AfGlyphPlacement *text_glyphs;
     AfTextLine *text_lines;
@@ -326,6 +343,10 @@ typedef struct AfEditorState {
     uint32_t tool_command_count;
     AfVec2 tool_pen_outgoing;
     bool tool_pen_has_outgoing;
+    uint64_t gradient_target;
+    uint32_t gradient_stop;
+    uint32_t gradient_drag;
+    bool text_dragging;
     bool text_panel_open;
     bool text_panel_replace;
     uint32_t text_panel_field;
@@ -505,6 +526,12 @@ static bool af_editor_selected_path_has_animation(const AfEditorState *editor);
 static bool af_editor_path_segment_hit(const AfEditorState *editor, int width, int height,
                                        AfVec2 mouse, uint32_t *out_command, float *out_t);
 static void af_editor_group_selection(AfEditorState *editor);
+static void af_editor_render_gradient_handles(AfEditorState *editor, int width, int height);
+static uint32_t af_editor_gradient_stop(const AfEditorState *editor, const AfPaint *paint);
+static void af_editor_text_preview_update(AfEditorState *editor);
+static void af_editor_text_panel_mouse(AfEditorState *editor, int width, int height, float x,
+                                       float y);
+static void af_editor_render_text_canvas(AfEditorState *editor, int width, int height);
 static void af_editor_open_text_panel(AfEditorState *editor, int width, int height);
 static void af_editor_finish_text_tool(AfEditorState *editor, int width, int height);
 static bool af_editor_is_text(const AfEditorState *editor, uint64_t id);
@@ -527,6 +554,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_paths.inc"
 #include "editor/editor_app_text.inc"
 #include "editor/editor_app_properties.inc"
+#include "editor/editor_app_gradient.inc"
 #include "editor/editor_app_menus.inc"
 #include "editor/editor_app_workflow_core.inc"
 #include "editor/editor_app_onboarding.inc"
@@ -1485,6 +1513,11 @@ cleanup:
     SDL_DestroyCursor(editor.resize_horizontal_cursor);
     SDL_DestroyCursor(editor.resize_vertical_cursor);
     af_platform_window_destroy(&editor.window);
+    free(editor.text_preview);
+    free(editor.text_preview_styles.styles);
+    af_text_engine_destroy(editor.system_font_engine);
+    af_file_data_destroy(&editor.allocator, &editor.system_font_file);
+    af_editor_fonts_destroy(&editor.font_catalog);
     af_text_engine_destroy(editor.text_engine);
     for (uint32_t i = 0; i < 12; ++i)
         af_file_data_destroy(&editor.allocator, &editor.document_font_files[i]);

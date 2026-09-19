@@ -1,6 +1,6 @@
 # Arcflow 1.0 production release
 
-Arcflow 1.0.0 uses the Stable channel, editable-project format 14, runtime-package format 13,
+Arcflow 1.0.0 uses the Stable channel, editable-project format 15, runtime-package format 13,
 runtime version 10, and Host SDK 1.0.0. A release candidate is accepted only when the automated gate
 and the external platform/hardware evidence both pass for the same source revision.
 

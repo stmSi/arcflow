@@ -610,6 +610,7 @@ static void af_editor_render_workflow(AfEditorState *editor, int width, int heig
     af_editor_render_recent_projects(editor, width, height);
     af_editor_render_export(editor, width, height);
     af_editor_render_onboarding(editor, width, height);
+    af_editor_render_gradient(editor, width);
     af_editor_render_text_panel(editor, width, height);
     if (editor->offset_panel_open) {
         const float x = ((float)width - 540.0F) * 0.5F, y = ((float)height - 210.0F) * 0.5F;
@@ -733,7 +734,7 @@ static void af_editor_render_canvas_workflow(AfEditorState *editor, int width, i
             }
         }
     }
-    if (editor->measurement_visible && editor->selected_count == 1U) {
+    if (!editor->text_panel_open && editor->measurement_visible && editor->selected_count == 1U) {
         const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
         if (node != NULL) {
             const AfVec2 origin = af_affine_transform_point(camera, node->local_transform.position);

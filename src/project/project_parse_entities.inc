@@ -30,11 +30,16 @@ static bool af_project_parse_node_field(const char *line, AfProjectNodeSnapshot 
         snapshot->text.offset = values[3];
         return true;
     }
-    if ((value = af_project_value(line, "text_utf8")) != NULL) {
-        if (!af_project_set_field(fields, AF_PROJECT_FIELD_TEXT_UTF8))
+    const bool font_name = (value = af_project_value(line, "text_font")) != NULL;
+    if (font_name || (value = af_project_value(line, "text_utf8")) != NULL) {
+        char *destination = font_name ? snapshot->text.font_name : snapshot->text.utf8;
+        const size_t capacity =
+            font_name ? sizeof(snapshot->text.font_name) : AF_PROJECT_TEXT_BYTES;
+        if (!af_project_set_field(fields, font_name ? AF_PROJECT_FIELD_TEXT_FONT
+                                                    : AF_PROJECT_FIELD_TEXT_UTF8))
             return false;
         const size_t length = strlen(value);
-        if (length == 0 || length % 2 != 0 || length / 2 >= AF_PROJECT_TEXT_BYTES)
+        if (length == 0 || length % 2 != 0 || length / 2 >= capacity)
             return false;
         for (size_t i = 0; i < length / 2; ++i) {
             unsigned int byte = 0;
@@ -46,9 +51,9 @@ static bool af_project_parse_node_field(const char *line, AfProjectNodeSnapshot 
             }
             if (!byte)
                 return false;
-            snapshot->text.utf8[i] = (char)byte;
+            destination[i] = (char)byte;
         }
-        snapshot->text.utf8[length / 2] = '\0';
+        destination[length / 2] = '\0';
         return true;
     }
     if ((value = af_project_value(line, "text_guide")) != NULL) {

@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AF_PROJECT_FORMAT_VERSION 14U
+#define AF_PROJECT_FORMAT_VERSION 15U
 #define AF_PROJECT_MAX_FILE_SIZE (32U * 1024U * 1024U)
 #define AF_PROJECT_NAME_CAPACITY 64U
 #define AF_PROJECT_MAX_CLIPS 64U
@@ -38,6 +38,7 @@ typedef struct AfProjectText {
     float width;
     float offset;
     uint32_t font_family; /* Liberation Sans, Serif, Mono. */
+    char font_name[128];  /* Empty uses the legacy bundled family; otherwise installed family. */
     bool bold;
     bool italic;
     uint32_t alignment;

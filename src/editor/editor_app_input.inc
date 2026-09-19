@@ -1195,6 +1195,8 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
     if (event->button != SDL_BUTTON_LEFT) {
         return;
     }
+    if (af_editor_gradient_mouse(editor, width, height, x, y))
+        return;
     if (x >= 12.0F && x <= 106.0F && y >= 30.0F && y <= 47.0F && x < editor->left_width) {
         af_editor_group_selection(editor);
         return;
@@ -1308,9 +1310,10 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
             if (hit_node != NULL && hit_node->polygon_sides == 0U &&
                 af_path_find_node_const(&editor->project.path_data, hit) != NULL) {
                 af_editor_select_only(editor, hit);
-                if (af_editor_is_text(editor, hit))
+                if (af_editor_is_text(editor, hit)) {
                     af_editor_open_text_panel(editor, width, height);
-                else
+                    af_editor_text_panel_mouse(editor, width, height, x, y);
+                } else
                     af_editor_convert_selected_to_path(editor);
                 return;
             }
@@ -1468,6 +1471,21 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
     editor->mouse_position = (AfVec2){event->x, event->y};
+    if (editor->gradient_drag) {
+        af_editor_gradient_motion(editor, width, height, event->x, event->y);
+        return;
+    }
+    if (editor->text_panel_open) {
+        if (editor->text_dragging && (event->state & SDL_BUTTON_LMASK) &&
+            event->x >= editor->left_width && event->x < (float)width - editor->right_width &&
+            event->y >= editor->toolbar_height + 108 &&
+            event->y < af_editor_timeline_top(editor, height)) {
+            size_t anchor = editor->text_anchor;
+            af_editor_text_panel_mouse(editor, width, height, event->x, event->y);
+            editor->text_anchor = anchor;
+        }
+        return;
+    }
     if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY) {
         if (!editor->hierarchy_drag_started &&
             hypotf(event->x - editor->drag_start_mouse.x, event->y - editor->drag_start_mouse.y) >
@@ -1717,6 +1735,12 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
 }
 
 static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
+    editor->text_dragging = false;
+    if (editor->gradient_drag) {
+        editor->gradient_drag = 0;
+        (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_STYLE, false);
+        return;
+    }
     if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY && editor->hierarchy_drag_started) {
         const float top = editor->toolbar_height + 8.0F;
         const float bottom = editor->asset_browser_visible
@@ -1828,6 +1852,15 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
 
 static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
                                   const SDL_MouseWheelEvent *event) {
+    if (editor->text_panel_open && editor->text_panel_field == 7) {
+        if (event->y < 0) {
+            uint32_t indices[11];
+            if (af_editor_text_font_results(editor, indices, 11) > 10)
+                ++editor->font_scroll;
+        } else if (event->y > 0 && editor->font_scroll)
+            --editor->font_scroll;
+        return;
+    }
     if (editor->text_panel_open || editor->offset_panel_open)
         return;
     const float direction = event->direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0F : 1.0F;
@@ -1913,6 +1946,21 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     const bool shift = (event->mod & SDL_KMOD_SHIFT) != 0U;
     const float nudge = (event->mod & SDL_KMOD_SHIFT) != 0U ? 10.0F : 1.0F;
     if (!event->down) {
+        return;
+    }
+    if (editor->gradient_drag) {
+        if (event->key == SDLK_ESCAPE) {
+            for (uint32_t i = 0; i < editor->selection_drag_count; ++i) {
+                AfStyle *style = af_project_find_node_style(
+                    &editor->project, editor->selection_drag_before[i].node.id);
+                if (style)
+                    *style = editor->selection_drag_before[i].style;
+            }
+            editor->selection_drag_count = 0;
+            editor->gradient_drag = 0;
+            af_editor_update_preview(editor);
+            af_editor_status(editor, "Gradient drag canceled");
+        }
         return;
     }
     if (editor->text_panel_open) {
@@ -2939,6 +2987,93 @@ static AfResult af_editor_vector_package_smoke(AfEditorState *editor, int width,
         VECTOR_CHECK(editor->text_panel_id == editor->selected_id);
         af_editor_text_panel_key(editor, &(SDL_KeyboardEvent){.key = SDLK_ESCAPE, .down = true});
     }
+    /* Exercise actual SDL text events, UTF-8 insertion, caret selection and font lookup. */
+    af_editor_open_text_panel(editor, width, height);
+    VECTOR_CHECK(SDL_TextInputActive(editor->window.window));
+    af_editor_text_panel_append(editor, "AéB");
+    af_editor_text_panel_key(editor, &(SDL_KeyboardEvent){.key = SDLK_LEFT, .down = true});
+    af_editor_text_panel_key(editor, &(SDL_KeyboardEvent){.key = SDLK_BACKSPACE, .down = true});
+    VECTOR_CHECK(strcmp(editor->text_panel_draft.utf8, "AB") == 0);
+    SDL_Event typed = {.text = {.type = SDL_EVENT_TEXT_INPUT, .text = "é"}};
+    af_editor_handle_event(editor, &typed, width, height);
+    VECTOR_CHECK(strcmp(editor->text_panel_draft.utf8, "AéB") == 0);
+    af_editor_text_panel_key(
+        editor, &(SDL_KeyboardEvent){.key = SDLK_LEFT, .mod = SDL_KMOD_SHIFT, .down = true});
+    af_editor_text_panel_append(editor, "x");
+    VECTOR_CHECK(strcmp(editor->text_panel_draft.utf8, "AxB") == 0);
+    af_editor_text_focus(editor, 7, true);
+    af_editor_text_panel_append(editor, "Liberation Sans");
+    af_editor_text_panel_key(editor, &(SDL_KeyboardEvent){.key = SDLK_RETURN, .down = true});
+    VECTOR_CHECK(strcmp(editor->text_panel_draft.font_name, "Liberation Sans") == 0);
+    af_editor_text_preview_update(editor);
+    VECTOR_CHECK(editor->text_preview_valid && editor->system_font_engine);
+    VECTOR_CHECK(editor->text_caret_tops[0].y < editor->text_carets[0].y);
+    af_editor_apply_text_panel(editor);
+    VECTOR_CHECK(!editor->text_panel_open && !SDL_TextInputActive(editor->window.window));
+    uint32_t text_index = af_project_find_index(&editor->project, editor->selected_id);
+    VECTOR_CHECK(strcmp(editor->project.texts[text_index].font_name, "Liberation Sans") == 0);
+    VECTOR_CHECK(strcmp(editor->project.texts[text_index].utf8, "AxB") == 0);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(strcmp(editor->project.texts[text_index].utf8, "Text on a curve") == 0);
+    VECTOR_CHECK(af_editor_history_redo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    af_editor_open_text_panel(editor, width, height);
+    (void)snprintf(editor->text_panel_draft.font_name, sizeof(editor->text_panel_draft.font_name),
+                   "Arcflow Missing Font Test");
+    VECTOR_CHECK(af_editor_document_font(editor, &editor->text_panel_draft) == 0);
+    af_editor_text_close(editor);
+    /* Gradient changes, color edits and geometry dragging remain one undoable transaction. */
+    af_editor_gradient_action(editor, 0);
+    style = af_project_find_node_style(&editor->project, editor->selected_id);
+    VECTOR_CHECK(style->fill.type == AF_PAINT_LINEAR_GRADIENT && style->fill.stop_count == 2);
+    af_editor_gradient_action(editor, 3);
+    VECTOR_CHECK(style->fill.stop_count == 3);
+    VECTOR_CHECK(af_editor_apply_inspector_color(editor, (AfColor){.2F, .4F, .8F, .6F}));
+    VECTOR_CHECK(style->fill.type == AF_PAINT_LINEAR_GRADIENT &&
+                 fabsf(style->fill.stops[1].color.a - .6F) < .001F);
+    af_editor_gradient_action(editor, 7);
+    VECTOR_CHECK(fabsf(style->fill.stops[1].offset - .55F) < .001F);
+    af_editor_update_preview(editor);
+    AfAffine2 gradient_frame;
+    AfVec2 gradient_start, gradient_end;
+    VECTOR_CHECK(af_editor_gradient_geometry(editor, width, height, &gradient_frame,
+                                             &gradient_start, &gradient_end));
+    const AfVec2 moved_end = {gradient_end.x + 30, gradient_end.y + 10};
+    const AfVec2 screen_end = af_affine_transform_point(gradient_frame, moved_end);
+    AfPaint before_drag = style->fill;
+    af_editor_begin_selection_modify(editor, false);
+    editor->gradient_drag = 2;
+    af_editor_gradient_motion(editor, width, height, screen_end.x, screen_end.y);
+    af_editor_mouse_up(editor, width, height);
+    VECTOR_CHECK(fabsf(style->fill.end.x - moved_end.x) < .001F &&
+                 fabsf(style->fill.end.y - moved_end.y) < .001F);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(memcmp(&before_drag, &style->fill, sizeof(AfPaint)) == 0);
+    af_editor_begin_selection_modify(editor, false);
+    editor->gradient_drag = 2;
+    af_editor_gradient_motion(editor, width, height, screen_end.x, screen_end.y);
+    af_editor_key(editor, width, height, &(SDL_KeyboardEvent){.key = SDLK_ESCAPE, .down = true});
+    VECTOR_CHECK(memcmp(&before_drag, &style->fill, sizeof(AfPaint)) == 0 &&
+                 !editor->gradient_drag);
+    AfPaint original_paint = style->fill;
+    af_editor_gradient_action(editor, 5);
+    VECTOR_CHECK(fabsf(style->fill.stops[1].offset - .45F) < .001F);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(memcmp(&style->fill, &original_paint, sizeof(AfPaint)) == 0);
+    af_editor_open_text_panel(editor, width, height);
+    af_editor_text_panel_append(editor, "Gradient text");
+    af_editor_text_preview_update(editor);
+    VECTOR_CHECK(editor->text_preview_valid);
+    VECTOR_CHECK(editor->text_preview->after[0].style.fill.type == AF_PAINT_LINEAR_GRADIENT);
+    af_editor_apply_text_panel(editor);
+    style = af_project_find_node_style(&editor->project, editor->selected_id);
+    VECTOR_CHECK(style->fill.type == AF_PAINT_LINEAR_GRADIENT);
+    af_editor_gradient_action(editor, 0);
+    VECTOR_CHECK(style->fill.type == AF_PAINT_RADIAL_GRADIENT && style->fill.stop_count == 3);
+    af_editor_gradient_action(editor, 0);
+    VECTOR_CHECK(style->fill.type == AF_PAINT_CONIC_GRADIENT && style->fill.stop_count == 3);
+    af_editor_gradient_action(editor, 4);
+    VECTOR_CHECK(style->fill.stop_count == 2);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
     VECTOR_CHECK(af_project_validate(&editor->project) == AF_RESULT_SUCCESS);
     af_editor_update_preview(editor);
     af_editor_status(editor, "Verified: join / continue, outline, offset, artistic / paragraph / "

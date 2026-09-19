@@ -771,6 +771,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     AfAffine2 camera = af_editor_camera(editor, width, height);
     uint32_t index = 0U;
     editor->render_scene.count = 0U;
+    editor->render_scene.styles = &editor->project.style_data;
     af_editor_layout(editor, width, height, &canvas_x, &canvas_y, &canvas_width, &canvas_height);
     if (editor->welcome_visible || editor->example_browser_visible ||
         editor->guide_browser_visible) {
@@ -798,19 +799,27 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
                        (AfColor){0.46F, 0.5F, 0.58F, 1.0F}, -89990);
     af_editor_render_grid(editor, width, height, camera);
     af_editor_render_canvas_workflow(editor, width, height, camera);
+    if (editor->text_panel_open)
+        af_editor_text_preview_update(editor);
     for (index = 0U; index < editor->preview_scene.count; ++index) {
         const AfSceneNode *source = &editor->preview_scene.nodes[index];
         AfSceneNode *target = NULL;
         if (editor->render_scene.count >= AF_MAX_NODES) {
             continue;
         }
+        if (editor->text_panel_open && source->id == editor->text_panel_id &&
+            !editor->text_panel_draft.utf8[0])
+            continue;
         target = &editor->render_scene.nodes[editor->render_scene.count++];
         *target = *source;
         target->world_transform = af_affine_multiply(camera, source->world_transform);
         target->layer_order = af_editor_clamp_layer(source->layer_order);
     }
-    af_editor_render_selection_outlines(editor, camera);
-    if (editor->active_tool == AF_EDITOR_TOOL_SELECT) {
+    af_editor_render_text_canvas(editor, width, height);
+    af_editor_render_gradient_handles(editor, width, height);
+    if (!editor->text_panel_open)
+        af_editor_render_selection_outlines(editor, camera);
+    if (!editor->text_panel_open && editor->active_tool == AF_EDITOR_TOOL_SELECT) {
         af_editor_render_gizmo(editor, camera);
     } else if (editor->active_tool == AF_EDITOR_TOOL_NODE) {
         af_editor_render_outline(editor,
