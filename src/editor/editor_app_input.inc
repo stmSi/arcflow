@@ -2896,8 +2896,26 @@ static AfResult af_editor_vector_package_smoke(AfEditorState *editor, int width,
     VECTOR_CHECK(editor->text_panel_open &&
                  editor->text_panel_draft.mode == AF_PROJECT_TEXT_PARAGRAPH);
     VECTOR_CHECK(strcmp(editor->text_panel_numbers[1], "200") == 0);
+    af_editor_text_panel_append(editor, "Esc confirms");
     af_editor_text_panel_key(editor, &(SDL_KeyboardEvent){.key = SDLK_ESCAPE, .down = true});
+    VECTOR_CHECK(!editor->text_panel_open && !SDL_TextInputActive(editor->window.window));
+    VECTOR_CHECK(
+        strcmp(editor->project.texts[af_project_find_index(&editor->project, editor->selected_id)]
+                   .utf8,
+               "Esc confirms") == 0);
+    af_editor_open_text_panel(editor, width, height);
+    af_editor_text_panel_append(editor, "Toolbar confirms");
+    const float text_bar_width = (float)width - editor->left_width - editor->right_width - 12;
+    af_editor_text_panel_mouse(editor, width, height, editor->left_width + 6 + text_bar_width * .9F,
+                               editor->toolbar_height + 90);
     VECTOR_CHECK(!editor->text_panel_open);
+    VECTOR_CHECK(
+        strcmp(editor->project.texts[af_project_find_index(&editor->project, editor->selected_id)]
+                   .utf8,
+               "Toolbar confirms") == 0);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    af_editor_select_only(editor, 0);
     AfPathCommand line[] = {{.type = AF_PATH_MOVE, .point = {center.x - 350, center.y - 180}},
                             {.type = AF_PATH_CUBIC,
                              .point = {center.x - 240, center.y - 180},
@@ -2985,7 +3003,20 @@ static AfResult af_editor_vector_package_smoke(AfEditorState *editor, int width,
                      AF_RESULT_SUCCESS);
         af_editor_open_text_panel(editor, width, height);
         VECTOR_CHECK(editor->text_panel_id == editor->selected_id);
+        const AfProjectText before_confirm = *authored;
+        af_editor_text_panel_append(editor, "Confirmed edit");
+        af_editor_text_focus(editor, 7, true);
         af_editor_text_panel_key(editor, &(SDL_KeyboardEvent){.key = SDLK_ESCAPE, .down = true});
+        VECTOR_CHECK(!editor->text_panel_open);
+        VECTOR_CHECK(strcmp(editor->project
+                                .texts[af_project_find_index(&editor->project, editor->selected_id)]
+                                .utf8,
+                            "Confirmed edit") == 0);
+        VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) ==
+                     AF_RESULT_SUCCESS);
+        VECTOR_CHECK(memcmp(&editor->project.texts[af_project_find_index(&editor->project,
+                                                                         editor->selected_id)],
+                            &before_confirm, sizeof(before_confirm)) == 0);
     }
     /* Exercise actual SDL text events, UTF-8 insertion, caret selection and font lookup. */
     af_editor_open_text_panel(editor, width, height);
@@ -3008,7 +3039,9 @@ static AfResult af_editor_vector_package_smoke(AfEditorState *editor, int width,
     af_editor_text_preview_update(editor);
     VECTOR_CHECK(editor->text_preview_valid && editor->system_font_engine);
     VECTOR_CHECK(editor->text_caret_tops[0].y < editor->text_carets[0].y);
-    af_editor_apply_text_panel(editor);
+    af_editor_text_focus(editor, 7, true);
+    af_editor_text_panel_key(
+        editor, &(SDL_KeyboardEvent){.key = SDLK_RETURN, .mod = SDL_KMOD_CTRL, .down = true});
     VECTOR_CHECK(!editor->text_panel_open && !SDL_TextInputActive(editor->window.window));
     uint32_t text_index = af_project_find_index(&editor->project, editor->selected_id);
     VECTOR_CHECK(strcmp(editor->project.texts[text_index].font_name, "Liberation Sans") == 0);
@@ -3020,6 +3053,9 @@ static AfResult af_editor_vector_package_smoke(AfEditorState *editor, int width,
     (void)snprintf(editor->text_panel_draft.font_name, sizeof(editor->text_panel_draft.font_name),
                    "Arcflow Missing Font Test");
     VECTOR_CHECK(af_editor_document_font(editor, &editor->text_panel_draft) == 0);
+    af_editor_text_panel_key(editor, &(SDL_KeyboardEvent){.key = SDLK_ESCAPE, .down = true});
+    VECTOR_CHECK(editor->text_panel_open && SDL_TextInputActive(editor->window.window));
+    VECTOR_CHECK(strcmp(editor->project.texts[text_index].font_name, "Liberation Sans") == 0);
     af_editor_text_close(editor);
     /* Gradient changes, color edits and geometry dragging remain one undoable transaction. */
     af_editor_gradient_action(editor, 0);

@@ -120,7 +120,7 @@ with a click or Enter. Real installed bold/italic faces are used; missing faces 
 
 Click or drag on text to position the caret or select a range. Arrow keys, Home/End, Shift-selection,
 Backspace/Delete and clipboard cut/copy/paste work with UTF-8. Enter inserts a line break;
-**Ctrl+Enter / Done** saves one undoable edit, and **Escape** cancels. `Ctrl+B/I` changes the whole
+**Ctrl+Enter, Escape, or Done** confirms one undoable edit. Use undo to revert it. `Ctrl+B/I` changes the whole
 object's style. Tab traverses content and formatting fields. Formatting applies to the whole object,
 including when a text range is selected. The live preview keeps existing gradient fills and outlines.
 For text on a curve, select a single-contour path, use **Shape > Create / Edit Text**, and choose

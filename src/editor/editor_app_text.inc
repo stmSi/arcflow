@@ -537,6 +537,11 @@ static void af_editor_text_panel_key(AfEditorState *editor, const SDL_KeyboardEv
     size_t capacity;
     char *buffer = af_editor_text_panel_buffer(editor, &capacity);
     const size_t length = strlen(buffer);
+    if (event->key == SDLK_ESCAPE ||
+        (control && (event->key == SDLK_RETURN || event->key == SDLK_KP_ENTER))) {
+        af_editor_apply_text_panel(editor);
+        return;
+    }
     if (editor->text_panel_field == 7 &&
         (event->key == SDLK_UP || event->key == SDLK_DOWN || event->key == SDLK_RETURN)) {
         uint32_t indices[11];
@@ -549,17 +554,10 @@ static void af_editor_text_panel_key(AfEditorState *editor, const SDL_KeyboardEv
             --editor->font_scroll;
         return;
     }
-    if (event->key == SDLK_ESCAPE) {
-        if (editor->text_panel_field == 7)
-            af_editor_text_focus(editor, 0, false);
-        else
-            af_editor_text_close(editor);
-    } else if (event->key == SDLK_TAB) {
+    if (event->key == SDLK_TAB) {
         af_editor_text_focus(editor, (editor->text_panel_field + (shift ? 6U : 1U)) % 7U, true);
     } else if (event->key == SDLK_RETURN || event->key == SDLK_KP_ENTER) {
-        if (control)
-            af_editor_apply_text_panel(editor);
-        else if (editor->text_panel_field == 0)
+        if (editor->text_panel_field == 0)
             af_editor_text_panel_append(editor, "\n");
         else
             af_editor_text_focus(editor, 0, false);
@@ -704,10 +702,8 @@ static void af_editor_text_panel_mouse(AfEditorState *editor, int width, int hei
         } else {
             if (col < 2)
                 af_editor_text_focus(editor, 6, true);
-            else if (col < 4)
-                af_editor_apply_text_panel(editor);
             else
-                af_editor_text_close(editor);
+                af_editor_apply_text_panel(editor);
         }
         return;
     }
@@ -827,13 +823,12 @@ static void af_editor_render_text_panel(AfEditorState *editor, int width, int he
                             leading,
                             "Edit text",
                             color,
-                            "Done (Ctrl+Enter)",
-                            "Cancel (Esc)"};
-    const uint32_t columns[] = {0, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 2, 4};
-    const uint32_t rows[] = {0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2};
-    const uint32_t spans[] = {2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2};
-    const uint32_t fields[] = {7, 1, 99, 99, 99, 99, 2, 3, 4, 5, 0, 6, 99, 99};
-    for (uint32_t i = 0; i < 14; ++i) {
+                            "Done (Ctrl+Enter / Esc)"};
+    const uint32_t columns[] = {0, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 2};
+    const uint32_t rows[] = {0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2};
+    const uint32_t spans[] = {2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 4};
+    const uint32_t fields[] = {7, 1, 99, 99, 99, 99, 2, 3, 4, 5, 0, 6, 99};
+    for (uint32_t i = 0; i < 13; ++i) {
         float bx = x + (float)columns[i] * cell, by = y + (float)rows[i] * 36 + 3,
               bw = (float)spans[i] * cell - 4;
         bool selected = editor->text_panel_field == fields[i] ||
@@ -888,6 +883,5 @@ static void af_editor_finish_text_tool(AfEditorState *editor, int width, int hei
         editor->text_panel_draft.mode = AF_PROJECT_TEXT_PARAGRAPH;
         (void)snprintf(editor->text_panel_numbers[1], 32, "%.6g", (double)fabsf(end.x - start.x));
     }
-    af_editor_status(editor,
-                     "Type text · choose font and formatting · Ctrl+Enter saves · Esc cancels");
+    af_editor_status(editor, "Type text · choose font and formatting · Ctrl+Enter or Esc confirms");
 }
