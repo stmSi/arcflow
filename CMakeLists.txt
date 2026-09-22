@@ -288,6 +288,7 @@ function(arcflow_shader SOURCE OUTPUT)
         COMMAND ${ARCFLOW_SHADER_TOOL_ENV} "${ARCFLOW_SPIRV_VAL}" --target-env vulkan1.3
                 "${ARCFLOW_SHADER_DIR}/${OUTPUT}"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SOURCE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/shaders/paint.glsl"
         VERBATIM
     )
 endfunction()
@@ -361,6 +362,11 @@ target_compile_definitions(arcflow_editor PRIVATE
     ARCFLOW_EDITOR_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/test/api/fonts/NotoSans-Bold.ttf"
 )
 target_link_libraries(arcflow_editor PRIVATE arcflow_renderer arcflow_editor_core arcflow_update)
+
+# Native display-dependent pixel checks are run explicitly by the renderer validation workflow.
+add_executable(arcflow_gradient_render_tests tests/test_gradient_render.c)
+target_include_directories(arcflow_gradient_render_tests PRIVATE src)
+target_link_libraries(arcflow_gradient_render_tests PRIVATE arcflow_renderer arcflow_project)
 
 enable_testing()
 add_executable(arcflow_tests tests/test_main.c)
@@ -531,7 +537,7 @@ set(ARCFLOW_OWN_TARGETS
     arcflow_core arcflow_runtime arcflow_runtime_shared arcflow_project arcflow_editor_core
     arcflow_update arcflow_renderer
     arcflow_compiler arcflow_player_app arcflow_player arcflow_editor arcflow_tests
-    arcflow_performance_tests arcflow_hotpath_benchmarks
+    arcflow_performance_tests arcflow_hotpath_benchmarks arcflow_gradient_render_tests
     arcflow_stability_tests arcflow_beta_performance_tests arcflow_parser_fuzz_tests
     arcflow_import_fuzz_tests arcflow_release_tests
     arcflow_localization_tests

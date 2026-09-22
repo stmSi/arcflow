@@ -4,6 +4,7 @@ layout(location = 0) in vec4 in_matrix;
 layout(location = 1) in vec4 in_translation_bounds;
 layout(location = 2) in vec4 in_color;
 layout(location = 3) in vec4 in_parameters;
+layout(location = 4) in uint in_paint;
 
 layout(push_constant) uniform Canvas {
     vec2 viewport_size;
@@ -13,6 +14,7 @@ layout(location = 0) out vec2 out_uv;
 layout(location = 1) out vec2 out_bounds;
 layout(location = 2) out vec4 out_color;
 layout(location = 3) out vec4 out_parameters;
+layout(location = 4) flat out uint out_paint;
 
 const vec2 POSITIONS[6] = vec2[6](
     vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),
@@ -34,4 +36,5 @@ void main() {
     out_bounds = in_translation_bounds.zw;
     out_color = in_color;
     out_parameters = in_parameters;
+    out_paint = in_paint;
 }

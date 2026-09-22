@@ -98,8 +98,12 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
                                                            : "Dope sheet opened");
         } else if (local_x >= 188.0F && local_x < 220.0F) {
             af_editor_select_adjacent_property(editor, -1);
-        } else if ((local_x >= 226.0F && local_x < 352.0F) ||
-                   (local_x >= 358.0F && local_x < 390.0F)) {
+        } else if (local_x >= 226.0F && local_x < 352.0F) {
+            af_editor_choice_open(editor, 2, width, height,
+                                  editor->left_width +
+                                      226 * af_editor_timeline_controls_scale(editor, width),
+                                  top + 42);
+        } else if (local_x >= 358.0F && local_x < 390.0F) {
             af_editor_select_adjacent_property(editor, 1);
         } else if (local_x >= 398.0F && local_x < 514.0F) {
             if (af_editor_add_keyframe(editor) != AF_RESULT_SUCCESS) {
@@ -1159,6 +1163,10 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
     if (af_editor_workflow_mouse_down(editor, width, height, x, y)) {
         return;
     }
+    if (event->button == SDL_BUTTON_LEFT && af_editor_choice_mouse(editor, x, y))
+        return;
+    if (event->button != SDL_BUTTON_LEFT)
+        editor->choice_menu = 0;
     if (event->button == SDL_BUTTON_RIGHT) {
         editor->top_menu = AF_EDITOR_MENU_NONE;
         af_editor_open_context_menu(editor, width, height, x, y);
@@ -1195,8 +1203,10 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
     if (event->button != SDL_BUTTON_LEFT) {
         return;
     }
-    if (af_editor_gradient_mouse(editor, width, height, x, y))
+    if (af_editor_gradient_mouse(editor, width, height, x, y, event->clicks >= 2))
         return;
+    if (x < (float)width - editor->right_width)
+        editor->gradient_stop_focus = false;
     if (x >= 12.0F && x <= 106.0F && y >= 30.0F && y <= 47.0F && x < editor->left_width) {
         af_editor_group_selection(editor);
         return;
@@ -3110,6 +3120,88 @@ static AfResult af_editor_vector_package_smoke(AfEditorState *editor, int width,
     af_editor_gradient_action(editor, 4);
     VECTOR_CHECK(style->fill.stop_count == 2);
     VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    /* Exercise stop selection through mouse events and the actual inspector editor. */
+    const uint32_t object_count = editor->project.scene.count;
+    const float bar_top = editor->toolbar_height + 36;
+    const float ramp_left = editor->left_width + 16;
+    const float ramp_width = (float)width - editor->left_width - editor->right_width - 32;
+    SDL_MouseButtonEvent stop_click = {.button = SDL_BUTTON_LEFT,
+                                       .down = true,
+                                       .clicks = 2,
+                                       .x = ramp_left + ramp_width * .25F,
+                                       .y = bar_top + 82};
+    af_editor_mouse_down(editor, width, height, &stop_click, SDL_KMOD_NONE);
+    VECTOR_CHECK(style->fill.stop_count == 4 && editor->gradient_stop_focus);
+    VECTOR_CHECK(fabsf(style->fill.stops[editor->gradient_stop].offset - .25F) < .001F);
+    af_editor_mouse_down(editor, width, height, &stop_click, SDL_KMOD_NONE);
+    VECTOR_CHECK(style->fill.stop_count == 4); /* Double-clicking a stop selects it. */
+    stop_click.clicks = 1;
+    af_editor_mouse_down(editor, width, height, &stop_click, SDL_KMOD_NONE);
+    af_editor_begin_inspector_edit(editor, AF_EDITOR_INSPECTOR_COLOR_HEX);
+    af_editor_append_inspector_text(editor, "#33CC66FF");
+    VECTOR_CHECK(af_editor_finish_inspector_edit(editor, true));
+    VECTOR_CHECK(style->fill.type == AF_PAINT_CONIC_GRADIENT &&
+                 fabsf(style->fill.stops[editor->gradient_stop].color.g - .8F) < .001F);
+    af_editor_key(editor, width, height, &(SDL_KeyboardEvent){.key = SDLK_DELETE, .down = true});
+    VECTOR_CHECK(style->fill.stop_count == 3 && editor->project.scene.count == object_count);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(style->fill.stop_count == 4);
+    for (uint32_t i = 0; i < 3; ++i)
+        af_editor_key(editor, width, height,
+                      &(SDL_KeyboardEvent){.key = SDLK_DELETE, .down = true});
+    VECTOR_CHECK(style->fill.stop_count == 2 && editor->project.scene.count == object_count);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(style->fill.stop_count == 4);
+    /* The fill and timeline labels open menus; selecting an item does not cycle. */
+    SDL_MouseButtonEvent choice_click = {.button = SDL_BUTTON_LEFT,
+                                         .down = true,
+                                         .clicks = 1,
+                                         .x = editor->left_width + 20,
+                                         .y = bar_top + 15};
+    af_editor_mouse_down(editor, width, height, &choice_click, SDL_KMOD_NONE);
+    VECTOR_CHECK(editor->choice_menu == 1);
+    choice_click.x = editor->choice_origin.x + 20;
+    choice_click.y = editor->choice_origin.y + 28 * 2 + 14;
+    af_editor_mouse_down(editor, width, height, &choice_click, SDL_KMOD_NONE);
+    VECTOR_CHECK(!editor->choice_menu && style->fill.type == AF_PAINT_RADIAL_GRADIENT &&
+                 style->fill.stop_count == 4);
+    choice_click.x = editor->left_width + 280 * af_editor_timeline_controls_scale(editor, width);
+    choice_click.y = af_editor_timeline_top(editor, height) + 20;
+    af_editor_mouse_down(editor, width, height, &choice_click, SDL_KMOD_NONE);
+    VECTOR_CHECK(editor->choice_menu == 2);
+    choice_click.x = editor->choice_origin.x + 20;
+    choice_click.y = editor->choice_origin.y + 28 * AF_PROPERTY_ROTATION + 14;
+    af_editor_mouse_down(editor, width, height, &choice_click, SDL_KMOD_NONE);
+    VECTOR_CHECK(!editor->choice_menu && editor->selected_property == AF_PROPERTY_ROTATION);
+    af_editor_choice_open(editor, 2, width, height, editor->left_width + 250,
+                          af_editor_timeline_top(editor, height) + 42);
+    af_editor_key(editor, width, height, &(SDL_KeyboardEvent){.key = SDLK_DOWN, .down = true});
+    af_editor_key(editor, width, height, &(SDL_KeyboardEvent){.key = SDLK_RETURN, .down = true});
+    VECTOR_CHECK(editor->selected_property == AF_PROPERTY_SCALE && !editor->choice_menu);
+    af_editor_choice_open(editor, 2, width, height, editor->left_width + 250,
+                          af_editor_timeline_top(editor, height) + 42);
+    af_editor_key(editor, width, height, &(SDL_KeyboardEvent){.key = SDLK_DOWN, .down = true});
+    af_editor_key(editor, width, height, &(SDL_KeyboardEvent){.key = SDLK_ESCAPE, .down = true});
+    VECTOR_CHECK(editor->selected_property == AF_PROPERTY_SCALE && !editor->choice_menu);
+    /* Inspector fill choices apply to the entire selection as one transaction. */
+    const uint64_t primary = editor->selected_id;
+    const uint64_t secondary = editor->project.scene.nodes[0].id;
+    VECTOR_CHECK(primary != secondary);
+    const AfPaint primary_paint = style->fill;
+    const AfPaint secondary_paint = af_project_find_node_style(&editor->project, secondary)->fill;
+    af_editor_selection_add(editor, secondary);
+    af_editor_gradient_set_type(editor, AF_PAINT_LINEAR_GRADIENT);
+    VECTOR_CHECK(style->fill.type == AF_PAINT_LINEAR_GRADIENT &&
+                 af_project_find_node_style(&editor->project, secondary)->fill.type ==
+                     AF_PAINT_LINEAR_GRADIENT);
+    VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
+    VECTOR_CHECK(memcmp(&primary_paint, &style->fill, sizeof(AfPaint)) == 0 &&
+                 memcmp(&secondary_paint,
+                        &af_project_find_node_style(&editor->project, secondary)->fill,
+                        sizeof(AfPaint)) == 0);
+    af_editor_select_only(editor, primary);
+    editor->timeline_focus = false;
     VECTOR_CHECK(af_project_validate(&editor->project) == AF_RESULT_SUCCESS);
     af_editor_update_preview(editor);
     af_editor_status(editor, "Verified: join / continue, outline, offset, artistic / paragraph / "

@@ -35,6 +35,7 @@ static bool af_test_gpu_smoke(void) {
     VkShaderModule vertex_shader = VK_NULL_HANDLE;
     VkShaderModule fragment_shader = VK_NULL_HANDLE;
     VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout paint_layout = VK_NULL_HANDLE;
     VkPipeline pipeline = VK_NULL_HANDLE;
     uint32_t *vertex_code = NULL;
     uint32_t *fragment_code = NULL;
@@ -163,10 +164,23 @@ static bool af_test_gpu_smoke(void) {
         }
     }
     {
+        const VkDescriptorSetLayoutBinding paint_binding = {
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT};
+        const VkDescriptorSetLayoutCreateInfo paint_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .bindingCount = 1,
+            .pBindings = &paint_binding};
+        if (vkCreateDescriptorSetLayout(device, &paint_info, NULL, &paint_layout) != VK_SUCCESS)
+            goto cleanup;
         VkPushConstantRange push = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
                                     .size = 2U * sizeof(float)};
         VkPipelineLayoutCreateInfo layout_info = {.sType =
                                                       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                                  .setLayoutCount = 1U,
+                                                  .pSetLayouts = &paint_layout,
                                                   .pushConstantRangeCount = 1U,
                                                   .pPushConstantRanges = &push};
         VkPipelineShaderStageCreateInfo stages[2] = {
@@ -179,17 +193,18 @@ static bool af_test_gpu_smoke(void) {
              .module = fragment_shader,
              .pName = "main"}};
         VkVertexInputBindingDescription binding = {
-            .binding = 0U, .stride = 68U, .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE};
-        VkVertexInputAttributeDescription attributes[4] = {
+            .binding = 0U, .stride = 72U, .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE};
+        VkVertexInputAttributeDescription attributes[5] = {
             {.location = 0U, .format = VK_FORMAT_R32G32B32A32_SFLOAT},
             {.location = 1U, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = 16U},
             {.location = 2U, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = 32U},
-            {.location = 3U, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = 48U}};
+            {.location = 3U, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = 48U},
+            {.location = 4U, .format = VK_FORMAT_R32_UINT, .offset = 68U}};
         VkPipelineVertexInputStateCreateInfo vertex_input = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
             .vertexBindingDescriptionCount = 1U,
             .pVertexBindingDescriptions = &binding,
-            .vertexAttributeDescriptionCount = 4U,
+            .vertexAttributeDescriptionCount = 5U,
             .pVertexAttributeDescriptions = attributes};
         VkPipelineInputAssemblyStateCreateInfo assembly = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -264,6 +279,8 @@ cleanup:
         if (layout != VK_NULL_HANDLE) {
             vkDestroyPipelineLayout(device, layout, NULL);
         }
+        if (paint_layout != VK_NULL_HANDLE)
+            vkDestroyDescriptorSetLayout(device, paint_layout, NULL);
         if (fragment_shader != VK_NULL_HANDLE) {
             vkDestroyShaderModule(device, fragment_shader, NULL);
         }

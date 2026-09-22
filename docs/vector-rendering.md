@@ -27,8 +27,16 @@ encodes the shader result so its presentation remains color-correct.
 
 Path styling supports bounded dashed strokes with butt/round/square caps and miter/round/bevel
 joins. Vector paints support solid, linear, radial, and conic gradients. Geometry and paint
-generations are tracked separately so paint-only changes reuse tessellation. Composition plans
-support rectangle, rounded-rectangle, and path clips; alpha/inverted/nested masks; common
+generations are tracked separately so paint-only changes reuse tessellation. Gradient stops are
+interpolated in authored sRGB per fragment, then decoded for linear blending. The fragment position
+is mapped through the inverse node and paint transforms, using bounded per-frame storage records.
+This preserves intermediate stops and curved gradients on analytic shapes, paths, and strokes.
+
+With a Vulkan-capable display, run `build/debug/arcflow_gradient_render_tests` to compare captured
+pixels against the CPU paint evaluator, including recoloring, transforms, alpha, and all 16 stops.
+This native test is separate from the headless CTest suite.
+
+Composition plans support rectangle, rounded-rectangle, and path clips; alpha/inverted/nested masks; common
 premultiplied blend modes; bounded filters; cached offscreen layers; and pooled targets. Shape
 morphing and skinning always write into separate output storage so cached source geometry remains
 immutable.

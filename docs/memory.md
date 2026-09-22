@@ -13,6 +13,10 @@ Normal `af_instance_update` starts allocation instrumentation, restores base nod
 samples tracks, and evaluates world transforms. It performs zero general heap allocations. The
 renderer maps one persistent host-coherent upload buffer at initialization and divides it into two
 frame slices. Rendering writes into the current safe slice after waiting for its frame fence.
+Each slice also reserves a storage-buffer region for 8,193 paint records (384 bytes each): one solid
+sentinel and at most a fill and stroke gradient per node. Fragment shaders evaluate the bounded
+16-stop records; no paint allocation or geometry rebuild is needed for color/stop edits. Analytic
+instances use 72 bytes and path vertices 28 bytes, including their paint index.
 
 Runtime-package limits are 4,096 nodes, 256 clips, 8,192 tracks, 65,536 keyframes, 512 paths, and
 32,768 path commands. Each path has at most 4,096 commands; flattening, contours, subdivision depth,

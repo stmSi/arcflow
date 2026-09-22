@@ -1,6 +1,9 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "paint.glsl"
 
 layout(location = 0) in vec4 in_color;
+layout(location = 1) flat in uint in_paint;
 layout(location = 0) out vec4 out_color;
 
 layout(constant_id = 0) const uint OUTPUT_IS_SRGB = 1U;
@@ -27,6 +30,7 @@ vec4 premultiplied_output(vec3 linear_color, float alpha) {
 }
 
 void main() {
-    float alpha = clamp(in_color.a, 0.0, 1.0);
-    out_color = premultiplied_output(srgb_to_linear(in_color.rgb), alpha);
+    vec4 color = sample_paint(in_paint, in_color);
+    float alpha = clamp(in_paint == 0U ? color.a : color.a * in_color.a, 0.0, 1.0);
+    out_color = premultiplied_output(srgb_to_linear(color.rgb), alpha);
 }

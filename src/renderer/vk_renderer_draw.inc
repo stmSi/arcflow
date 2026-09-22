@@ -296,6 +296,10 @@ AfResult af_vk_renderer_draw_timed_with_options(AfVkRenderer *renderer, const Af
                                        offset);
                 vkCmdPushConstants(frame->command_buffer, layout, VK_SHADER_STAGE_VERTEX_BIT, 0U,
                                    sizeof(canvas), canvas);
+                if (item->type != AF_VK_RENDER_IMAGE)
+                    vkCmdBindDescriptorSets(
+                        frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0U, 1U,
+                        &renderer->paint_descriptor_sets[renderer->frame_index], 0U, NULL);
                 bound_type = item->type;
             }
             if (item->type == AF_VK_RENDER_IMAGE && item->atlas_index != bound_atlas) {

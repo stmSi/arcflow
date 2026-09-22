@@ -407,8 +407,10 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
     af_editor_add_rect(editor, center_left + 233.0F, top + 14.0F, 5.0F, 16.0F,
                        af_editor_property_color(editor->selected_property), 100130);
     af_editor_add_text(editor, center_left + 244.0F, top + 18.0F,
-                       af_editor_property_name(editor->selected_property), 0.68F, 100.0F,
+                       af_editor_property_name(editor->selected_property), 0.68F, 83.0F,
                        (AfColor){0.94F, 0.95F, 0.98F, 1.0F}, 100135);
+    af_editor_add_text(editor, center_left + 340, top + 18, "v", .68F, 8,
+                       (AfColor){.94F, .95F, .98F, 1}, 100135);
     af_editor_add_text(editor, center_left + 370.0F, top + 18.0F, ">", 0.75F, 8.0F,
                        (AfColor){0.82F, 0.85F, 0.92F, 1.0F}, 100135);
     {

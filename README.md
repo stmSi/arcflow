@@ -131,12 +131,17 @@ renderable if its font is absent; editing requires choosing an available family.
 511 UTF-8 bytes, 32 baseline commands, and bounded glyph geometry. Per-range formatting, full
 IME/bidi editing, live baseline links, font axes and typography animation remain planned.
 
-Select an object with Pick to access the contextual **Fill** controls. Cycle Solid / Linear /
-Radial / Conic, add or delete stops (2–16), select a stop, and use the inspector color picker or
-hex field for its color and alpha. Adjust stop position, reverse the gradient, and change its
+Select an object with Pick to access the contextual **Fill** dropdown: Solid, Linear, Radial,
+or Conic. Double-click the gradient ramp or canvas gradient line to add a stop; click a stop to
+select it, then use the inspector color picker or hex field for its color and alpha. Press Delete
+to remove the selected stop (at least two remain; up to 16 are supported). Adjust stop position, reverse the gradient, and change its
 angle or radius. Drag the canvas handles to position the gradient; Escape cancels the drag.
 Each edit supports undo/redo, and gradients persist in native projects and playback. Constrained
 export formats retain their existing gradient compatibility limitations.
+
+Click the timeline property dropdown to choose Position, Rotation, Scale, Opacity, Fill, and other
+properties. Unavailable choices are dimmed. Both dropdowns support Up/Down and Enter selection;
+Escape dismisses the menu. Text editing still confirms with Escape or Ctrl+Enter.
 
 Timeline edits share bounded `Ctrl+Z`/`Ctrl+Y` history with scene edits. Scene shortcuts include
 `1`–`4`, `F2`, arrows, `Q`/`E`, `-`/`+`, brackets, `U`, `Ctrl+S`, and `F5`. `4` creates an editable

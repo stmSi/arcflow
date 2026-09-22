@@ -346,6 +346,11 @@ typedef struct AfEditorState {
     uint64_t gradient_target;
     uint32_t gradient_stop;
     uint32_t gradient_drag;
+    bool gradient_stop_focus;
+    uint32_t choice_menu; /* 1: fill type, 2: animation property. */
+    uint32_t choice_index;
+    uint64_t choice_target;
+    AfVec2 choice_origin;
     bool text_dragging;
     bool text_panel_open;
     bool text_panel_replace;
@@ -526,6 +531,8 @@ static bool af_editor_selected_path_has_animation(const AfEditorState *editor);
 static bool af_editor_path_segment_hit(const AfEditorState *editor, int width, int height,
                                        AfVec2 mouse, uint32_t *out_command, float *out_t);
 static void af_editor_group_selection(AfEditorState *editor);
+static void af_editor_choice_open(AfEditorState *editor, uint32_t menu, int width, int height,
+                                  float x, float y);
 static void af_editor_render_gradient_handles(AfEditorState *editor, int width, int height);
 static uint32_t af_editor_gradient_stop(const AfEditorState *editor, const AfPaint *paint);
 static void af_editor_text_preview_update(AfEditorState *editor);

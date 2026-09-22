@@ -185,7 +185,7 @@ static AfResult af_vk_create_pipeline(AfVkRenderer *renderer) {
                                                           .pData = &output_is_srgb};
     VkVertexInputBindingDescription binding = {
         .binding = 0U, .stride = sizeof(AfGpuShape), .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE};
-    VkVertexInputAttributeDescription attributes[4] = {
+    VkVertexInputAttributeDescription attributes[5] = {
         {.location = 0U,
          .binding = 0U,
          .format = VK_FORMAT_R32G32B32A32_SFLOAT,
@@ -201,12 +201,16 @@ static AfResult af_vk_create_pipeline(AfVkRenderer *renderer) {
         {.location = 3U,
          .binding = 0U,
          .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-         .offset = offsetof(AfGpuShape, parameters)}};
+         .offset = offsetof(AfGpuShape, parameters)},
+        {.location = 4U,
+         .binding = 0U,
+         .format = VK_FORMAT_R32_UINT,
+         .offset = offsetof(AfGpuShape, paint_index)}};
     VkPipelineVertexInputStateCreateInfo vertex_input = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .vertexBindingDescriptionCount = 1U,
         .pVertexBindingDescriptions = &binding,
-        .vertexAttributeDescriptionCount = 4U,
+        .vertexAttributeDescriptionCount = 5U,
         .pVertexAttributeDescriptions = attributes};
     VkPipelineInputAssemblyStateCreateInfo input_assembly = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -248,6 +252,8 @@ static AfResult af_vk_create_pipeline(AfVkRenderer *renderer) {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0U, .size = 2U * sizeof(float)};
     VkPipelineLayoutCreateInfo layout_info = {.sType =
                                                   VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                              .setLayoutCount = 1U,
+                                              .pSetLayouts = &renderer->paint_descriptor_layout,
                                               .pushConstantRangeCount = 1U,
                                               .pPushConstantRanges = &push_range};
     VkPipelineRenderingCreateInfo rendering_info = {
@@ -324,7 +330,7 @@ static AfResult af_vk_create_path_pipeline(AfVkRenderer *renderer) {
                                                           .pData = &output_is_srgb};
     const VkVertexInputBindingDescription binding = {
         .binding = 0U, .stride = sizeof(AfGpuPathVertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
-    const VkVertexInputAttributeDescription attributes[2] = {
+    const VkVertexInputAttributeDescription attributes[3] = {
         {.location = 0U,
          .binding = 0U,
          .format = VK_FORMAT_R32G32_SFLOAT,
@@ -332,12 +338,16 @@ static AfResult af_vk_create_path_pipeline(AfVkRenderer *renderer) {
         {.location = 1U,
          .binding = 0U,
          .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-         .offset = offsetof(AfGpuPathVertex, color)}};
+         .offset = offsetof(AfGpuPathVertex, color)},
+        {.location = 2U,
+         .binding = 0U,
+         .format = VK_FORMAT_R32_UINT,
+         .offset = offsetof(AfGpuPathVertex, paint_index)}};
     const VkPipelineVertexInputStateCreateInfo vertex_input = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .vertexBindingDescriptionCount = 1U,
         .pVertexBindingDescriptions = &binding,
-        .vertexAttributeDescriptionCount = 2U,
+        .vertexAttributeDescriptionCount = 3U,
         .pVertexAttributeDescriptions = attributes};
     const VkPipelineInputAssemblyStateCreateInfo input_assembly = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -379,6 +389,8 @@ static AfResult af_vk_create_path_pipeline(AfVkRenderer *renderer) {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0U, .size = 2U * sizeof(float)};
     const VkPipelineLayoutCreateInfo layout_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1U,
+        .pSetLayouts = &renderer->paint_descriptor_layout,
         .pushConstantRangeCount = 1U,
         .pPushConstantRanges = &push_range};
     const VkPipelineRenderingCreateInfo rendering_info = {
@@ -441,13 +453,23 @@ static AfResult af_vk_create_path_pipeline(AfVkRenderer *renderer) {
 }
 
 static AfResult af_vk_create_upload_ring(AfVkRenderer *renderer) {
-    const VkDeviceSize slice_size =
+    const VkDeviceSize vertex_bytes =
         AF_MAX_GPU_SHAPES * sizeof(AfGpuShape) +
         (VkDeviceSize)AF_MAX_GPU_PATH_VERTICES * sizeof(AfGpuPathVertex) +
         (VkDeviceSize)AF_MAX_GPU_IMAGE_VERTICES * sizeof(AfGpuImageVertex);
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(renderer->physical_device, &properties);
+    const VkDeviceSize alignment = properties.limits.minStorageBufferOffsetAlignment;
+    renderer->paint_upload_offset = (vertex_bytes + alignment - 1) / alignment * alignment;
+    const VkDeviceSize paint_bytes = AF_MAX_GPU_PAINTS * sizeof(AfGpuPaint);
+    if (paint_bytes > properties.limits.maxStorageBufferRange)
+        return AF_RESULT_UNSUPPORTED_FEATURE;
+    const VkDeviceSize slice_size =
+        (renderer->paint_upload_offset + paint_bytes + alignment - 1) / alignment * alignment;
     VkBufferCreateInfo buffer_info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                       .size = AF_FRAME_COUNT * slice_size,
-                                      .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                      .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                       .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
     VkMemoryRequirements requirements;
     VkMemoryAllocateInfo allocation = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
@@ -474,6 +496,7 @@ static AfResult af_vk_create_upload_ring(AfVkRenderer *renderer) {
         return AF_RESULT_VULKAN_ERROR;
     }
     renderer->upload_slice_size = slice_size;
+    af_vk_bind_paint_buffers(renderer);
     af_vk_name(renderer, VK_OBJECT_TYPE_BUFFER, (uint64_t)(uintptr_t)renderer->upload_buffer,
                "Arcflow persistent upload ring");
     return AF_RESULT_SUCCESS;

@@ -26,6 +26,7 @@ AfResult af_vk_renderer_create(AfPlatformWindow *window, AfVkRenderer **out_rend
         result = AF_RESULT_VULKAN_ERROR;
     } else if ((result = af_vk_create_device(renderer)) != AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_create_swapchain(renderer)) != AF_RESULT_SUCCESS) {
+    } else if ((result = af_vk_create_paint_descriptors(renderer)) != AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_create_pipeline(renderer)) != AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_create_path_pipeline(renderer)) != AF_RESULT_SUCCESS) {
     } else if ((result = af_vk_create_image_pipeline(renderer)) != AF_RESULT_SUCCESS) {
@@ -78,6 +79,10 @@ void af_vk_renderer_destroy(AfVkRenderer *renderer) {
         af_vk_particles_destroy(renderer->particles);
         renderer->particles = NULL;
         af_vk_destroy_pipeline(renderer);
+        if (renderer->paint_descriptor_pool != VK_NULL_HANDLE)
+            vkDestroyDescriptorPool(renderer->device, renderer->paint_descriptor_pool, NULL);
+        if (renderer->paint_descriptor_layout != VK_NULL_HANDLE)
+            vkDestroyDescriptorSetLayout(renderer->device, renderer->paint_descriptor_layout, NULL);
         af_vk_destroy_images(renderer);
         af_vk_destroy_swapchain(renderer);
         vkDestroyDevice(renderer->device, NULL);

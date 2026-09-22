@@ -612,6 +612,7 @@ static void af_editor_render_workflow(AfEditorState *editor, int width, int heig
     af_editor_render_onboarding(editor, width, height);
     af_editor_render_gradient(editor, width);
     af_editor_render_text_panel(editor, width, height);
+    af_editor_render_choices(editor);
     if (editor->offset_panel_open) {
         const float x = ((float)width - 540.0F) * 0.5F, y = ((float)height - 210.0F) * 0.5F;
         af_editor_add_rect(editor, 0, 0, (float)width, (float)height, (AfColor){0, 0, 0, 0.6F},

@@ -316,22 +316,6 @@ static AfResult af_vk_emit_image_node(const AfSceneNode *node, const AfImageData
     return AF_RESULT_SUCCESS;
 }
 
-static AfResult af_vk_sample_node_fill(const AfSceneNode *node, const AfStyle *style, AfVec2 point,
-                                       AfColor *out_color) {
-    if (node == NULL || out_color == NULL) {
-        return AF_RESULT_INVALID_ARGUMENT;
-    }
-    *out_color = node->fill;
-    if (style == NULL) {
-        return AF_RESULT_SUCCESS;
-    }
-    if (style->fill.type == AF_PAINT_SOLID) {
-        out_color->a *= style->fill_opacity;
-        return AF_RESULT_SUCCESS;
-    }
-    return af_paint_sample(&style->fill, point, style->fill_opacity, out_color);
-}
-
 static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                                    uint32_t *out_shape_count, uint32_t *out_path_vertex_count,
                                    uint32_t *out_image_vertex_count, uint32_t *out_item_count) {
@@ -342,6 +326,8 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
     AfGpuImageVertex *image_vertices =
         (AfGpuImageVertex *)(void *)(slice + AF_MAX_GPU_SHAPES * sizeof(AfGpuShape) +
                                      (size_t)AF_MAX_GPU_PATH_VERTICES * sizeof(AfGpuPathVertex));
+    AfGpuPaint *paints = (AfGpuPaint *)(void *)(slice + renderer->paint_upload_offset);
+    uint32_t paint_count = 0;
     uint32_t shape_count = 0U;
     uint32_t path_vertex_count = 0U;
     uint32_t item_count = 0U;
@@ -367,6 +353,23 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
             }
             style = &resolved_style;
         }
+        uint32_t fill_index = 0, stroke_index = 0;
+        AfColor fill = node->fill, stroke = {0};
+        if (style) {
+            fill.a *= style->fill_opacity;
+            AfResult paint_result = af_vk_upload_paint(paints, &paint_count, node, &style->fill,
+                                                       style->fill_opacity, &fill_index);
+            if (paint_result != AF_RESULT_SUCCESS)
+                return paint_result;
+            if (style->stroke.enabled) {
+                stroke = style->stroke_paint.solid;
+                stroke.a *= style->stroke_opacity;
+                paint_result = af_vk_upload_paint(paints, &paint_count, node, &style->stroke_paint,
+                                                  style->stroke_opacity, &stroke_index);
+                if (paint_result != AF_RESULT_SUCCESS)
+                    return paint_result;
+            }
+        }
         if (node->type == AF_NODE_PATH) {
             const AfPath *path =
                 scene->paths == NULL ? NULL : af_path_find_node_const(scene->paths, node->id);
@@ -388,15 +391,14 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                 return AF_RESULT_LIMIT_EXCEEDED;
             }
             for (uint32_t vertex_index = 0U; vertex_index < cache->vertex_count; ++vertex_index) {
-                AfColor color = node->fill;
+                AfColor color = fill;
                 const AfVec2 local = cache->vertices[vertex_index];
                 const AfVec2 world = af_affine_transform_point(node->world_transform, local);
-                if (af_vk_sample_node_fill(node, style, local, &color) != AF_RESULT_SUCCESS) {
-                    return AF_RESULT_INVALID_ARGUMENT;
-                }
-                path_vertices[path_vertex_count++] = (AfGpuPathVertex){
-                    .position = {world.x, world.y},
-                    .color = {color.r, color.g, color.b, color.a * node->world_opacity}};
+                path_vertices[path_vertex_count++] =
+                    (AfGpuPathVertex){.position = {world.x, world.y},
+                                      .color = {color.r, color.g, color.b,
+                                                node->world_opacity * (fill_index ? 1 : color.a)},
+                                      .paint_index = fill_index};
             }
             if (cache->vertex_count != 0U) {
                 af_vk_append_render_item(renderer, &item_count,
@@ -416,17 +418,14 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                 }
                 for (uint32_t vertex_index = 0U; vertex_index < stroke_cache->vertex_count;
                      ++vertex_index) {
-                    AfColor color;
+                    AfColor color = stroke;
                     const AfVec2 local = stroke_cache->vertices[vertex_index];
                     const AfVec2 world = af_affine_transform_point(node->world_transform, local);
-                    if (af_paint_sample(&style->stroke_paint, local,
-                                        style->stroke_opacity * node->world_opacity,
-                                        &color) != AF_RESULT_SUCCESS) {
-                        return AF_RESULT_INVALID_ARGUMENT;
-                    }
-                    path_vertices[path_vertex_count++] =
-                        (AfGpuPathVertex){.position = {world.x, world.y},
-                                          .color = {color.r, color.g, color.b, color.a}};
+                    path_vertices[path_vertex_count++] = (AfGpuPathVertex){
+                        .position = {world.x, world.y},
+                        .color = {color.r, color.g, color.b,
+                                  node->world_opacity * (stroke_index ? 1 : color.a)},
+                        .paint_index = stroke_index};
                 }
                 if (stroke_cache->vertex_count != 0U) {
                     af_vk_append_render_item(renderer, &item_count,
@@ -462,13 +461,7 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                 shape_count > AF_MAX_GPU_SHAPES - (stroke_visible ? 2U : 1U)) {
                 return AF_RESULT_INVALID_ARGUMENT;
             }
-            AfColor color = node->fill;
-            if (af_vk_sample_node_fill(
-                    node, style,
-                    (AfVec2){node->resolved_bounds.x * 0.5F, node->resolved_bounds.y * 0.5F},
-                    &color) != AF_RESULT_SUCCESS) {
-                return AF_RESULT_INVALID_ARGUMENT;
-            }
+            AfColor color = fill;
             shapes[shape_count] = (AfGpuShape){
                 .matrix = {node->world_transform.m00, node->world_transform.m01,
                            node->world_transform.m10, node->world_transform.m11},
@@ -476,7 +469,8 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                                        node->resolved_bounds.x, node->resolved_bounds.y},
                 .color = {color.r, color.g, color.b, color.a},
                 .parameters = {(float)node->type, node->corner_radius, node->world_opacity, 0.0F},
-                .layer_order = node->layer_order};
+                .layer_order = node->layer_order,
+                .paint_index = fill_index};
             af_vk_append_render_item(renderer, &item_count,
                                      (AfVkRenderItem){.type = AF_VK_RENDER_ANALYTIC,
                                                       .layer_order = node->layer_order,
@@ -484,13 +478,7 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                                                       .count = 1U});
             ++shape_count;
             if (stroke_visible) {
-                AfColor stroke_color;
-                if (af_paint_sample(
-                        &style->stroke_paint,
-                        (AfVec2){node->resolved_bounds.x * 0.5F, node->resolved_bounds.y * 0.5F},
-                        style->stroke_opacity, &stroke_color) != AF_RESULT_SUCCESS) {
-                    return AF_RESULT_INVALID_ARGUMENT;
-                }
+                AfColor stroke_color = stroke;
                 shapes[shape_count] = (AfGpuShape){
                     .matrix = {node->world_transform.m00, node->world_transform.m01,
                                node->world_transform.m10, node->world_transform.m11},
@@ -499,7 +487,8 @@ static AfResult af_vk_upload_scene(AfVkRenderer *renderer, const AfScene *scene,
                     .color = {stroke_color.r, stroke_color.g, stroke_color.b, stroke_color.a},
                     .parameters = {(float)node->type, node->corner_radius, node->world_opacity,
                                    style->stroke.width},
-                    .layer_order = node->layer_order};
+                    .layer_order = node->layer_order,
+                    .paint_index = stroke_index};
                 af_vk_append_render_item(renderer, &item_count,
                                          (AfVkRenderItem){.type = AF_VK_RENDER_ANALYTIC,
                                                           .layer_order = node->layer_order,

@@ -411,8 +411,8 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                     .id = UINT64_C(0x30100) + (uint64_t)editor->selected_property,
                     .title = "Animated Property",
                     .summary = "Choose which property the key button records.",
-                    .details = "Use the arrows to cycle through properties valid for the selected "
-                               "object or vector point.",
+                    .details = "Click the property name to open its menu. Arrows step through "
+                               "properties valid for the selected object or vector point.",
                     .shortcut = "Canvas handles choose position, scale, skew, or rotation for you"};
             }
             if (local_x >= 398.0F && local_x < 514.0F) {

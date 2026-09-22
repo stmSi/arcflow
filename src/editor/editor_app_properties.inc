@@ -1498,7 +1498,12 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
         const int action = (int)((x - panel_x) / 38.0F);
         const float action_x = panel_x + (float)action * 38.0F;
         if (action >= 0 && action < 6 && x >= action_x && x <= action_x + 34.0F) {
-            af_editor_modify_style(editor, (uint32_t)action);
+            if (action == 3) {
+                int pixel_width, pixel_height;
+                if (SDL_GetWindowSizeInPixels(editor->window.window, &pixel_width, &pixel_height))
+                    af_editor_choice_open(editor, 1, width, pixel_height, action_x, y + 28);
+            } else
+                af_editor_modify_style(editor, (uint32_t)action);
         }
         return;
     }

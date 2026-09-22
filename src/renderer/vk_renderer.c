@@ -24,6 +24,7 @@
 #define AF_MAX_SURFACE_FORMATS 64U
 #define AF_MAX_PRESENT_MODES 32U
 #define AF_MAX_QUEUE_FAMILIES 64U
+#define AF_MAX_GPU_PAINTS (AF_MAX_NODES * 2U + 1U)
 #define AF_MAX_GPU_SHAPES (AF_MAX_NODES * 2U)
 #define AF_MAX_GPU_PATH_VERTICES (AF_MAX_PATH_TESSELLATED_VERTICES * 4U)
 #define AF_MAX_RENDER_ITEMS (AF_MAX_NODES * 2U)
@@ -52,11 +53,13 @@ typedef struct AfGpuShape {
     float color[4];
     float parameters[4];
     int32_t layer_order;
+    uint32_t paint_index;
 } AfGpuShape;
 
 typedef struct AfGpuPathVertex {
     float position[2];
     float color[4];
+    uint32_t paint_index;
 } AfGpuPathVertex;
 
 typedef struct AfGpuImageVertex {
@@ -64,6 +67,14 @@ typedef struct AfGpuImageVertex {
     float uv[2];
     float color[4];
 } AfGpuImageVertex;
+
+/* Matches shaders/paint.glsl's std430 vec4 layout. */
+typedef struct AfGpuPaint {
+    float inverse_x[4], inverse_y[4], endpoints[4], parameters[4];
+    float colors[AF_MAX_GRADIENT_STOPS][4];
+    float offsets[AF_MAX_GRADIENT_STOPS];
+} AfGpuPaint;
+_Static_assert(sizeof(AfGpuPaint) == 384, "GPU paint layout");
 
 typedef struct AfVkPathCache {
     const AfPathData *source;
@@ -126,6 +137,10 @@ struct AfVkRenderer {
     VkDeviceMemory upload_memory;
     uint8_t *upload_mapping;
     VkDeviceSize upload_slice_size;
+    VkDeviceSize paint_upload_offset;
+    VkDescriptorSetLayout paint_descriptor_layout;
+    VkDescriptorPool paint_descriptor_pool;
+    VkDescriptorSet paint_descriptor_sets[AF_FRAME_COUNT];
     VkPipelineLayout pipeline_layout;
     VkPipeline pipeline;
     VkPipelineLayout path_pipeline_layout;
@@ -173,6 +188,7 @@ static float af_vk_srgb_to_linear_component(float component) {
 }
 
 // clang-format off
+#include "renderer/vk_renderer_paints.inc"
 #include "renderer/vk_renderer_device.inc"
 #include "renderer/vk_renderer_swapchain.inc"
 #include "renderer/vk_renderer_images.inc"

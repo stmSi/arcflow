@@ -1,10 +1,13 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "paint.glsl"
 
 layout(location = 0) in vec2 in_uv;
 layout(location = 1) in vec2 in_bounds;
 layout(location = 2) in vec4 in_color;
 layout(location = 3) in vec4 in_parameters;
 
+layout(location = 4) flat in uint in_paint;
 layout(location = 0) out vec4 out_color;
 
 layout(constant_id = 0) const uint OUTPUT_IS_SRGB = 1U;
@@ -57,6 +60,7 @@ void main() {
                          ? 1.0 - smoothstep(in_parameters.w * 0.5 - antialias,
                                             in_parameters.w * 0.5 + antialias, abs(distance))
                          : 1.0 - smoothstep(-antialias, antialias, distance);
-    float alpha = clamp(in_color.a * in_parameters.z * coverage, 0.0, 1.0);
-    out_color = premultiplied_output(srgb_to_linear(in_color.rgb), alpha);
+    vec4 color = sample_paint(in_paint, in_color);
+    float alpha = clamp(color.a * in_parameters.z * coverage, 0.0, 1.0);
+    out_color = premultiplied_output(srgb_to_linear(color.rgb), alpha);
 }
