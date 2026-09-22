@@ -1481,6 +1481,7 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
     editor->mouse_position = (AfVec2){event->x, event->y};
+    af_editor_top_menu_hover(editor, width, event);
     if (editor->gradient_drag) {
         af_editor_gradient_motion(editor, width, height, event->x, event->y);
         return;
@@ -1871,7 +1872,8 @@ static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
             --editor->font_scroll;
         return;
     }
-    if (editor->text_panel_open || editor->offset_panel_open)
+    if (af_editor_menu_blocked(editor) || editor->top_menu != AF_EDITOR_MENU_NONE ||
+        editor->choice_menu || editor->context_menu != AF_EDITOR_CONTEXT_NONE)
         return;
     const float direction = event->direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0F : 1.0F;
     const float scroll_x = event->x * direction;
@@ -2319,7 +2321,11 @@ static void af_editor_mouse_scale(const AfEditorState *editor, float *x, float *
 }
 
 static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int width, int height) {
-    if (event->type == SDL_EVENT_QUIT) {
+    if (event->type == SDL_EVENT_WINDOW_FOCUS_LOST || event->type == SDL_EVENT_WINDOW_MOUSE_LEAVE) {
+        editor->top_menu = AF_EDITOR_MENU_NONE;
+        editor->choice_menu = 0;
+        editor->context_menu = AF_EDITOR_CONTEXT_NONE;
+    } else if (event->type == SDL_EVENT_QUIT) {
         if (editor->dialog_active) {
             af_editor_status(editor, "Close the file dialog before exiting");
         } else if (af_editor_confirm_discard(editor, "Exit Arcflow Editor?")) {

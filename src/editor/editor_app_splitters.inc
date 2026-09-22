@@ -12,7 +12,8 @@ static AfEditorDragMode af_editor_splitter_at(const AfEditorState *editor, int w
     const AfVec2 p = editor->mouse_position;
     const float right = (float)width - editor->right_width;
     const float timeline = (float)height - editor->status_height - editor->timeline_height;
-    if (p.y < AF_EDITOR_MENU_HEIGHT) {
+    if (editor->top_menu != AF_EDITOR_MENU_NONE || editor->choice_menu ||
+        editor->context_menu != AF_EDITOR_CONTEXT_NONE || p.y < AF_EDITOR_MENU_HEIGHT) {
         return AF_EDITOR_DRAG_NONE;
     }
     if (fabsf(p.x - editor->left_width) <= 5.0F)

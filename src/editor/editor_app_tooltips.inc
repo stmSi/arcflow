@@ -23,7 +23,7 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
         }
         return tooltip;
     }
-    if (editor->top_menu != AF_EDITOR_MENU_NONE) {
+    if (editor->top_menu != AF_EDITOR_MENU_NONE || editor->choice_menu) {
         return tooltip;
     }
     if (fabsf(mouse.x - editor->left_width) <= 5.0F) {

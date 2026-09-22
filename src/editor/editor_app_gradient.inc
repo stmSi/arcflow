@@ -198,6 +198,8 @@ static bool af_editor_choice_enabled(const AfEditorState *editor, uint32_t row) 
 static void af_editor_choice_open(AfEditorState *editor, uint32_t menu, int width, int height,
                                   float x, float y) {
     editor->choice_menu = menu;
+    editor->top_menu = AF_EDITOR_MENU_NONE;
+    editor->context_menu = AF_EDITOR_CONTEXT_NONE;
     editor->choice_target = editor->selected_id;
     const AfStyle *style = af_project_find_node_style(&editor->project, editor->selected_id);
     editor->choice_index =
@@ -233,7 +235,7 @@ static bool af_editor_choice_mouse(AfEditorState *editor, float x, float y) {
         return true;
     }
     editor->choice_menu = 0;
-    return false;
+    return true;
 }
 static bool af_editor_choice_key(AfEditorState *editor, const SDL_KeyboardEvent *event) {
     if (!editor->choice_menu)

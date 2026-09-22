@@ -254,6 +254,7 @@ typedef struct AfEditorState {
     AfVec2 context_position;
     AfEditorContextMenu context_menu;
     AfEditorTopMenu top_menu;
+    uint32_t top_menu_item;
     uint64_t hovered_tooltip_id;
     uint64_t tooltip_started_ticks;
     float timeline_height;
@@ -568,6 +569,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_workflow_render.inc"
 #include "editor/editor_app_workflow_input.inc"
 #include "editor/editor_app_input.inc"
+#include "editor/editor_app_menu_smoke.inc"
 // clang-format on
 
 int af_editor_run(int argument_count, char **arguments) {
@@ -834,6 +836,11 @@ int af_editor_run(int argument_count, char **arguments) {
         }
         if (editor.boolean_smoke && editor.rendered_frames == 0U) {
             result = af_editor_boolean_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS)
+                goto cleanup;
+        }
+        if (editor.menu_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_menu_interaction_smoke(&editor, width, height);
             if (result != AF_RESULT_SUCCESS)
                 goto cleanup;
         }
@@ -1402,6 +1409,7 @@ int af_editor_run(int argument_count, char **arguments) {
         } else if (editor.menu_smoke) {
             const uint32_t menu = (editor.rendered_frames / 2U) % (uint32_t)AF_EDITOR_MENU_HELP;
             editor.top_menu = (AfEditorTopMenu)(AF_EDITOR_MENU_FILE + menu);
+            editor.top_menu_item = 1;
             editor.mouse_position =
                 (AfVec2){af_editor_top_menu_x(&editor, editor.top_menu) + 22.0F,
                          AF_EDITOR_MENU_HEIGHT + AF_EDITOR_CONTEXT_ITEM_HEIGHT + 12.0F};

@@ -138,7 +138,7 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
          .items = {{"PLAY / PAUSE", "SPACE", AF_EDITOR_MENU_ACTION_PLAY},
                    {"STOP", "HOME", AF_EDITOR_MENU_ACTION_STOP},
                    {"ADD KEYFRAME", "K", AF_EDITOR_MENU_ACTION_ADD_KEY},
-                   {"CURVE EDITOR", "E", AF_EDITOR_MENU_ACTION_CURVES},
+                   {"CURVE EDITOR", "F6", AF_EDITOR_MENU_ACTION_CURVES},
                    {"NEW CLIP", "ALT+C", AF_EDITOR_MENU_ACTION_NEW_CLIP},
                    {"DELETE CLIP", "ALT+DEL", AF_EDITOR_MENU_ACTION_DELETE_CLIP}},
          .item_count = 6U},
@@ -217,6 +217,56 @@ static float af_editor_top_menu_x(const AfEditorState *editor, AfEditorTopMenu m
         x += info == NULL ? 0.0F : info->width * af_editor_top_menu_scale(editor);
     }
     return x;
+}
+
+/* Hover menus share the same input boundaries as modal workflows. */
+static bool af_editor_menu_blocked(const AfEditorState *editor) {
+    return editor->dialog_active || editor->text_panel_open || editor->offset_panel_open ||
+           editor->rename_active || editor->inspector_field != AF_EDITOR_INSPECTOR_NONE ||
+           editor->hierarchy_search_active || editor->command_palette.open ||
+           editor->welcome_visible || editor->example_browser_visible ||
+           editor->guide_browser_visible || editor->export_panel_visible ||
+           editor->platform_panel_visible || editor->update_panel_visible ||
+           editor->template_panel_visible || editor->recent_panel_visible ||
+           editor->shortcuts_overlay || editor->recovery_overlay || editor->preset_panel_visible ||
+           editor->help_overlay;
+}
+static float af_editor_top_popup_x(const AfEditorState *editor, int width) {
+    return af_editor_clamp(af_editor_top_menu_x(editor, editor->top_menu), 0,
+                           fmaxf(0, (float)width - 340));
+}
+static void af_editor_top_menu_open(AfEditorState *editor, AfEditorTopMenu menu) {
+    if (editor->top_menu != menu)
+        editor->top_menu_item = UINT32_MAX;
+    editor->top_menu = menu;
+    editor->context_menu = AF_EDITOR_CONTEXT_NONE;
+    editor->choice_menu = 0;
+    editor->hovered_tooltip_id = 0;
+}
+static void af_editor_top_menu_hover(AfEditorState *editor, int width,
+                                     const SDL_MouseMotionEvent *event) {
+    if (af_editor_menu_blocked(editor) || event->state || editor->gradient_drag ||
+        editor->drag_mode != AF_EDITOR_DRAG_NONE || editor->tool_command_count)
+        return;
+    if (event->y >= 0 && event->y < AF_EDITOR_MENU_HEIGHT) {
+        for (AfEditorTopMenu menu = AF_EDITOR_MENU_FILE; menu <= AF_EDITOR_MENU_HELP;
+             menu = (AfEditorTopMenu)(menu + 1)) {
+            const float x = af_editor_top_menu_x(editor, menu);
+            if (event->x >= x && event->x < x + af_editor_top_menu_info(menu)->width *
+                                                    af_editor_top_menu_scale(editor)) {
+                af_editor_top_menu_open(editor, menu);
+                return;
+            }
+        }
+    }
+    if (editor->top_menu != AF_EDITOR_MENU_NONE) {
+        const float x = af_editor_top_popup_x(editor, width), y = AF_EDITOR_MENU_HEIGHT + 4;
+        const uint32_t count = af_editor_top_menu_info(editor->top_menu)->item_count;
+        editor->top_menu_item =
+            event->x >= x && event->x < x + 340 && event->y >= y && event->y < y + (float)count * 30
+                ? (uint32_t)((event->y - y) / 30)
+                : UINT32_MAX;
+    }
 }
 
 static bool af_editor_confirm_discard(AfEditorState *editor, const char *title) {
@@ -1330,6 +1380,42 @@ static void af_editor_render_help_overlay(AfEditorState *editor, int width, int 
                        0.9F, box_width - 44.0F, (AfColor){0.58F, 0.63F, 0.72F, 1.0F}, 220010);
 }
 
+static bool af_editor_top_menu_key(AfEditorState *editor, int width, int height,
+                                   const SDL_KeyboardEvent *event) {
+    if (editor->top_menu == AF_EDITOR_MENU_NONE)
+        return false;
+    const AfEditorTopMenuInfo *info = af_editor_top_menu_info(editor->top_menu);
+    if (event->key == SDLK_ESCAPE)
+        editor->top_menu = AF_EDITOR_MENU_NONE;
+    else if (event->key == SDLK_LEFT || event->key == SDLK_RIGHT) {
+        const uint32_t count = (uint32_t)AF_EDITOR_MENU_HELP;
+        af_editor_top_menu_open(editor,
+                                (AfEditorTopMenu)(1 + ((uint32_t)editor->top_menu - 1 +
+                                                       (event->key == SDLK_LEFT ? count - 1 : 1)) %
+                                                          count));
+        editor->top_menu_item = 0;
+    } else if (event->key == SDLK_DOWN || event->key == SDLK_UP) {
+        const uint32_t count = info->item_count;
+        editor->top_menu_item =
+            editor->top_menu_item >= count
+                ? (event->key == SDLK_DOWN ? 0 : count - 1)
+                : (editor->top_menu_item + (event->key == SDLK_DOWN ? 1 : count - 1)) % count;
+    } else if (event->key == SDLK_HOME)
+        editor->top_menu_item = 0;
+    else if (event->key == SDLK_END)
+        editor->top_menu_item = info->item_count - 1;
+    else if ((event->key == SDLK_RETURN || event->key == SDLK_KP_ENTER) &&
+             editor->top_menu_item < info->item_count) {
+        const AfEditorMenuAction action = info->items[editor->top_menu_item].action;
+        editor->top_menu = AF_EDITOR_MENU_NONE;
+        af_editor_execute_menu_action(editor, action, width, height);
+    } else if (event->mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) {
+        editor->top_menu = AF_EDITOR_MENU_NONE;
+        return false; /* Keep standard shortcuts usable while a menu is open. */
+    }
+    return true;
+}
+
 static void af_editor_render_top_menu(AfEditorState *editor, int width, int height) {
     const float right = (float)width - editor->right_width;
     const AfColor text_color = {0.8F, 0.83F, 0.89F, 1.0F};
@@ -1354,8 +1440,8 @@ static void af_editor_render_top_menu(AfEditorState *editor, int width, int heig
     }
     if (editor->top_menu != AF_EDITOR_MENU_NONE) {
         const AfEditorTopMenuInfo *info = af_editor_top_menu_info(editor->top_menu);
-        const float x = af_editor_top_menu_x(editor, editor->top_menu);
-        const float popup_width = 270.0F;
+        const float x = af_editor_top_popup_x(editor, width);
+        const float popup_width = 340.0F;
         const float popup_height = 8.0F + (float)info->item_count * 30.0F;
         af_editor_add_shape(
             editor, AF_NODE_ROUNDED_RECTANGLE,
@@ -1364,17 +1450,14 @@ static void af_editor_render_top_menu(AfEditorState *editor, int width, int heig
             210030);
         for (uint32_t index = 0U; index < info->item_count; ++index) {
             const float item_y = AF_EDITOR_MENU_HEIGHT + 4.0F + (float)index * 30.0F;
-            const bool hovered =
-                editor->mouse_position.x >= x && editor->mouse_position.x < x + popup_width &&
-                editor->mouse_position.y >= item_y && editor->mouse_position.y < item_y + 30.0F;
-            if (hovered) {
+            if (index == editor->top_menu_item) {
                 af_editor_add_rect(editor, x + 4.0F, item_y, popup_width - 8.0F, 29.0F,
                                    (AfColor){0.18F, 0.34F, 0.56F, 1.0F}, 210040);
             }
             af_editor_add_text(editor, x + 14.0F, item_y + 9.0F, info->items[index].label, 1.0F,
-                               175.0F, text_color, 210050);
-            af_editor_add_text(editor, x + 190.0F, item_y + 10.0F, info->items[index].shortcut,
-                               0.75F, 68.0F, (AfColor){0.48F, 0.54F, 0.64F, 1.0F}, 210050);
+                               205.0F, text_color, 210050);
+            af_editor_add_text(editor, x + 224.0F, item_y + 10.0F, info->items[index].shortcut,
+                               0.75F, 104.0F, (AfColor){0.48F, 0.54F, 0.64F, 1.0F}, 210050);
         }
     }
     af_editor_render_help_overlay(editor, width, height);
@@ -1390,8 +1473,7 @@ static bool af_editor_top_menu_mouse_down(AfEditorState *editor, int width, int 
             const AfEditorTopMenuInfo *info = af_editor_top_menu_info(menu);
             const float menu_x = af_editor_top_menu_x(editor, menu);
             if (x >= menu_x && x < menu_x + info->width * af_editor_top_menu_scale(editor)) {
-                editor->top_menu = editor->top_menu == menu ? AF_EDITOR_MENU_NONE : menu;
-                editor->context_menu = AF_EDITOR_CONTEXT_NONE;
+                af_editor_top_menu_open(editor, menu);
                 return true;
             }
         }
@@ -1400,8 +1482,8 @@ static bool af_editor_top_menu_mouse_down(AfEditorState *editor, int width, int 
     }
     if (editor->top_menu != AF_EDITOR_MENU_NONE) {
         const AfEditorTopMenuInfo *info = af_editor_top_menu_info(editor->top_menu);
-        const float menu_x = af_editor_top_menu_x(editor, editor->top_menu);
-        const float popup_width = 270.0F;
+        const float menu_x = af_editor_top_popup_x(editor, width);
+        const float popup_width = 340.0F;
         const float first_y = AF_EDITOR_MENU_HEIGHT + 4.0F;
         if (x >= menu_x && x < menu_x + popup_width && y >= first_y &&
             y < first_y + (float)info->item_count * 30.0F) {
@@ -1412,6 +1494,7 @@ static bool af_editor_top_menu_mouse_down(AfEditorState *editor, int width, int 
             return true;
         }
         editor->top_menu = AF_EDITOR_MENU_NONE;
+        return true; /* Dismissal must not select or draw behind the popup. */
     }
     if (editor->help_overlay) {
         const float box_x = ((float)width - 620.0F) * 0.5F;

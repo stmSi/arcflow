@@ -427,6 +427,8 @@ static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEven
         }
         return true;
     }
+    if (af_editor_top_menu_key(editor, editor->window_width, editor->window_height, event))
+        return true;
     if ((modifiers & (AF_EDITOR_SHORTCUT_MODIFIER_CTRL | AF_EDITOR_SHORTCUT_MODIFIER_SHIFT)) ==
             (AF_EDITOR_SHORTCUT_MODIFIER_CTRL | AF_EDITOR_SHORTCUT_MODIFIER_SHIFT) &&
         key == (uint32_t)'P') {

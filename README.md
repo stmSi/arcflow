@@ -25,6 +25,12 @@ Add `--resize-smoke` to force swapchain recreation during that run.
 The editor provides resizable docked panels, persistent vector tools, transform gizmos, a dope
 sheet, and a curve editor. The toolbar includes Pick, Node, Scissors, Segment Delete, Knife,
 Rectangle, Rounded Rectangle, Ellipse, Line, Pen, Pencil, Polygon, Star, Arc, and Spiral tools.
+Hover over **File**, **Edit**, or another top menu to open it; move across the menu bar to switch.
+Use Up/Down to choose a row, Left/Right to switch menus, and Enter to execute. Escape or an outside
+click dismisses a popup without changing the canvas. Hover menus stay inactive during drawing,
+drags, and text/modal editing. Open popups capture scrolling and suppress underlying tooltips and
+resize handles. Long menu labels and shortcuts have separate columns, and popups stay inside the
+window.
 Tool buttons have vector icons; scroll over the toolbar to reveal tools in a narrow workspace.
 Canvas rulers follow the visible world, including negative coordinates, with zoom-dependent ticks.
 Dock edges, the hierarchy/assets divider, toolbar/status boundaries, and timeline label divider
