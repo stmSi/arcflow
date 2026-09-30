@@ -40,3 +40,9 @@ Composition plans support rectangle, rounded-rectangle, and path clips; alpha/in
 premultiplied blend modes; bounded filters; cached offscreen layers; and pooled targets. Shape
 morphing and skinning always write into separate output storage so cached source geometry remains
 immutable.
+
+The editor’s export preview uses its vector renderer with an explicit viewport border and four
+opaque masks that clip only the thumbnail. SVG/media previews share the exporter’s object support
+policy, so unsupported gradients, images and variable-width strokes are omitted consistently. The
+working geometry and render caches remain intact. The preview shows vector conversion and cropping;
+GIF palette quantization, video compression and external Lottie player differences are not modeled.

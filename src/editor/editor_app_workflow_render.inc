@@ -523,77 +523,7 @@ static void af_editor_render_recent_projects(AfEditorState *editor, int width, i
 }
 
 static void af_editor_render_export(AfEditorState *editor, int width, int height) {
-    static const char *const titles[] = {"1  RUNTIME",       "2  LOTTIE JSON",  "3  DOTLOTTIE",
-                                         "4  STATIC VECTOR", "5  ANIMATED GIF", "6  MP4 VIDEO"};
-    static const char *const formats[] = {".AFP  NATIVE PACKAGE", ".JSON  VECTOR MOTION",
-                                          ".LOTTIE  PORTABLE",    ".SVG  CURRENT FRAME",
-                                          ".GIF  30 FPS",         ".MP4  H.264  30 FPS"};
-    static const char *const summaries[] = {
-        "Lossless Arcflow runtime data",  "Web and mobile vector playback",
-        "Compressed Lottie v2 container", "Editable vector snapshot",
-        "Universal looping animation",    "Production-ready video delivery"};
-    static const char *const actions[] = {"EXPORT PACKAGE", "EXPORT JSON", "EXPORT .LOTTIE",
-                                          "EXPORT SVG",     "EXPORT GIF",  "EXPORT MP4"};
-    static const AfColor colors[] = {{0.12F, 0.25F, 0.4F, 1.0F}, {0.27F, 0.18F, 0.42F, 1.0F},
-                                     {0.16F, 0.3F, 0.4F, 1.0F},  {0.14F, 0.34F, 0.27F, 1.0F},
-                                     {0.4F, 0.22F, 0.16F, 1.0F}, {0.35F, 0.17F, 0.2F, 1.0F}};
-    const float box_width = 780.0F;
-    const float box_height = 500.0F;
-    const float card_width = 232.0F;
-    const float card_height = 160.0F;
-    const float x = ((float)width - box_width) * 0.5F;
-    const float y = ((float)height - box_height) * 0.5F;
-    char frame_label[64];
-    if (!editor->export_panel_visible) {
-        return;
-    }
-    (void)snprintf(frame_label, sizeof(frame_label), "CURRENT FRAME AT %.2f SECONDS",
-                   (double)editor->playhead);
-    af_editor_add_rect(editor, 0.0F, 0.0F, (float)width, (float)height,
-                       (AfColor){0.0F, 0.0F, 0.0F, 0.58F}, 241900);
-    af_editor_add_shape(
-        editor, AF_NODE_ROUNDED_RECTANGLE, (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = y},
-        (AfVec2){box_width, box_height}, (AfColor){0.075F, 0.085F, 0.11F, 1.0F}, 9.0F, 242000);
-    af_editor_add_text(editor, x + 24.0F, y + 19.0F, "EXPORT", 1.3F, 180.0F,
-                       (AfColor){0.61F, 0.82F, 1.0F, 1.0F}, 242010);
-    af_editor_add_text(editor, x + 24.0F, y + 49.0F,
-                       "Choose a delivery format. Export never changes the editable project.",
-                       0.74F, box_width - 48.0F, (AfColor){0.57F, 0.64F, 0.75F, 1.0F}, 242010);
-    for (uint32_t index = 0U; index < 6U; ++index) {
-        const uint32_t column = index % 3U;
-        const uint32_t row = index / 3U;
-        const float card_x = x + 24.0F + (float)column * 250.0F;
-        const float card_y = y + 78.0F + (float)row * 178.0F;
-        const bool hovered =
-            editor->mouse_position.x >= card_x && editor->mouse_position.x < card_x + card_width &&
-            editor->mouse_position.y >= card_y && editor->mouse_position.y < card_y + card_height;
-        AfColor card_color = colors[index];
-        if (hovered) {
-            card_color.r = fminf(card_color.r + 0.08F, 1.0F);
-            card_color.g = fminf(card_color.g + 0.08F, 1.0F);
-            card_color.b = fminf(card_color.b + 0.08F, 1.0F);
-        }
-        af_editor_add_button_rounded(editor, card_x, card_y, card_width, card_height, card_color,
-                                     hovered ? 10.0F : 7.0F, 242010);
-        af_editor_add_text(editor, card_x + 16.0F, card_y + 17.0F, titles[index], 0.94F,
-                           card_width - 32.0F, (AfColor){0.82F, 0.91F, 1.0F, 1.0F}, 242020);
-        af_editor_add_text(editor, card_x + 16.0F, card_y + 47.0F, formats[index], 0.64F,
-                           card_width - 32.0F, (AfColor){0.54F, 0.8F, 0.94F, 1.0F}, 242020);
-        af_editor_add_text(editor, card_x + 16.0F, card_y + 78.0F,
-                           index == 3U ? frame_label : summaries[index], 0.62F, card_width - 32.0F,
-                           (AfColor){0.72F, 0.78F, 0.87F, 1.0F}, 242020);
-        if (index == 4U || index == 5U) {
-            af_editor_add_text(editor, card_x + 16.0F, card_y + 101.0F, "REQUIRES FFMPEG", 0.55F,
-                               card_width - 32.0F, (AfColor){0.83F, 0.66F, 0.46F, 1.0F}, 242020);
-        }
-        af_editor_add_text(
-            editor, card_x + 16.0F, card_y + 132.0F, actions[index], 0.72F, card_width - 32.0F,
-            hovered ? (AfColor){1.0F, 1.0F, 1.0F, 1.0F} : (AfColor){0.91F, 0.94F, 0.98F, 1.0F},
-            242020);
-    }
-    af_editor_add_text(editor, x + 24.0F, y + 462.0F,
-                       "CLICK A FORMAT OR PRESS 1-6  -  ESC OR CLICK OUTSIDE TO CLOSE", 0.68F,
-                       box_width - 48.0F, (AfColor){0.47F, 0.55F, 0.66F, 1.0F}, 242020);
+    af_editor_render_export_panel(editor, width, height);
 }
 
 static void af_editor_render_workflow(AfEditorState *editor, int width, int height) {
@@ -706,6 +636,18 @@ static void af_editor_render_canvas_workflow(AfEditorState *editor, int width, i
             }
         }
     }
+    /* The page boundary makes artwork outside the document visible at every zoom. */
+    const AfVec2 page_start = af_affine_transform_point(camera, (AfVec2){0, 0});
+    const AfVec2 page_end = af_affine_transform_point(camera, editor->project.canvas_size);
+    const AfColor page_line = {.4F, .52F, .65F, .85F};
+    af_editor_add_line(editor, page_start, (AfVec2){page_end.x, page_start.y}, 1.5F, page_line,
+                       -89900);
+    af_editor_add_line(editor, (AfVec2){page_end.x, page_start.y}, page_end, 1.5F, page_line,
+                       -89900);
+    af_editor_add_line(editor, page_end, (AfVec2){page_start.x, page_end.y}, 1.5F, page_line,
+                       -89900);
+    af_editor_add_line(editor, (AfVec2){page_start.x, page_end.y}, page_start, 1.5F, page_line,
+                       -89900);
     for (uint32_t index = 0U; index < editor->workspace.guide_count; ++index) {
         const AfEditorGuide *guide = &editor->workspace.guides[index];
         const AfVec2 point =
@@ -716,25 +658,7 @@ static void af_editor_render_canvas_workflow(AfEditorState *editor, int width, i
             guide->vertical ? 1.5F : canvas_width, guide->vertical ? canvas_height : 1.5F,
             (AfColor){0.8F, 0.25F, 0.72F, 0.85F}, 90050);
     }
-    if (editor->smart_guides_visible && editor->selected_count == 1U) {
-        const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
-        if (node != NULL && node->parent_id == AF_INVALID_NODE_ID) {
-            const float center_x = node->local_transform.position.x + node->bounds.x * 0.5F;
-            const float center_y = node->local_transform.position.y + node->bounds.y * 0.5F;
-            if (fabsf(center_x - editor->project.canvas_size.x * 0.5F) < 0.01F) {
-                const AfVec2 point = af_affine_transform_point(
-                    camera, (AfVec2){editor->project.canvas_size.x * 0.5F, 0.0F});
-                af_editor_add_rect(editor, point.x, canvas_y, 1.0F, canvas_height,
-                                   (AfColor){0.2F, 0.9F, 0.75F, 0.9F}, 90055);
-            }
-            if (fabsf(center_y - editor->project.canvas_size.y * 0.5F) < 0.01F) {
-                const AfVec2 point = af_affine_transform_point(
-                    camera, (AfVec2){0.0F, editor->project.canvas_size.y * 0.5F});
-                af_editor_add_rect(editor, canvas_x, point.y, canvas_width, 1.0F,
-                                   (AfColor){0.2F, 0.9F, 0.75F, 0.9F}, 90055);
-            }
-        }
-    }
+    af_editor_render_snap_guides(editor, camera, canvas_x, canvas_y, canvas_width, canvas_height);
     if (!editor->text_panel_open && editor->measurement_visible && editor->selected_count == 1U) {
         const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
         if (node != NULL) {

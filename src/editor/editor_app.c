@@ -8,11 +8,13 @@
 #include "core/log.h"
 #include "editor/editor_actions.h"
 #include "editor/editor_commands.h"
+#include "editor/editor_export.h"
 #include "editor/editor_fonts.h"
 #include "editor/editor_gizmo.h"
 #include "editor/editor_inspector.h"
 #include "editor/editor_preferences.h"
 #include "editor/editor_recovery.h"
+#include "editor/editor_snapping.h"
 #include "editor/editor_text.h"
 #include "editor/editor_vector_tools.h"
 #include "editor/editor_workflow.h"
@@ -250,6 +252,11 @@ typedef struct AfEditorState {
     uint32_t particle_page;
     bool grid_visible;
     bool snapping;
+    AfEditorSnapTarget snap_targets[AF_MAX_NODES];
+    uint32_t snap_target_count;
+    AfEditorSnapBounds snap_drag_bounds;
+    AfEditorSnapResult snap_result;
+
     AfVec2 mouse_position;
     AfVec2 context_position;
     AfEditorContextMenu context_menu;
@@ -417,6 +424,7 @@ typedef struct AfEditorState {
     bool vector_animation_smoke;
     bool image_smoke;
     bool menu_smoke;
+    bool snapping_smoke;
     bool workflow_smoke;
     bool platform_smoke;
     bool release_smoke;
@@ -429,6 +437,20 @@ typedef struct AfEditorState {
     uint32_t vector_tools_smoke_path_start;
     bool dialog_active;
     bool export_panel_visible;
+    AfEditorExportOptions export_options;
+    uint32_t export_format;
+    uint32_t export_field;
+    bool export_replace;
+    char export_buffer[16];
+    bool export_ready;
+    bool export_smoke;
+    bool export_preview_dirty;
+    bool export_preview_valid;
+    bool export_preview_draw[AF_EDITOR_PROJECT_CAPACITY];
+    uint32_t export_visible_count;
+    uint32_t export_outside_count;
+    AfInterchangeDiagnostics export_diagnostics;
+
     bool help_overlay;
     bool shortcuts_overlay;
     bool asset_browser_visible;
@@ -522,7 +544,15 @@ static void af_editor_collaboration_saved(AfEditorState *editor);
 static void af_editor_collaboration_update(AfEditorState *editor, uint64_t now_ns);
 static bool af_editor_hierarchy_name_matches(const AfEditorState *editor, uint32_t node_index);
 static AfVec2 af_editor_tool_line_end(AfVec2 start, AfVec2 end, SDL_Keymod modifiers);
-static AfVec2 af_editor_tool_snap_point(const AfEditorState *editor, AfVec2 point);
+static void af_editor_open_export(AfEditorState *editor);
+static void af_editor_render_export_panel(AfEditorState *editor, int width, int height);
+static AfResult af_editor_export_with_options(AfEditorState *editor, const char *path,
+                                              AfEditorDialogAction action);
+static void af_editor_export_panel_mouse(AfEditorState *editor, int width, int height, float x,
+                                         float y);
+static void af_editor_export_panel_key(AfEditorState *editor, const SDL_KeyboardEvent *event);
+static void af_editor_export_panel_text(AfEditorState *editor, const char *text);
+static AfVec2 af_editor_tool_snap_point(AfEditorState *editor, AfVec2 point);
 static bool af_editor_pen_closes_at(const AfEditorState *editor, AfAffine2 camera, AfVec2 screen);
 static AfResult af_editor_knife_path(AfEditorState *editor, AfVec2 project_start,
                                      AfVec2 project_end);
@@ -558,18 +588,22 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_panels.inc"
 #include "editor/editor_app_tooltips.inc"
 #include "editor/editor_app_canvas.inc"
+#include "editor/editor_app_snapping.inc"
 #include "editor/editor_app_animation.inc"
 #include "editor/editor_app_paths.inc"
 #include "editor/editor_app_text.inc"
 #include "editor/editor_app_properties.inc"
 #include "editor/editor_app_gradient.inc"
 #include "editor/editor_app_menus.inc"
+#include "editor/editor_app_export.inc"
 #include "editor/editor_app_workflow_core.inc"
 #include "editor/editor_app_onboarding.inc"
 #include "editor/editor_app_workflow_render.inc"
 #include "editor/editor_app_workflow_input.inc"
 #include "editor/editor_app_input.inc"
 #include "editor/editor_app_menu_smoke.inc"
+#include "editor/editor_app_snap_smoke.inc"
+#include "editor/editor_app_export_smoke.inc"
 // clang-format on
 
 int af_editor_run(int argument_count, char **arguments) {
@@ -614,6 +648,9 @@ int af_editor_run(int argument_count, char **arguments) {
                af_result_string(result));
         goto cleanup;
     }
+    result = af_editor_reserve_authoring_nodes(&editor, &editor.project);
+    if (result != AF_RESULT_SUCCESS)
+        goto cleanup;
     if (editor.image_smoke) {
         result = af_editor_prepare_image_smoke(&editor);
         if (result != AF_RESULT_SUCCESS) {
@@ -836,6 +873,16 @@ int af_editor_run(int argument_count, char **arguments) {
         }
         if (editor.boolean_smoke && editor.rendered_frames == 0U) {
             result = af_editor_boolean_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS)
+                goto cleanup;
+        }
+        if (editor.snapping_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_snapping_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS)
+                goto cleanup;
+        }
+        if (editor.export_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_export_smoke(&editor, width, height);
             if (result != AF_RESULT_SUCCESS)
                 goto cleanup;
         }

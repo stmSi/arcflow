@@ -266,6 +266,7 @@ static void af_editor_timeline_box_select(AfEditorState *editor, int height) {
 }
 
 static bool af_editor_begin_path_drag(AfEditorState *editor, AfPath *path, AfEditorDragMode mode) {
+    af_editor_prepare_snapping(editor, true);
     if (af_editor_is_text(editor, editor->selected_id))
         return false;
     const AfProjectTrack *track = af_editor_selected_track(editor);
@@ -613,17 +614,14 @@ static void af_editor_drag_path_handle(AfEditorState *editor, int width, int hei
         !af_affine_inverse(node->world_transform, &inverse)) {
         return;
     }
-    point = af_affine_transform_point(inverse,
-                                      af_editor_screen_to_project(editor, width, height, mouse));
+    point = af_affine_transform_point(
+        inverse,
+        af_editor_snap_point(editor, af_editor_screen_to_project(editor, width, height, mouse)));
     if (!isfinite(point.x) || !isfinite(point.y)) {
         return;
     }
     point.x = af_editor_clamp(point.x, -1000000.0F, 1000000.0F);
     point.y = af_editor_clamp(point.y, -1000000.0F, 1000000.0F);
-    if (editor->snapping) {
-        point.x = roundf(point.x / editor->grid_step) * editor->grid_step;
-        point.y = roundf(point.y / editor->grid_step) * editor->grid_step;
-    }
     if (editor->path_key_drag) {
         AfProjectKeyframe *key =
             af_project_find_keyframe(&editor->project, editor->path_drag_key_id);
@@ -1439,6 +1437,7 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
             editor->selected_property = AF_PROPERTY_POSITION;
             af_editor_begin_selection_modify(editor, true);
             af_editor_begin_transform_key_drag(editor, AF_PROPERTY_POSITION);
+            af_editor_prepare_snapping(editor, true);
         } else if (editor->drag_mode == AF_EDITOR_DRAG_GIZMO && selected != NULL) {
             const AfVec2 parent_mouse =
                 af_editor_gizmo_parent_point(editor, selected, width, height, (AfVec2){x, y});
@@ -1666,77 +1665,58 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
         editor->drag_mode == AF_EDITOR_DRAG_Y) {
         const AfVec2 project_current =
             af_editor_screen_to_project(editor, width, height, (AfVec2){event->x, event->y});
-        for (uint32_t index = 0U; index < editor->selection_drag_count; ++index) {
+        AfVec2 delta = {project_current.x - editor->drag_start_mouse.x,
+                        project_current.y - editor->drag_start_mouse.y};
+        AfVec2 axis = {0};
+        if (editor->drag_mode == AF_EDITOR_DRAG_X || editor->drag_mode == AF_EDITOR_DRAG_Y) {
+            const AfSceneNode *primary =
+                af_scene_find_const(&editor->preview_scene, editor->selected_id);
+            if (primary) {
+                axis = editor->drag_mode == AF_EDITOR_DRAG_X
+                           ? (AfVec2){primary->world_transform.m00, primary->world_transform.m10}
+                           : (AfVec2){primary->world_transform.m01, primary->world_transform.m11};
+                const float length = hypotf(axis.x, axis.y);
+                if (length <= .0001F)
+                    return;
+                axis.x /= length;
+                axis.y /= length;
+                const float distance = delta.x * axis.x + delta.y * axis.y;
+                delta = (AfVec2){axis.x * distance, axis.y * distance};
+            }
+        }
+        delta = af_editor_snap_move(editor, delta, axis);
+        for (uint32_t index = 0; index < editor->selection_drag_count; ++index) {
             const AfProjectNodeSnapshot *before = &editor->selection_drag_before[index];
             AfSceneNode *node = af_scene_find(&editor->project.scene, before->node.id);
-            const int32_t key_drag_index =
-                af_editor_transform_drag_key_index(editor, before->node.id);
-            AfProjectKeyframe *position_key =
-                key_drag_index < 0 ? NULL
-                                   : af_project_find_keyframe(
-                                         &editor->project,
-                                         editor->transform_drag_key_ids[(uint32_t)key_drag_index]);
-            AfVec2 current = project_current;
-            AfVec2 start = editor->drag_start_mouse;
-            AfVec2 position =
-                key_drag_index < 0
-                    ? before->node.local_transform.position
-                    : (AfVec2){editor->transform_drag_key_starts[(uint32_t)key_drag_index][0],
-                               editor->transform_drag_key_starts[(uint32_t)key_drag_index][1]};
-            if (node == NULL) {
+            if (!node)
                 continue;
+            const int32_t key_index = af_editor_transform_drag_key_index(editor, before->node.id);
+            AfProjectKeyframe *key =
+                key_index < 0
+                    ? NULL
+                    : af_project_find_keyframe(&editor->project,
+                                               editor->transform_drag_key_ids[(uint32_t)key_index]);
+            AfVec2 position =
+                key_index < 0 ? before->node.local_transform.position
+                              : (AfVec2){editor->transform_drag_key_starts[(uint32_t)key_index][0],
+                                         editor->transform_drag_key_starts[(uint32_t)key_index][1]};
+            AfVec2 local_delta = delta;
+            if (node->parent_id != AF_INVALID_NODE_ID) {
+                const AfSceneNode *parent =
+                    af_scene_find_const(&editor->preview_scene, node->parent_id);
+                AfAffine2 inverse;
+                if (!parent || !af_affine_inverse(parent->world_transform, &inverse))
+                    continue;
+                local_delta = (AfVec2){inverse.m00 * delta.x + inverse.m01 * delta.y,
+                                       inverse.m10 * delta.x + inverse.m11 * delta.y};
             }
-            if (before->node.parent_id != AF_INVALID_NODE_ID) {
-                const AfSceneNode *parent = af_scene_find_const(
-                    key_drag_index < 0 ? &editor->project.scene : &editor->preview_scene,
-                    before->node.parent_id);
-                AfAffine2 parent_inverse = af_affine_identity();
-                if (parent != NULL && af_affine_inverse(parent->world_transform, &parent_inverse)) {
-                    current = af_affine_transform_point(parent_inverse, current);
-                    start = af_affine_transform_point(parent_inverse, start);
-                }
-            }
-            if (editor->drag_mode == AF_EDITOR_DRAG_X || editor->drag_mode == AF_EDITOR_DRAG_Y) {
-                AfTransform2D orientation = before->node.local_transform;
-                const AfAffine2 affine = af_affine_from_transform(orientation);
-                AfVec2 axis = editor->drag_mode == AF_EDITOR_DRAG_X
-                                  ? (AfVec2){affine.m00, affine.m10}
-                                  : (AfVec2){affine.m01, affine.m11};
-                const float length = sqrtf(axis.x * axis.x + axis.y * axis.y);
-                if (length > 0.0001F) {
-                    const AfVec2 delta = {current.x - start.x, current.y - start.y};
-                    float distance = 0.0F;
-                    axis.x /= length;
-                    axis.y /= length;
-                    distance = delta.x * axis.x + delta.y * axis.y;
-                    position.x += axis.x * distance;
-                    position.y += axis.y * distance;
-                }
-            } else {
-                position.x += current.x - start.x;
-                position.y += current.y - start.y;
-            }
-            if (editor->snapping) {
-                position.x = roundf(position.x / editor->grid_step) * editor->grid_step;
-                position.y = roundf(position.y / editor->grid_step) * editor->grid_step;
-            }
-            if (editor->smart_guides_visible && node->parent_id == AF_INVALID_NODE_ID) {
-                const float threshold = 8.0F / editor->zoom;
-                const float center_x = position.x + node->bounds.x * 0.5F;
-                const float center_y = position.y + node->bounds.y * 0.5F;
-                if (fabsf(center_x - editor->project.canvas_size.x * 0.5F) <= threshold) {
-                    position.x = editor->project.canvas_size.x * 0.5F - node->bounds.x * 0.5F;
-                }
-                if (fabsf(center_y - editor->project.canvas_size.y * 0.5F) <= threshold) {
-                    position.y = editor->project.canvas_size.y * 0.5F - node->bounds.y * 0.5F;
-                }
-            }
-            if (position_key != NULL) {
-                position_key->keyframe.value[0] = position.x;
-                position_key->keyframe.value[1] = position.y;
-            } else {
+            position.x += local_delta.x;
+            position.y += local_delta.y;
+            if (key) {
+                key->keyframe.value[0] = position.x;
+                key->keyframe.value[1] = position.y;
+            } else
                 node->local_transform.position = position;
-            }
         }
         (void)af_scene_evaluate_world(&editor->project.scene);
         if (editor->transform_drag_key_count != 0U) {
@@ -1747,6 +1727,7 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
 
 static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
     editor->text_dragging = false;
+    editor->snap_result = (AfEditorSnapResult){0};
     if (editor->gradient_drag) {
         editor->gradient_drag = 0;
         (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_STYLE, false);
@@ -3525,6 +3506,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->vector_animation_smoke = true;
         } else if (strcmp(arguments[index], "--image-smoke") == 0) {
             editor->image_smoke = true;
+        } else if (strcmp(arguments[index], "--export-smoke") == 0) {
+            editor->export_smoke = true;
+        } else if (strcmp(arguments[index], "--snapping-smoke") == 0) {
+            editor->snapping_smoke = true;
         } else if (strcmp(arguments[index], "--menu-smoke") == 0) {
             editor->menu_smoke = true;
         } else if (strcmp(arguments[index], "--workflow-smoke") == 0) {
@@ -3580,7 +3565,8 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->vector_preview_smoke || editor->pen_close_smoke || editor->compound_smoke ||
         editor->boolean_smoke || editor->vector_package_smoke || editor->vfx_smoke ||
         editor->particle_view_smoke || editor->vector_animation_smoke || editor->image_smoke ||
-        editor->menu_smoke || editor->workflow_smoke || editor->platform_smoke ||
-        editor->release_smoke || editor->onboarding_smoke;
+        editor->export_smoke || editor->snapping_smoke || editor->menu_smoke ||
+        editor->workflow_smoke || editor->platform_smoke || editor->release_smoke ||
+        editor->onboarding_smoke;
     af_editor_derive_package_path(editor);
 }

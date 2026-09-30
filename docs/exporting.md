@@ -1,6 +1,27 @@
 # Exporting from Arcflow Editor
 
-Open **File > Export...** (`Ctrl+Shift+E`) and choose the output for its destination:
+Open **File > Export...** (`Ctrl+Shift+E`) to configure and preview the output before choosing a
+destination. Set **Width** and **Height** (1–16,384 pixels), choose **Canvas** or **Selection**, and
+use **Fit content** to crop the viewport around the chosen artwork, including negative coordinates.
+**Page size** restores the document viewport. Dimensions change the output boundary without scaling
+the artwork or changing the project canvas. MP4 dimensions must be even.
+
+The preview clips artwork to the output boundary and counts objects that extend outside it. A
+permanent boundary also marks the document page in the drawing canvas. SVG, GIF, and MP4 use a
+compatible vector preview with the same object-omission rules as the SVG exporter; this is not a
+preview of the GIF palette or H.264 encoding. Lottie/dotLottie show the Arcflow scene and disclose
+conversion warnings, rather than promising exact rendering in a third-party player. Compatibility
+checks refresh when settings change. The white preview paper is not an exported background; MP4
+does not support transparency.
+
+Selection includes selected descendants, preserves parent transforms and animation, and retains
+empty structural groups where flow layouts need space from unselected siblings. Inherited
+appearances are resolved in the export copy. Fit Content uses curve extrema and conservative stroke
+padding. The source project, decoded image pixels, and undo history remain unchanged. Native
+packages retain responsive layout settings; their playback viewport is controlled by the host,
+rather than a fixed pixel crop.
+
+Choose one of these formats, then press **Export...** to open the native save dialog:
 
 - **Runtime Package (`.afp`)** preserves clips, keyframes, vectors, images, particles, layouts,
   components, state machines, and bindings. The editor compiles a production-stripped package,
@@ -16,7 +37,7 @@ Open **File > Export...** (`Ctrl+Shift+E`) and choose the output for its destina
   a valid root `manifest.json` and `a/animation.json`. Use it when a player or delivery service
   prefers one portable animation file.
 - **Static Vector (`.svg`)** evaluates the selected clip at the current playhead time and exports that
-  frame at the project canvas size. Solid-filled and solid-stroked rectangles, rounded rectangles,
+  frame at the configured export viewport size. Solid-filled and solid-stroked rectangles, rounded rectangles,
   ellipses, and paths are represented directly. Features without a static SVG representation, such
   as particles, images, gradients, variable-width strokes, and some composed effects, are omitted
   and counted as compatibility warnings in the editor status.

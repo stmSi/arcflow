@@ -98,12 +98,13 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                                            .details = "The guide follows canvas zoom and is "
                                                       "excluded from export.",
                                            .shortcut = "G"}
-                       : (AfEditorTooltip){
-                             .id = 31U,
-                             .title = "Snapping",
-                             .summary = "Enable or disable construction and editing snaps.",
-                             .details = "Construction points snap to the current grid interval.",
-                             .shortcut = "N"};
+                       : (AfEditorTooltip){.id = 31U,
+                                           .title = "Snapping",
+                                           .summary =
+                                               "Enable or disable construction and editing snaps.",
+                                           .details = "Snap object edges and centers within 8 "
+                                                      "screen pixels. The grid is visual only.",
+                                           .shortcut = "N"};
         }
         return tooltip;
     }

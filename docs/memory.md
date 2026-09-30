@@ -27,3 +27,11 @@ only when a path generation changes; transform, paint, opacity, and normal playb
 Composition targets come from a bounded pool, shape and rig solvers use fixed-capacity scratch
 storage, constraints cap iterations and chain length, and procedural updates cap fixed steps per
 call. Skinning writes to a caller-owned output buffer and never mutates cached bind geometry.
+
+Editor object snapping caches up to 4,096 stationary world bounds in fixed storage once per gesture.
+Move/node/construction pointer updates reuse this cache without heap allocation. Export preparation
+allocates an isolated project copy and clones decoded image pixels; temporary serialized data and
+export buffers are released after compatibility checks or writing. Compatibility checks, object eligibility and outside-boundary counts are cached
+while dialog settings are unchanged. The visual zoom grid emits at most 257 lines per axis.
+Working editor documents reserve their full 2,896-node authoring capacity after loading, independent
+of file line count. This keeps creation, duplication and undo available after reopening small files.

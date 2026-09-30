@@ -248,6 +248,8 @@ add_library(arcflow_editor_core STATIC
     src/editor/editor_text.c
     src/editor/editor_compound.c
     src/editor/editor_actions.c
+    src/editor/editor_export.c
+    src/editor/editor_snapping.c
     src/editor/editor_gizmo.c
     src/editor/editor_inspector.c
     src/editor/editor_vector_tools.c

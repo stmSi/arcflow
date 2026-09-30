@@ -18,28 +18,7 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
         return true;
     }
     if (editor->export_panel_visible) {
-        static const AfEditorDialogAction actions[] = {
-            AF_EDITOR_DIALOG_EXPORT_PACKAGE,   AF_EDITOR_DIALOG_EXPORT_LOTTIE,
-            AF_EDITOR_DIALOG_EXPORT_DOTLOTTIE, AF_EDITOR_DIALOG_EXPORT_SVG,
-            AF_EDITOR_DIALOG_EXPORT_GIF,       AF_EDITOR_DIALOG_EXPORT_MP4};
-        const float box_x = ((float)width - 780.0F) * 0.5F;
-        const float box_y = ((float)height - 500.0F) * 0.5F;
-        if (x >= box_x + 24.0F && y >= box_y + 78.0F) {
-            const uint32_t column = (uint32_t)((x - box_x - 24.0F) / 250.0F);
-            const uint32_t row = (uint32_t)((y - box_y - 78.0F) / 178.0F);
-            const uint32_t index = row * 3U + column;
-            const float card_x = box_x + 24.0F + (float)column * 250.0F;
-            const float card_y = box_y + 78.0F + (float)row * 178.0F;
-            if (column < 3U && row < 2U && index < 6U && x < card_x + 232.0F &&
-                y < card_y + 160.0F) {
-                editor->export_panel_visible = false;
-                af_editor_show_project_dialog(editor, actions[index]);
-            }
-        }
-        if (x < box_x || x >= box_x + 780.0F || y < box_y || y >= box_y + 500.0F) {
-            editor->export_panel_visible = false;
-            af_editor_status(editor, "Export canceled");
-        }
+        af_editor_export_panel_mouse(editor, width, height, x, y);
         return true;
     }
     if (editor->platform_panel_visible) {
@@ -264,27 +243,7 @@ static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEven
         return true;
     }
     if (editor->export_panel_visible) {
-        AfEditorDialogAction export_action = AF_EDITOR_DIALOG_NONE;
-        if (event->key == SDLK_ESCAPE) {
-            editor->export_panel_visible = false;
-            af_editor_status(editor, "Export canceled");
-        } else if (event->key == SDLK_1) {
-            export_action = AF_EDITOR_DIALOG_EXPORT_PACKAGE;
-        } else if (event->key == SDLK_2) {
-            export_action = AF_EDITOR_DIALOG_EXPORT_LOTTIE;
-        } else if (event->key == SDLK_3) {
-            export_action = AF_EDITOR_DIALOG_EXPORT_DOTLOTTIE;
-        } else if (event->key == SDLK_4) {
-            export_action = AF_EDITOR_DIALOG_EXPORT_SVG;
-        } else if (event->key == SDLK_5) {
-            export_action = AF_EDITOR_DIALOG_EXPORT_GIF;
-        } else if (event->key == SDLK_6) {
-            export_action = AF_EDITOR_DIALOG_EXPORT_MP4;
-        }
-        if (export_action != AF_EDITOR_DIALOG_NONE) {
-            editor->export_panel_visible = false;
-            af_editor_show_project_dialog(editor, export_action);
-        }
+        af_editor_export_panel_key(editor, event);
         return true;
     }
     if (editor->platform_panel_visible) {
@@ -476,6 +435,10 @@ static bool af_editor_append_workflow_text(char *buffer, size_t capacity, const 
 }
 
 static bool af_editor_workflow_text(AfEditorState *editor, const char *text) {
+    if (editor->export_panel_visible) {
+        af_editor_export_panel_text(editor, text);
+        return true;
+    }
     if (editor->offset_panel_open) {
         if (editor->offset_replace)
             editor->offset_buffer[0] = '\0';

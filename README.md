@@ -72,6 +72,12 @@ Drag a numeric field horizontally to scrub it (`Shift` for fine control, `Ctrl` 
 or use its embedded `−`/`+` buttons for quick steps. `RATIO` links width/height and scale X/Y while
 typing, scrubbing, or stepping.
 New stars and polygons retain their point-count and inner-radius settings in the inspector.
+Canvas **Snap** aligns object left/right/top/bottom edges and horizontal/vertical centers within
+8 screen pixels. Moves preserve group spacing and parent transforms; Pen and node editing use the
+same object targets. Matching guides identify the edge or center. The grid is visual only, and its
+minor/major spacing adapts to zoom. Arrow nudges remain precise one-unit moves. A page boundary
+shows the document area even when artwork extends outside it.
+
 New shapes and closed paths start with a black 1 px outline; open paths keep their cyan 3 px
 outline. Use the inspector's **OUT** toggle to disable it. **Reset Appearance** enables the default
 outline again for shapes and paths.
@@ -172,7 +178,11 @@ Use **File > Export...** (`Ctrl+Shift+E`) for deliverables. Export targets inclu
 runtime package (`.afp`), Lottie JSON (`.json`), dotLottie v2 (`.lottie`), the current vector frame
 (`.svg`), animated GIF, and H.264 MP4. Vector interchange reports compatibility warnings; GIF and
 MP4 evaluate the selected clip at 30 FPS and require FFmpeg. Destinations are replaced only after a
-successful export.
+successful export. The export dialog previews the chosen viewport, accepts width and height,
+reports objects beyond its boundary, and supports **Canvas** or **Selection** with **Fit content**.
+SVG/GIF/MP4 previews omit unsupported objects using the SVG exporter’s compatibility rules;
+Lottie previews show the Arcflow scene with conversion warnings. Export settings leave the document
+and undo history unchanged.
 
 Compile without opening the editor using:
 

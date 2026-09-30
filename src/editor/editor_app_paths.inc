@@ -165,12 +165,8 @@ static void af_editor_convert_selected_to_path(AfEditorState *editor) {
                      "Vector points ready · drag points or handles · undo restores the shape");
 }
 
-static AfVec2 af_editor_tool_snap_point(const AfEditorState *editor, AfVec2 point) {
-    if (editor->snapping && editor->grid_step > 0.0001F) {
-        point.x = roundf(point.x / editor->grid_step) * editor->grid_step;
-        point.y = roundf(point.y / editor->grid_step) * editor->grid_step;
-    }
-    return point;
+static AfVec2 af_editor_tool_snap_point(AfEditorState *editor, AfVec2 point) {
+    return af_editor_snap_point(editor, point);
 }
 
 static void af_editor_cancel_vector_tool(AfEditorState *editor, const char *status) {
@@ -467,6 +463,9 @@ static bool af_editor_commit_pen_path(AfEditorState *editor, bool closed) {
 
 static bool af_editor_vector_tool_mouse_down(AfEditorState *editor, int width, int height,
                                              const SDL_MouseButtonEvent *event) {
+    if (!af_editor_vector_tool_is_construction(editor->active_tool))
+        return false;
+    af_editor_prepare_snapping(editor, false);
     const AfVec2 raw_point =
         af_editor_screen_to_project(editor, width, height, (AfVec2){event->x, event->y});
     AfVec2 point = editor->active_tool == AF_EDITOR_TOOL_PENCIL

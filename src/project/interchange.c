@@ -462,6 +462,17 @@ static AfResult af_interchange_svg_node_style(const AfScene *scene, const AfScen
     return AF_RESULT_SUCCESS;
 }
 
+bool af_interchange_static_svg_node_supported(const AfScene *scene, const AfSceneNode *node) {
+    if (!scene || !node || !node->world_visible || node->world_opacity <= 0 ||
+        (node->type != AF_NODE_RECTANGLE && node->type != AF_NODE_ROUNDED_RECTANGLE &&
+         node->type != AF_NODE_ELLIPSE && !(node->type == AF_NODE_PATH && scene->paths)))
+        return false;
+    AfStyle style;
+    const AfStyle *resolved = NULL;
+    return af_interchange_svg_node_style(scene, node, 0, &style, &resolved, NULL) ==
+           AF_RESULT_SUCCESS;
+}
+
 AfResult af_interchange_export_static_svg(const AfScene *scene, AfVec2 canvas_size, char *output,
                                           size_t output_capacity, size_t *out_size,
                                           AfInterchangeDiagnostics *diagnostics) {

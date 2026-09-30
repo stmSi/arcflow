@@ -772,6 +772,11 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     uint32_t index = 0U;
     editor->render_scene.count = 0U;
     editor->render_scene.styles = &editor->project.style_data;
+    editor->render_scene.images = &editor->project.image_data;
+    if (editor->export_panel_visible) {
+        af_editor_render_export_panel(editor, width, height);
+        return;
+    }
     af_editor_layout(editor, width, height, &canvas_x, &canvas_y, &canvas_width, &canvas_height);
     if (editor->welcome_visible || editor->example_browser_visible ||
         editor->guide_browser_visible) {
@@ -801,7 +806,8 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     af_editor_render_canvas_workflow(editor, width, height, camera);
     if (editor->text_panel_open)
         af_editor_text_preview_update(editor);
-    for (index = 0U; index < editor->preview_scene.count; ++index) {
+    for (index = 0U; !editor->export_panel_visible && index < editor->preview_scene.count;
+         ++index) {
         const AfSceneNode *source = &editor->preview_scene.nodes[index];
         AfSceneNode *target = NULL;
         if (editor->render_scene.count >= AF_MAX_NODES) {

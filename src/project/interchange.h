@@ -135,6 +135,8 @@ AfResult af_interchange_export_sprite_sheet_png(const char *path,
 AfResult af_interchange_export_static_svg(const AfScene *scene, AfVec2 canvas_size, char *output,
                                           size_t output_capacity, size_t *out_size,
                                           AfInterchangeDiagnostics *diagnostics);
+/* Shared by the export dialog to preview which objects survive SVG conversion. */
+bool af_interchange_static_svg_node_supported(const AfScene *scene, const AfSceneNode *node);
 AfResult af_interchange_export_lottie_json(const struct AfProject *project, uint64_t clip_id,
                                            const AfLottieExportOptions *options, char *output,
                                            size_t output_capacity, size_t *out_size,

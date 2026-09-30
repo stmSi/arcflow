@@ -972,10 +972,6 @@ static void af_editor_nudge(AfEditorState *editor, float x, float y) {
                                   editor->transform_drag_key_starts[(uint32_t)key_drag_index][1]};
         position.x += x;
         position.y += y;
-        if (editor->snapping) {
-            position.x = roundf(position.x / editor->grid_step) * editor->grid_step;
-            position.y = roundf(position.y / editor->grid_step) * editor->grid_step;
-        }
         if (position_key != NULL) {
             position_key->keyframe.value[0] = position.x;
             position_key->keyframe.value[1] = position.y;

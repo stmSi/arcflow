@@ -290,12 +290,48 @@ static bool af_editor_confirm_discard(AfEditorState *editor, const char *title) 
     return selected == 1;
 }
 
+/* Loading reserves by text line count; authoring needs room to add and duplicate nodes. */
+static AfResult af_editor_reserve_authoring_nodes(AfEditorState *editor, AfProject *project) {
+    if (project->scene.count > AF_EDITOR_PROJECT_CAPACITY)
+        return AF_RESULT_LIMIT_EXCEEDED;
+    if (project->scene.capacity >= AF_EDITOR_PROJECT_CAPACITY) {
+        project->scene.capacity = AF_EDITOR_PROJECT_CAPACITY;
+        return AF_RESULT_SUCCESS;
+    }
+    AfSceneNode *nodes = af_allocate_array(&editor->allocator, AF_EDITOR_PROJECT_CAPACITY,
+                                           sizeof(*nodes), _Alignof(AfSceneNode));
+    AfProjectText *texts = af_allocate_array(&editor->allocator, AF_EDITOR_PROJECT_CAPACITY,
+                                             sizeof(*texts), _Alignof(AfProjectText));
+    char (*names)[AF_PROJECT_NAME_CAPACITY] = af_allocate_array(
+        &editor->allocator, AF_EDITOR_PROJECT_CAPACITY, sizeof(*names), _Alignof(char));
+    if (!nodes || !texts || !names) {
+        af_deallocate(&editor->allocator, nodes);
+        af_deallocate(&editor->allocator, texts);
+        af_deallocate(&editor->allocator, names);
+        return AF_RESULT_OUT_OF_MEMORY;
+    }
+    memcpy(nodes, project->scene.nodes, (size_t)project->scene.count * sizeof(*nodes));
+    memcpy(texts, project->texts, (size_t)project->scene.count * sizeof(*texts));
+    memcpy(names, project->names, (size_t)project->scene.count * sizeof(*names));
+    af_deallocate(&editor->allocator, project->scene.nodes);
+    af_deallocate(&editor->allocator, project->texts);
+    af_deallocate(&editor->allocator, project->names);
+    project->scene.nodes = nodes;
+    project->texts = texts;
+    project->names = names;
+    project->scene.capacity = AF_EDITOR_PROJECT_CAPACITY;
+    return AF_RESULT_SUCCESS;
+}
+
 static AfResult af_editor_adopt_project(AfEditorState *editor, AfProject *project, const char *path,
                                         bool dirty) {
     if (editor == NULL || project == NULL || project->scene.count > AF_EDITOR_PROJECT_CAPACITY ||
         af_project_validate(project) != AF_RESULT_SUCCESS) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
+    const AfResult reserve = af_editor_reserve_authoring_nodes(editor, project);
+    if (reserve != AF_RESULT_SUCCESS)
+        return reserve;
     af_editor_collaboration_release(editor);
     af_project_destroy(&editor->project);
     editor->project = *project;
@@ -960,49 +996,11 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
         } else {
             af_editor_status(editor, "Project path is too long");
         }
-    } else if (action == AF_EDITOR_DIALOG_EXPORT_PACKAGE) {
-        char export_path[AF_EDITOR_PATH_CAPACITY];
-        if (af_editor_export_path_with_extension(path, ".afp", export_path, sizeof(export_path))) {
-            (void)af_editor_export_package_path(editor, export_path);
-        } else {
-            af_editor_status(editor, "Export path is too long");
-        }
-    } else if (action == AF_EDITOR_DIALOG_EXPORT_SVG) {
-        char export_path[AF_EDITOR_PATH_CAPACITY];
-        if (af_editor_export_path_with_extension(path, ".svg", export_path, sizeof(export_path))) {
-            (void)af_editor_export_svg_path(editor, export_path);
-        } else {
-            af_editor_status(editor, "Export path is too long");
-        }
-    } else if (action == AF_EDITOR_DIALOG_EXPORT_LOTTIE) {
-        char export_path[AF_EDITOR_PATH_CAPACITY];
-        if (af_editor_export_path_with_extension(path, ".json", export_path, sizeof(export_path))) {
-            (void)af_editor_export_lottie_path(editor, export_path, false);
-        } else {
-            af_editor_status(editor, "Export path is too long");
-        }
-    } else if (action == AF_EDITOR_DIALOG_EXPORT_DOTLOTTIE) {
-        char export_path[AF_EDITOR_PATH_CAPACITY];
-        if (af_editor_export_path_with_extension(path, ".lottie", export_path,
-                                                 sizeof(export_path))) {
-            (void)af_editor_export_lottie_path(editor, export_path, true);
-        } else {
-            af_editor_status(editor, "Export path is too long");
-        }
-    } else if (action == AF_EDITOR_DIALOG_EXPORT_GIF) {
-        char export_path[AF_EDITOR_PATH_CAPACITY];
-        if (af_editor_export_path_with_extension(path, ".gif", export_path, sizeof(export_path))) {
-            (void)af_editor_export_media_path(editor, export_path, true);
-        } else {
-            af_editor_status(editor, "Export path is too long");
-        }
-    } else if (action == AF_EDITOR_DIALOG_EXPORT_MP4) {
-        char export_path[AF_EDITOR_PATH_CAPACITY];
-        if (af_editor_export_path_with_extension(path, ".mp4", export_path, sizeof(export_path))) {
-            (void)af_editor_export_media_path(editor, export_path, false);
-        } else {
-            af_editor_status(editor, "Export path is too long");
-        }
+    } else if (action == AF_EDITOR_DIALOG_EXPORT_PACKAGE || action == AF_EDITOR_DIALOG_EXPORT_SVG ||
+               action == AF_EDITOR_DIALOG_EXPORT_LOTTIE ||
+               action == AF_EDITOR_DIALOG_EXPORT_DOTLOTTIE ||
+               action == AF_EDITOR_DIALOG_EXPORT_GIF || action == AF_EDITOR_DIALOG_EXPORT_MP4) {
+        (void)af_editor_export_with_options(editor, path, action);
     } else if (action == AF_EDITOR_DIALOG_REPAIR_IMAGE) {
         const AfResult result = af_project_repair_image_source(
             &editor->project, editor->project_path, editor->selected_asset_id, path);
@@ -1127,9 +1125,7 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         }
         break;
     case AF_EDITOR_MENU_ACTION_EXPORT:
-        editor->export_panel_visible = true;
-        editor->preview_playing = false;
-        af_editor_status(editor, "Choose an export format");
+        af_editor_open_export(editor);
         break;
     case AF_EDITOR_MENU_ACTION_EXIT:
         if (!editor->dialog_active && af_editor_confirm_discard(editor, "Exit Arcflow Editor?")) {

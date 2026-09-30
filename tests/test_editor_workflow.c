@@ -1,6 +1,10 @@
 #include "editor/editor_actions.h"
+#include "editor/editor_export.h"
 #include "editor/editor_preferences.h"
+#include "editor/editor_snapping.h"
 #include "editor/editor_workflow.h"
+#include "project/interchange.h"
+#include <math.h>
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -388,17 +392,322 @@ static bool af_test_scene_workflow_tools(void) {
     return true;
 }
 
+static bool af_test_object_snapping(void) {
+    const AfEditorSnapTarget target = {.bounds = {{100, 200}, {180, 260}}, .id = 42};
+    for (uint32_t axis = 0; axis < 2; ++axis)
+        for (uint32_t feature = 0; feature < 3; ++feature) {
+            AfVec2 point = {500, 500};
+            const float value = axis ? 200 + 30 * (float)feature : 100 + 40 * (float)feature;
+            if (axis)
+                point.y = value + 3;
+            else
+                point.x = value + 3;
+            AfEditorSnapResult result = af_editor_snap_bounds((AfEditorSnapBounds){point, point},
+                                                              &target, 1, 1, (AfVec2){0});
+            CHECK(result.axes[axis].active && result.axes[axis].feature == feature &&
+                  result.axes[axis].id == 42);
+            CHECK(fabsf((axis ? result.correction.y : result.correction.x) + 3) < .001F);
+        }
+    /* Tolerance is measured in screen pixels, independent of zoom. */
+    for (uint32_t i = 0; i < 3; ++i) {
+        const float zooms[] = {.1F, 1, 8};
+        const float zoom = zooms[i];
+        AfVec2 point = {100 - 7 / zoom, 900};
+        AfEditorSnapResult r = af_editor_snap_bounds((AfEditorSnapBounds){point, point}, &target, 1,
+                                                     zoom, (AfVec2){0});
+        CHECK(r.axes[0].active);
+        point.x = 100 - 9 / zoom;
+        r = af_editor_snap_bounds((AfEditorSnapBounds){point, point}, &target, 1, zoom,
+                                  (AfVec2){0});
+        CHECK(!r.axes[0].active && !r.axes[1].active);
+    }
+    /* No objects means no snapping, even near grid coordinates. */
+    AfEditorSnapResult r =
+        af_editor_snap_bounds((AfEditorSnapBounds){{19, 39}, {39, 59}}, NULL, 0, 1, (AfVec2){0});
+    CHECK(r.correction.x == 0 && r.correction.y == 0);
+    r = af_editor_snap_bounds((AfEditorSnapBounds){{97, 197}, {97, 197}}, &target, 1, 1,
+                              (AfVec2){1, 0});
+    CHECK(r.correction.x == 3 && r.correction.y == 0 && !r.axes[1].active);
+    r = af_editor_snap_bounds((AfEditorSnapBounds){{97, 197}, {97, 197}}, &target, 1, 1,
+                              (AfVec2){1, 1});
+    CHECK(fabsf(r.correction.x - 3) < .001F && fabsf(r.correction.y - 3) < .001F);
+    const AfEditorSnapTarget nearest[] = {target, {.bounds = {{104, 300}, {184, 360}}, .id = 43}};
+    r = af_editor_snap_bounds((AfEditorSnapBounds){{103, 800}, {103, 800}}, nearest, 2, 1,
+                              (AfVec2){0});
+    CHECK(r.axes[0].id == 43 && r.correction.x == 1);
+    return true;
+}
+static bool af_test_adaptive_grid(void) {
+    float previous = INFINITY;
+    for (float zoom = .1F; zoom < 8.1F; zoom *= 1.1F) {
+        const float step = af_editor_grid_interval(20, zoom);
+        CHECK(step * zoom >= 9.999F && step * zoom < 50.001F && step <= previous);
+        previous = step;
+    }
+    CHECK(af_editor_grid_interval(20, .1F) > af_editor_grid_interval(20, 1));
+    CHECK(af_editor_grid_interval(20, 8) < af_editor_grid_interval(20, 1));
+    CHECK(af_editor_grid_interval(20, 0) == 0 && af_editor_grid_interval(NAN, 1) == 0);
+    return true;
+}
+
+static bool af_test_export_scope(void) {
+    AfAllocator allocator;
+    af_allocator_init_default(&allocator);
+    AfProject source = {0}, selected = {0}, full = {0};
+    AfPackageBlob before = {0}, after = {0}, package = {0};
+    CHECK(af_project_create(&source, &allocator, 16) == AF_RESULT_SUCCESS);
+    source.canvas_size = (AfVec2){800, 600};
+    AfSceneNode parent = {
+        .id = 1,
+        .parent_id = AF_INVALID_NODE_ID,
+        .type = AF_NODE_RECTANGLE,
+        .local_transform = {.position = {100, 80}, .scale = {2, 1}, .rotation = .3F},
+        .bounds = {200, 100},
+        .visible = true,
+        .opacity = .8F,
+        .fill = {.2F, .3F, .4F, 1}};
+    AfSceneNode child = {.id = 2,
+                         .parent_id = 1,
+                         .type = AF_NODE_ELLIPSE,
+                         .local_transform = {.position = {12, 34}, .scale = {1, 1}},
+                         .bounds = {40, 30},
+                         .visible = true,
+                         .opacity = 1,
+                         .fill = {.9F, .1F, .2F, 1}};
+    AfSceneNode other = child;
+    other.id = 3;
+    other.parent_id = AF_INVALID_NODE_ID;
+    other.type = AF_NODE_PATH;
+    CHECK(af_project_add_node(&source, &parent, "Parent artwork") == AF_RESULT_SUCCESS);
+    CHECK(af_project_add_node(&source, &child, "Selected child") == AF_RESULT_SUCCESS);
+    CHECK(af_project_add_node(&source, &other, "Unrelated path") == AF_RESULT_SUCCESS);
+    AfPathCommand commands[] = {{.type = AF_PATH_MOVE, .point = {0, 0}},
+                                {.type = AF_PATH_LINE, .point = {40, 30}}};
+    AfPath path = {.id = 50, .node_id = 3, .command_count = 2, .geometry_generation = 1};
+    CHECK(af_project_add_path(&source, &path, commands) == AF_RESULT_SUCCESS);
+    AfProjectClip clip = {.id = 100, .name = "Animation", .duration = 2, .loop_end = 2};
+    CHECK(af_project_add_clip(&source, &clip) == AF_RESULT_SUCCESS);
+    for (uint32_t i = 0; i < 3; ++i) {
+        AfProjectTrack track = {
+            .id = 101 + i, .clip_id = 100, .node_id = 1 + i, .property = AF_PROPERTY_POSITION};
+        AfProjectKeyframe key = {.id = 110 + i,
+                                 .track_id = track.id,
+                                 .keyframe = {.time = 0,
+                                              .value = {100 + (float)i, 80 + (float)i},
+                                              .interpolation = AF_INTERPOLATION_LINEAR}};
+        CHECK(af_project_add_track(&source, &track) == AF_RESULT_SUCCESS);
+        CHECK(af_project_add_keyframe(&source, &key) == AF_RESULT_SUCCESS);
+    }
+    /* Inheritance may refer to an object that is outside the selected subtree. */
+    AfStyle *style = af_project_find_node_style(&source, 2);
+    CHECK(style);
+    style->parent_style_id = af_style_find_node_const(&source.style_data, 3)->id;
+    style->inherit_flags = AF_STYLE_INHERIT_FILL;
+    CHECK(af_scene_evaluate_world(&source.scene) == AF_RESULT_SUCCESS);
+    const AfAffine2 world = af_scene_find_const(&source.scene, 2)->world_transform;
+    CHECK(af_project_serialize(&source, &allocator, &before) == AF_RESULT_SUCCESS);
+    const uint64_t id = 2;
+    AfEditorExportOptions options = {
+        .size = {320, 240}, .origin = {20, 30}, .selection_only = true};
+    CHECK(af_editor_export_project(&source, &options, &id, 1, &allocator, &selected) ==
+          AF_RESULT_SUCCESS);
+    CHECK(selected.scene.count == 2 && selected.path_data.path_count == 0 &&
+          selected.track_count == 2 && selected.keyframe_count == 2);
+    CHECK(af_scene_find_const(&selected.scene, 1)->type == AF_NODE_GROUP);
+    CHECK(!af_scene_find_const(&selected.scene, 3));
+    CHECK(selected.canvas_size.x == 320 && selected.canvas_size.y == 240);
+    const AfSceneNode *kept = af_scene_find_const(&selected.scene, 2);
+    CHECK(fabsf(kept->world_transform.tx - world.tx + 20) < .001F &&
+          fabsf(kept->world_transform.ty - world.ty + 30) < .001F);
+    CHECK(selected.keyframes[0].keyframe.value[0] == 80 &&
+          selected.keyframes[0].keyframe.value[1] == 50);
+    CHECK(af_project_validate(&selected) == AF_RESULT_SUCCESS);
+    CHECK(af_project_compile(&selected, &allocator, &package) == AF_RESULT_SUCCESS);
+    af_package_blob_destroy(&allocator, &package);
+    char svg[8192];
+    size_t size = 0;
+    AfInterchangeDiagnostics diagnostics = {0};
+    CHECK(af_interchange_export_static_svg(&selected.scene, selected.canvas_size, svg, sizeof(svg),
+                                           &size, &diagnostics) == AF_RESULT_SUCCESS);
+    CHECK(strstr(svg, "width=\"320\" height=\"240\"") && strstr(svg, "<ellipse") &&
+          !strstr(svg, "<rect"));
+    CHECK(af_interchange_export_lottie_json(&selected, 100, NULL, svg, sizeof(svg), &size,
+                                            &diagnostics) == AF_RESULT_SUCCESS);
+    CHECK(strstr(svg, "\"w\":320") && strstr(svg, "\"h\":240") && !strstr(svg, "Unrelated path"));
+    af_project_destroy(&selected);
+    /* A selected parent includes descendants and retains its own artwork. */
+    const uint64_t root = 1;
+    CHECK(af_editor_export_project(&source, &options, &root, 1, &allocator, &selected) ==
+          AF_RESULT_SUCCESS);
+    CHECK(selected.scene.count == 2 && selected.scene.nodes[0].type == AF_NODE_RECTANGLE);
+    af_project_destroy(&selected);
+    options.selection_only = false;
+    CHECK(af_editor_export_project(&source, &options, NULL, 0, &allocator, &full) ==
+          AF_RESULT_SUCCESS);
+    CHECK(full.scene.count == 3 && full.path_data.path_count == 1 && full.track_count == 3);
+    af_project_destroy(&full);
+    options.selection_only = true;
+    CHECK(af_editor_export_project(&source, &options, NULL, 0, &allocator, &selected) ==
+          AF_RESULT_INVALID_ARGUMENT);
+    const uint64_t missing = 999;
+    CHECK(af_editor_export_project(&source, &options, &missing, 1, &allocator, &selected) ==
+          AF_RESULT_NOT_FOUND);
+    options.size.x = NAN;
+    CHECK(af_editor_export_project(&source, &options, &id, 1, &allocator, &selected) ==
+          AF_RESULT_INVALID_ARGUMENT);
+    CHECK(af_project_serialize(&source, &allocator, &after) == AF_RESULT_SUCCESS);
+    CHECK(before.size == after.size && !memcmp(before.data, after.data, before.size));
+    af_package_blob_destroy(&allocator, &before);
+    af_package_blob_destroy(&allocator, &after);
+    af_project_destroy(&source);
+    return true;
+}
+
+static bool af_test_export_flow_and_canvas_scale(void) {
+    AfAllocator allocator;
+    af_allocator_init_default(&allocator);
+    AfProject source = {0}, output = {0};
+    CHECK(af_project_create(&source, &allocator, 8) == AF_RESULT_SUCCESS);
+    source.layout_data.reference_size = (AfVec2){400, 300};
+    source.layout_data.target_size = (AfVec2){800, 600};
+    source.layout_data.scale_mode = AF_CANVAS_SCALE_FIT;
+    AfSceneNode parent = {.id = 1,
+                          .parent_id = AF_INVALID_NODE_ID,
+                          .type = AF_NODE_GROUP,
+                          .bounds = {300, 100},
+                          .local_transform = {.scale = {1, 1}},
+                          .visible = true,
+                          .opacity = 1};
+    CHECK(af_project_add_node(&source, &parent, "Flow parent") == AF_RESULT_SUCCESS);
+    AfLayoutNode layout = af_layout_node_default(1);
+    layout.direction = AF_LAYOUT_DIRECTION_HORIZONTAL;
+    layout.spacing = 10;
+    CHECK(af_project_set_layout(&source, &layout) == AF_RESULT_SUCCESS);
+    AfSceneNode sibling = {.id = 2,
+                           .parent_id = 1,
+                           .type = AF_NODE_RECTANGLE,
+                           .bounds = {50, 40},
+                           .local_transform = {.scale = {1, 1}},
+                           .visible = true,
+                           .opacity = 1,
+                           .fill = {1, 0, 0, 1}};
+    CHECK(af_project_add_node(&source, &sibling, "Space reserving sibling") == AF_RESULT_SUCCESS);
+    sibling.id = 3;
+    CHECK(af_project_add_node(&source, &sibling, "Selected artwork") == AF_RESULT_SUCCESS);
+    CHECK(af_scene_evaluate_world(&source.scene) == AF_RESULT_SUCCESS);
+    const AfAffine2 before = af_scene_find_const(&source.scene, 3)->world_transform;
+    const uint64_t id = 3;
+    const AfEditorExportOptions options = {
+        .size = {150, 120}, .origin = {50, 30}, .selection_only = true};
+    CHECK(af_editor_export_project(&source, &options, &id, 1, &allocator, &output) ==
+          AF_RESULT_SUCCESS);
+    CHECK(af_scene_find_const(&output.scene, 2)->type == AF_NODE_GROUP);
+    const AfAffine2 after = af_scene_find_const(&output.scene, 3)->world_transform;
+    CHECK(fabsf(after.tx - before.tx + 50) < .001F && fabsf(after.ty - before.ty + 30) < .001F);
+    char svg[4096];
+    size_t size = 0;
+    CHECK(af_interchange_export_static_svg(&output.scene, output.canvas_size, svg, sizeof(svg),
+                                           &size, NULL) == AF_RESULT_SUCCESS);
+    const char *rect = strstr(svg, "<rect");
+    CHECK(rect && !strstr(rect + 1, "<rect"));
+    af_project_destroy(&output);
+    af_project_destroy(&source);
+    return true;
+}
+
+static bool af_test_export_image_pixels(void) {
+    AfAllocator allocator;
+    af_allocator_init_default(&allocator);
+    AfProject source = {0}, output = {0};
+    CHECK(af_project_create(&source, &allocator, 8) == AF_RESULT_SUCCESS);
+    const uint8_t pixels[] = {255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255};
+    AfImageAsset asset = {.id = 1,
+                          .width = 2,
+                          .height = 2,
+                          .source_format = AF_IMAGE_SOURCE_PNG,
+                          .source_path = "assets/example.png",
+                          .name = "Example"};
+    uint64_t asset_id = 0;
+    bool duplicate = false;
+    CHECK(af_image_add(&source.image_data, &asset, pixels, &asset_id, &duplicate) ==
+          AF_RESULT_SUCCESS);
+    source.next_asset_id = asset_id + 1;
+    AfSceneNode node = {.id = 1,
+                        .parent_id = AF_INVALID_NODE_ID,
+                        .type = AF_NODE_IMAGE,
+                        .local_transform = {.scale = {1, 1}},
+                        .bounds = {40, 40},
+                        .visible = true,
+                        .opacity = 1,
+                        .fill = {1, 1, 1, 1}};
+    CHECK(af_project_add_node(&source, &node, "Image") == AF_RESULT_SUCCESS);
+    AfImageBinding binding = {.node_id = 1, .asset_id = asset_id};
+    CHECK(af_image_set_binding(&source.image_data, &binding) == AF_RESULT_SUCCESS);
+    AfEditorExportOptions options = {.size = {100, 80}, .selection_only = true};
+    const uint64_t id = 1;
+    CHECK(af_editor_export_project(&source, &options, &id, 1, &allocator, &output) ==
+          AF_RESULT_SUCCESS);
+    const AfImageAsset *copy = af_image_find_const(&output.image_data, asset_id);
+    CHECK(copy && !copy->missing && copy->pixels != source.image_data.assets[0].pixels &&
+          !memcmp(copy->pixels, pixels, sizeof(pixels)));
+    AfPackageBlob package = {0};
+    CHECK(af_project_compile(&output, &allocator, &package) == AF_RESULT_SUCCESS);
+    af_package_blob_destroy(&allocator, &package);
+    af_project_destroy(&output);
+    af_project_destroy(&source);
+    return true;
+}
+
+static bool af_test_curve_world_bounds(void) {
+    AfPathCommand commands[] = {
+        {.type = AF_PATH_MOVE, .point = {0, 0}},
+        {.type = AF_PATH_CUBIC, .point = {100, 0}, .control1 = {0, -100}, .control2 = {100, -100}}};
+    AfPath path = {.id = 5, .node_id = 1, .command_count = 2, .geometry_generation = 1};
+    AfPathData paths = {.paths = &path,
+                        .path_count = 1,
+                        .path_capacity = 1,
+                        .commands = commands,
+                        .command_count = 2,
+                        .command_capacity = 2};
+    AfSceneNode node = {.id = 1,
+                        .parent_id = AF_INVALID_NODE_ID,
+                        .type = AF_NODE_PATH,
+                        .bounds = {100, 20},
+                        .resolved_bounds = {100, 20},
+                        .world_visible = true,
+                        .world_opacity = 1,
+                        .world_transform = {.m00 = 1, .m11 = 1, .tx = 10, .ty = 20}};
+    AfScene scene = {.nodes = &node, .count = 1, .capacity = 1, .paths = &paths};
+    AfEditorSnapBounds bounds;
+    CHECK(af_editor_scene_node_bounds(&scene, &node, false, &bounds));
+    CHECK(fabsf(bounds.minimum.x - 10) < .001F && fabsf(bounds.maximum.x - 110) < .001F);
+    CHECK(fabsf(bounds.minimum.y + 55) < .001F && fabsf(bounds.maximum.y - 20) < .001F);
+    node.world_transform = (AfAffine2){.m01 = -1, .m10 = 1, .tx = 10, .ty = 20};
+    CHECK(af_editor_scene_node_bounds(&scene, &node, false, &bounds));
+    CHECK(fabsf(bounds.maximum.x - 85) < .001F && fabsf(bounds.maximum.y - 120) < .001F);
+    node.world_visible = false;
+    CHECK(!af_editor_scene_node_bounds(&scene, &node, false, &bounds));
+    return true;
+}
+
 int main(void) {
     static const struct {
         const char *name;
         bool (*function)(void);
-    } tests[] = {{"action registry", af_test_action_registry},
-                 {"command palette", af_test_command_palette},
-                 {"preferences round trip", af_test_preferences_round_trip},
-                 {"preferences shortcut application", af_test_preferences_apply_shortcuts},
-                 {"preferences malformed input", af_test_preferences_reject_malformed},
-                 {"workspace round trip", af_test_workspace_round_trip},
-                 {"scene workflow tools", af_test_scene_workflow_tools}};
+    } tests[] = {
+        {"curve extrema and transformed bounds", af_test_curve_world_bounds},
+        {"export scope, hierarchy, animation and isolation", af_test_export_scope},
+        {"export preserves flow placement and scaled canvas", af_test_export_flow_and_canvas_scale},
+        {"export preserves decoded images", af_test_export_image_pixels},
+        {"object alignment snapping", af_test_object_snapping},
+        {"adaptive visual grid", af_test_adaptive_grid},
+        {"action registry", af_test_action_registry},
+        {"command palette", af_test_command_palette},
+        {"preferences round trip", af_test_preferences_round_trip},
+        {"preferences shortcut application", af_test_preferences_apply_shortcuts},
+        {"preferences malformed input", af_test_preferences_reject_malformed},
+        {"workspace round trip", af_test_workspace_round_trip},
+        {"scene workflow tools", af_test_scene_workflow_tools}};
     size_t passed = 0U;
     for (size_t index = 0U; index < sizeof(tests) / sizeof(tests[0]); ++index) {
         if (tests[index].function()) {

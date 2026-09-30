@@ -173,25 +173,30 @@ static uint64_t af_editor_hit_test(AfEditorState *editor, AfVec2 project_point) 
 }
 
 static void af_editor_render_grid(AfEditorState *editor, int width, int height, AfAffine2 camera) {
-    float canvas_x = 0.0F;
-    float canvas_y = 0.0F;
-    float canvas_width = 0.0F;
-    float canvas_height = 0.0F;
-    float spacing = editor->grid_step * editor->zoom;
-    float x = 0.0F;
-    float y = 0.0F;
+    float canvas_x, canvas_y, canvas_width, canvas_height;
     af_editor_layout(editor, width, height, &canvas_x, &canvas_y, &canvas_width, &canvas_height);
-    if (!editor->grid_visible || spacing < 5.0F) {
+    float step = af_editor_grid_interval(editor->grid_step, editor->zoom);
+    if (!editor->grid_visible || step <= 0)
         return;
-    }
-    x = camera.tx + floorf((canvas_x - camera.tx) / spacing) * spacing;
-    for (; x < canvas_x + canvas_width; x += spacing) {
-        af_editor_add_rect(editor, x, canvas_y, 1.0F, canvas_height,
-                           (AfColor){0.19F, 0.21F, 0.25F, 1.0F}, -90000);
-    }
-    y = camera.ty + floorf((canvas_y - camera.ty) / spacing) * spacing;
-    for (; y < canvas_y + canvas_height; y += spacing) {
-        af_editor_add_rect(editor, canvas_x, y, canvas_width, 1.0F,
-                           (AfColor){0.19F, 0.21F, 0.25F, 1.0F}, -90000);
+    while (fmaxf(canvas_width, canvas_height) / (step * editor->zoom) > 256)
+        step *= 5;
+    const float spacing = step * editor->zoom;
+    const float alpha = af_editor_clamp((spacing - 8) / 22, .08F, .7F);
+    for (uint32_t axis = 0; axis < 2; ++axis) {
+        const float low = axis ? canvas_y : canvas_x, extent = axis ? canvas_height : canvas_width;
+        const double origin = axis ? camera.ty : camera.tx;
+        const double first = ceil(((double)low - origin) / (double)spacing);
+        for (uint32_t i = 0; i < 257; ++i) {
+            const double ordinal = first + i;
+            const float pixel = (float)(origin + ordinal * (double)spacing);
+            if (pixel >= low + extent)
+                break;
+            const bool major = fabs(remainder(ordinal, 5)) < .01;
+            af_editor_add_rect(editor, axis ? canvas_x : pixel, axis ? pixel : canvas_y,
+                               axis ? canvas_width : 1, axis ? 1 : canvas_height,
+                               major ? (AfColor){.25F, .28F, .34F, .8F}
+                                     : (AfColor){.24F, .27F, .32F, alpha},
+                               -90000);
+        }
     }
 }
