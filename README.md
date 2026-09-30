@@ -146,8 +146,12 @@ IME/bidi editing, live baseline links, font axes and typography animation remain
 Select an object with Pick to access the contextual **Fill** dropdown: Solid, Linear, Radial,
 or Conic. Double-click the gradient ramp or canvas gradient line to add a stop; click a stop to
 select it, then use the inspector color picker or hex field for its color and alpha. Press Delete
-to remove the selected stop (at least two remain; up to 16 are supported). Adjust stop position, reverse the gradient, and change its
-angle or radius. Drag the canvas handles to position the gradient; Escape cancels the drag.
+to remove the selected stop (at least two remain; up to 16 are supported). Drag any stop on the
+toolbar ramp, including the first and last, to change its position. Intermediate canvas stops can
+also be dragged along the gradient line. Stops retain their colors and selection when moved past
+other stops. Drag the hollow cyan start and orange end handles on the canvas to position the
+gradient; the end handle adjusts radius/angle for radial and conic fills. Reverse the gradient or
+adjust angle/radius using the toolbar buttons. Escape cancels a drag.
 Each edit supports undo/redo, and gradients persist in native projects and playback. Constrained
 export formats retain their existing gradient compatibility limitations.
 

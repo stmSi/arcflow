@@ -1154,6 +1154,8 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
     float canvas_width = 0.0F;
     float canvas_height = 0.0F;
     editor->mouse_position = (AfVec2){x, y};
+    if (editor->gradient_drag)
+        return;
     if (editor->inspector_field != AF_EDITOR_INSPECTOR_NONE &&
         !af_editor_finish_inspector_edit(editor, true)) {
         return;
@@ -1729,8 +1731,7 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
     editor->text_dragging = false;
     editor->snap_result = (AfEditorSnapResult){0};
     if (editor->gradient_drag) {
-        editor->gradient_drag = 0;
-        (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_STYLE, false);
+        af_editor_gradient_finish_drag(editor, false);
         return;
     }
     if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY && editor->hierarchy_drag_started) {
@@ -1853,8 +1854,9 @@ static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
             --editor->font_scroll;
         return;
     }
-    if (af_editor_menu_blocked(editor) || editor->top_menu != AF_EDITOR_MENU_NONE ||
-        editor->choice_menu || editor->context_menu != AF_EDITOR_CONTEXT_NONE)
+    if (editor->gradient_drag || af_editor_menu_blocked(editor) ||
+        editor->top_menu != AF_EDITOR_MENU_NONE || editor->choice_menu ||
+        editor->context_menu != AF_EDITOR_CONTEXT_NONE)
         return;
     const float direction = event->direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0F : 1.0F;
     const float scroll_x = event->x * direction;
@@ -1942,18 +1944,8 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
         return;
     }
     if (editor->gradient_drag) {
-        if (event->key == SDLK_ESCAPE) {
-            for (uint32_t i = 0; i < editor->selection_drag_count; ++i) {
-                AfStyle *style = af_project_find_node_style(
-                    &editor->project, editor->selection_drag_before[i].node.id);
-                if (style)
-                    *style = editor->selection_drag_before[i].style;
-            }
-            editor->selection_drag_count = 0;
-            editor->gradient_drag = 0;
-            af_editor_update_preview(editor);
-            af_editor_status(editor, "Gradient drag canceled");
-        }
+        if (event->key == SDLK_ESCAPE)
+            af_editor_gradient_finish_drag(editor, true);
         return;
     }
     if (editor->text_panel_open) {
@@ -2303,6 +2295,8 @@ static void af_editor_mouse_scale(const AfEditorState *editor, float *x, float *
 
 static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int width, int height) {
     if (event->type == SDL_EVENT_WINDOW_FOCUS_LOST || event->type == SDL_EVENT_WINDOW_MOUSE_LEAVE) {
+        if (event->type == SDL_EVENT_WINDOW_FOCUS_LOST)
+            af_editor_gradient_finish_drag(editor, false);
         editor->top_menu = AF_EDITOR_MENU_NONE;
         editor->choice_menu = 0;
         editor->context_menu = AF_EDITOR_CONTEXT_NONE;
@@ -2336,12 +2330,14 @@ static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int 
         af_editor_mouse_scale(editor, &button.x, &button.y);
         af_editor_mouse_down(editor, width, height, &button, SDL_GetModState());
     } else if (event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
-        if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY &&
+        if ((editor->gradient_drag || editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY) &&
             event->button.button != SDL_BUTTON_LEFT)
             return;
         float x = event->button.x, y = event->button.y;
         af_editor_mouse_scale(editor, &x, &y);
         editor->mouse_position = (AfVec2){x, y};
+        if (editor->gradient_drag)
+            af_editor_gradient_motion(editor, width, height, x, y);
         if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY &&
             hypotf(x - editor->drag_start_mouse.x, y - editor->drag_start_mouse.y) > 5.0F)
             editor->hierarchy_drag_started = true;
@@ -3073,16 +3069,17 @@ static AfResult af_editor_vector_package_smoke(AfEditorState *editor, int width,
     const AfVec2 moved_end = {gradient_end.x + 30, gradient_end.y + 10};
     const AfVec2 screen_end = af_affine_transform_point(gradient_frame, moved_end);
     AfPaint before_drag = style->fill;
-    af_editor_begin_selection_modify(editor, false);
-    editor->gradient_drag = 2;
+    const AfVec2 original_screen_end = af_affine_transform_point(gradient_frame, gradient_end);
+    VECTOR_CHECK(af_editor_gradient_begin_drag(editor, width, height, AF_EDITOR_GRADIENT_DRAG_END,
+                                               original_screen_end.x, original_screen_end.y));
     af_editor_gradient_motion(editor, width, height, screen_end.x, screen_end.y);
     af_editor_mouse_up(editor, width, height);
     VECTOR_CHECK(fabsf(style->fill.end.x - moved_end.x) < .001F &&
                  fabsf(style->fill.end.y - moved_end.y) < .001F);
     VECTOR_CHECK(af_editor_history_undo(&editor->history, &editor->project) == AF_RESULT_SUCCESS);
     VECTOR_CHECK(memcmp(&before_drag, &style->fill, sizeof(AfPaint)) == 0);
-    af_editor_begin_selection_modify(editor, false);
-    editor->gradient_drag = 2;
+    VECTOR_CHECK(af_editor_gradient_begin_drag(editor, width, height, AF_EDITOR_GRADIENT_DRAG_END,
+                                               original_screen_end.x, original_screen_end.y));
     af_editor_gradient_motion(editor, width, height, screen_end.x, screen_end.y);
     af_editor_key(editor, width, height, &(SDL_KeyboardEvent){.key = SDLK_ESCAPE, .down = true});
     VECTOR_CHECK(memcmp(&before_drag, &style->fill, sizeof(AfPaint)) == 0 &&
@@ -3124,6 +3121,7 @@ static AfResult af_editor_vector_package_smoke(AfEditorState *editor, int width,
     VECTOR_CHECK(style->fill.stop_count == 4); /* Double-clicking a stop selects it. */
     stop_click.clicks = 1;
     af_editor_mouse_down(editor, width, height, &stop_click, SDL_KMOD_NONE);
+    af_editor_mouse_up(editor, width, height);
     af_editor_begin_inspector_edit(editor, AF_EDITOR_INSPECTOR_COLOR_HEX);
     af_editor_append_inspector_text(editor, "#33CC66FF");
     VECTOR_CHECK(af_editor_finish_inspector_edit(editor, true));
@@ -3494,6 +3492,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->vector_package_smoke = true;
             if (editor->maximum_frames == 0U)
                 editor->maximum_frames = 4U;
+        } else if (strcmp(arguments[index], "--gradient-drag-smoke") == 0) {
+            editor->gradient_drag_smoke = true;
+            if (editor->maximum_frames == 0U)
+                editor->maximum_frames = 4U;
         } else if (strcmp(arguments[index], "--boolean-smoke") == 0) {
             editor->boolean_smoke = true;
             if (editor->maximum_frames == 0U)
@@ -3563,10 +3565,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->resize_smoke || editor->context_smoke || editor->tooltip_smoke ||
         editor->selection_smoke || editor->outline_smoke || editor->vector_tools_smoke ||
         editor->vector_preview_smoke || editor->pen_close_smoke || editor->compound_smoke ||
-        editor->boolean_smoke || editor->vector_package_smoke || editor->vfx_smoke ||
-        editor->particle_view_smoke || editor->vector_animation_smoke || editor->image_smoke ||
-        editor->export_smoke || editor->snapping_smoke || editor->menu_smoke ||
-        editor->workflow_smoke || editor->platform_smoke || editor->release_smoke ||
-        editor->onboarding_smoke;
+        editor->boolean_smoke || editor->vector_package_smoke || editor->gradient_drag_smoke ||
+        editor->vfx_smoke || editor->particle_view_smoke || editor->vector_animation_smoke ||
+        editor->image_smoke || editor->export_smoke || editor->snapping_smoke ||
+        editor->menu_smoke || editor->workflow_smoke || editor->platform_smoke ||
+        editor->release_smoke || editor->onboarding_smoke;
     af_editor_derive_package_path(editor);
 }

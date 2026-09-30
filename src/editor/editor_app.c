@@ -160,6 +160,14 @@ typedef enum AfEditorTopMenu {
     AF_EDITOR_MENU_HELP
 } AfEditorTopMenu;
 
+typedef enum AfEditorGradientDrag {
+    AF_EDITOR_GRADIENT_DRAG_NONE = 0,
+    AF_EDITOR_GRADIENT_DRAG_START,
+    AF_EDITOR_GRADIENT_DRAG_END,
+    AF_EDITOR_GRADIENT_DRAG_CANVAS_STOP,
+    AF_EDITOR_GRADIENT_DRAG_TOOLBAR_STOP
+} AfEditorGradientDrag;
+
 typedef enum AfEditorDialogAction {
     AF_EDITOR_DIALOG_NONE = 0,
     AF_EDITOR_DIALOG_OPEN_PROJECT,
@@ -353,7 +361,13 @@ typedef struct AfEditorState {
     bool tool_pen_has_outgoing;
     uint64_t gradient_target;
     uint32_t gradient_stop;
-    uint32_t gradient_drag;
+    AfEditorGradientDrag gradient_drag;
+    AfVec2 gradient_drag_origin;
+    AfVec2 gradient_drag_pointer;
+    float gradient_drag_stop_offset;
+    uint32_t gradient_drag_stop_before;
+    bool gradient_drag_changed;
+    bool gradient_drag_was_dirty;
     bool gradient_stop_focus;
     uint32_t choice_menu; /* 1: fill type, 2: animation property. */
     uint32_t choice_index;
@@ -418,6 +432,7 @@ typedef struct AfEditorState {
     bool compound_smoke;
     bool boolean_smoke;
     bool vector_package_smoke;
+    bool gradient_drag_smoke;
     bool text_panel_smoke;
     bool vfx_smoke;
     bool particle_view_smoke;
@@ -604,6 +619,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_menu_smoke.inc"
 #include "editor/editor_app_snap_smoke.inc"
 #include "editor/editor_app_export_smoke.inc"
+#include "editor/editor_app_gradient_smoke.inc"
 // clang-format on
 
 int af_editor_run(int argument_count, char **arguments) {
@@ -893,6 +909,11 @@ int af_editor_run(int argument_count, char **arguments) {
         }
         if (editor.vector_package_smoke && editor.rendered_frames == 0U) {
             result = af_editor_vector_package_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS)
+                goto cleanup;
+        }
+        if (editor.gradient_drag_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_gradient_drag_smoke(&editor, width, height);
             if (result != AF_RESULT_SUCCESS)
                 goto cleanup;
         }
