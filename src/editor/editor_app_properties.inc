@@ -161,12 +161,16 @@ static AfEditorInspectorField af_editor_inspector_field_at(const AfEditorState *
         return AF_EDITOR_INSPECTOR_COLOR_HEX;
     }
     if (y >= AF_EDITOR_COLOR_COMPONENT_Y &&
-        y < AF_EDITOR_COLOR_COMPONENT_Y + AF_EDITOR_INSPECTOR_FIELD_HEIGHT) {
-        const float field_width = (available - 12.0F) * 0.25F;
-        const uint32_t component = (uint32_t)((x - panel_x) / (field_width + 4.0F));
-        const float component_x = panel_x + (float)component * (field_width + 4.0F);
-        if (component < 4U && x < component_x + field_width) {
-            return (AfEditorInspectorField)(AF_EDITOR_INSPECTOR_COLOR_R + component);
+        y < AF_EDITOR_COLOR_COMPONENT_Y + 2.0F * AF_EDITOR_INSPECTOR_FIELD_STEP) {
+        const float field_width = (available - 6.0F) * 0.5F;
+        const uint32_t column = x >= panel_x + field_width + 6.0F ? 1U : 0U;
+        const uint32_t row =
+            (uint32_t)((y - AF_EDITOR_COLOR_COMPONENT_Y) / AF_EDITOR_INSPECTOR_FIELD_STEP);
+        const float component_x = panel_x + (float)column * (field_width + 6.0F);
+        const float row_y = AF_EDITOR_COLOR_COMPONENT_Y + (float)row * AF_EDITOR_INSPECTOR_FIELD_STEP;
+        if (x >= component_x && x < component_x + field_width &&
+            y < row_y + AF_EDITOR_INSPECTOR_FIELD_HEIGHT) {
+            return (AfEditorInspectorField)(AF_EDITOR_INSPECTOR_COLOR_R + row * 2U + column);
         }
         return AF_EDITOR_INSPECTOR_NONE;
     }
@@ -202,8 +206,11 @@ static bool af_editor_inspector_field_rect(const AfEditorState *editor, int widt
                                            float *out_width) {
     const float panel_x = (float)width - editor->right_width + 18.0F;
     const float available = editor->right_width - 36.0F;
-    if (field >= AF_EDITOR_INSPECTOR_POSITION_X && field <= AF_EDITOR_INSPECTOR_LAYER) {
-        const uint32_t offset = (uint32_t)(field - AF_EDITOR_INSPECTOR_POSITION_X);
+    if ((field >= AF_EDITOR_INSPECTOR_POSITION_X && field <= AF_EDITOR_INSPECTOR_LAYER) ||
+        (field >= AF_EDITOR_INSPECTOR_COLOR_R && field <= AF_EDITOR_INSPECTOR_COLOR_A)) {
+        const AfEditorInspectorField first = field <= AF_EDITOR_INSPECTOR_COLOR_A
+            ? AF_EDITOR_INSPECTOR_COLOR_R : AF_EDITOR_INSPECTOR_POSITION_X;
+        const uint32_t offset = (uint32_t)(field - first);
         const uint32_t column = offset % 2U;
         const float field_width = (available - 6.0F) * 0.5F;
         if (out_x != NULL) {
@@ -214,7 +221,7 @@ static bool af_editor_inspector_field_rect(const AfEditorState *editor, int widt
         }
         return true;
     }
-    if (field == AF_EDITOR_INSPECTOR_OUTLINE_WIDTH) {
+    if (field == AF_EDITOR_INSPECTOR_COLOR_HEX || field == AF_EDITOR_INSPECTOR_OUTLINE_WIDTH) {
         if (out_x != NULL) {
             *out_x = panel_x;
         }
@@ -254,7 +261,18 @@ static bool af_editor_inspector_numeric_value(const AfEditorState *editor,
     if (node == NULL || out_value == NULL) {
         return false;
     }
-    if (field == AF_EDITOR_INSPECTOR_POSITION_X) {
+    if (field >= AF_EDITOR_INSPECTOR_COLOR_HEX && field <= AF_EDITOR_INSPECTOR_COLOR_A) {
+        const AfColor color = af_editor_inspector_color(editor, node);
+        if (field == AF_EDITOR_INSPECTOR_COLOR_HEX) {
+            const uint32_t red = (uint32_t)roundf(af_editor_clamp(color.r, 0.0F, 1.0F) * 255.0F);
+            const uint32_t green = (uint32_t)roundf(af_editor_clamp(color.g, 0.0F, 1.0F) * 255.0F);
+            const uint32_t blue = (uint32_t)roundf(af_editor_clamp(color.b, 0.0F, 1.0F) * 255.0F);
+            *out_value = (float)((red << 16U) | (green << 8U) | blue);
+        } else {
+            const float components[] = {color.r, color.g, color.b, color.a};
+            *out_value = roundf(components[field - AF_EDITOR_INSPECTOR_COLOR_R] * 255.0F);
+        }
+    } else if (field == AF_EDITOR_INSPECTOR_POSITION_X) {
         *out_value = node->local_transform.position.x;
     } else if (field == AF_EDITOR_INSPECTOR_POSITION_Y) {
         *out_value = node->local_transform.position.y;
@@ -298,6 +316,9 @@ static float af_editor_inspector_step_size(AfEditorInspectorField field) {
 }
 
 static float af_editor_inspector_scrub_sensitivity(AfEditorInspectorField field) {
+    if (field >= AF_EDITOR_INSPECTOR_COLOR_HEX && field <= AF_EDITOR_INSPECTOR_COLOR_A) {
+        return 1.0F;
+    }
     if (field == AF_EDITOR_INSPECTOR_SCALE_X || field == AF_EDITOR_INSPECTOR_SCALE_Y) {
         return 0.005F;
     }
@@ -408,7 +429,7 @@ static AfEditorMergeKey af_editor_inspector_merge_key(AfEditorInspectorField fie
     return AF_EDITOR_MERGE_TRANSFORM;
 }
 
-static bool af_editor_apply_inspector_color(AfEditorState *editor, AfColor color) {
+static bool af_editor_apply_inspector_color(AfEditorState *editor, AfColor color, bool allow_merge) {
     const AfStyle *selected_style =
         af_project_find_node_style(&editor->project, editor->selected_id);
     const bool animatable = !editor->color_target_outline &&
@@ -427,10 +448,10 @@ static bool af_editor_apply_inspector_color(AfEditorState *editor, AfColor color
     if (!animatable || !af_editor_transform_key_drag_covers_selection(editor)) {
         (void)af_editor_commit_selection_modify(
             editor, editor->color_target_outline ? AF_EDITOR_MERGE_STYLE : AF_EDITOR_MERGE_FILL,
-            false);
+            allow_merge);
     }
     if (animatable) {
-        (void)af_editor_commit_transform_key_drag(editor, false);
+        (void)af_editor_commit_transform_key_drag(editor, allow_merge);
     }
     af_editor_status(editor,
                      editor->color_target_outline ? "Outline color entered" : "Fill color entered");
@@ -463,6 +484,21 @@ static bool af_editor_apply_inspector_number(AfEditorState *editor, AfEditorInsp
         !(field >= AF_EDITOR_INSPECTOR_COLOR_HEX && field <= AF_EDITOR_INSPECTOR_COLOR_A);
     if (editor->selected_id == 0U) {
         return false;
+    }
+    if (field >= AF_EDITOR_INSPECTOR_COLOR_HEX && field <= AF_EDITOR_INSPECTOR_COLOR_A) {
+        const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
+        AfColor color = af_editor_inspector_color(editor, node);
+        if (field == AF_EDITOR_INSPECTOR_COLOR_HEX) {
+            const uint32_t rgb = (uint32_t)roundf(af_editor_clamp(value, 0.0F, 16777215.0F));
+            color.r = (float)((rgb >> 16U) & 255U) / 255.0F;
+            color.g = (float)((rgb >> 8U) & 255U) / 255.0F;
+            color.b = (float)(rgb & 255U) / 255.0F;
+        } else {
+            float *components[] = {&color.r, &color.g, &color.b, &color.a};
+            *components[field - AF_EDITOR_INSPECTOR_COLOR_R] =
+                roundf(af_editor_clamp(value, 0.0F, 255.0F)) / 255.0F;
+        }
+        return af_editor_apply_inspector_color(editor, color, allow_merge);
     }
     if (field == AF_EDITOR_INSPECTOR_WIDTH || field == AF_EDITOR_INSPECTOR_HEIGHT) {
         const AfSceneNode *shape = af_scene_find_const(&editor->project.scene, editor->selected_id);
@@ -641,7 +677,8 @@ static bool af_editor_step_inspector_value(AfEditorState *editor, AfEditorInspec
     if (direction == 0 || !af_editor_inspector_numeric_value(editor, field, &value)) {
         return false;
     }
-    if ((modifiers & SDL_KMOD_SHIFT) != 0U && field != AF_EDITOR_INSPECTOR_LAYER) {
+    if ((modifiers & SDL_KMOD_SHIFT) != 0U && field > AF_EDITOR_INSPECTOR_COLOR_A &&
+        field != AF_EDITOR_INSPECTOR_LAYER) {
         multiplier = 0.1F;
     } else if ((modifiers & SDL_KMOD_CTRL) != 0U) {
         multiplier = 10.0F;
@@ -715,7 +752,7 @@ static bool af_editor_finish_inspector_edit(AfEditorState *editor, bool commit) 
     if (field == AF_EDITOR_INSPECTOR_COLOR_HEX) {
         AfColor color = {0};
         if (af_editor_inspector_parse_hex_color(editor->inspector_buffer, &color)) {
-            applied = af_editor_apply_inspector_color(editor, color);
+            applied = af_editor_apply_inspector_color(editor, color, false);
         }
     } else if (field >= AF_EDITOR_INSPECTOR_COLOR_R && field <= AF_EDITOR_INSPECTOR_COLOR_A) {
         float component = 0.0F;
@@ -726,7 +763,7 @@ static bool af_editor_finish_inspector_edit(AfEditorState *editor, bool commit) 
             float *components[4] = {&color.r, &color.g, &color.b, &color.a};
             *components[field - AF_EDITOR_INSPECTOR_COLOR_R] =
                 af_editor_clamp(component / 255.0F, 0.0F, 1.0F);
-            applied = af_editor_apply_inspector_color(editor, color);
+            applied = af_editor_apply_inspector_color(editor, color, false);
         }
     } else if (field == AF_EDITOR_INSPECTOR_LAYER) {
         int32_t integer = 0;
@@ -1411,10 +1448,8 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
             if (af_editor_step_inspector_value(editor, field, step)) {
                 af_editor_status(editor, step > 0 ? "Value increased" : "Value decreased");
             }
-        } else if (field >= AF_EDITOR_INSPECTOR_POSITION_X) {
-            af_editor_begin_inspector_scrub(editor, field, x, y);
         } else {
-            af_editor_begin_inspector_edit(editor, field);
+            af_editor_begin_inspector_scrub(editor, field, x, y);
         }
         return;
     }

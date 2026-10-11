@@ -76,14 +76,16 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                 "Drag a bounded three-turn editable spiral.",
                 "Click for artistic text, drag a paragraph frame, or click existing text to edit."};
             static const char *const shortcuts[AF_EDITOR_TOOL_COUNT] = {
-                "V", "Shift+V", "X", "D", "J", "R", "Shift+R", "O",
+                "V (toggle)", "V / Shift+V", "X", "D", "J", "R", "Shift+R", "O",
                 "L", "P",       "B", "Y", "A", "C", "I",       "T"};
             if (tool < AF_EDITOR_TOOL_COUNT && local_x < button_x + 38.0F) {
                 return (AfEditorTooltip){
                     .id = 10U + tool,
                     .title = af_editor_vector_tool_name((AfEditorVectorTool)tool),
                     .summary = summaries[tool],
-                    .details = af_editor_vector_tool_is_construction((AfEditorVectorTool)tool)
+                    .details = tool <= AF_EDITOR_TOOL_NODE
+                                   ? "Press V to toggle between Pick and Node; Shift+V selects Node."
+                               : af_editor_vector_tool_is_construction((AfEditorVectorTool)tool)
                                    ? "The result is undoable and uses Arcflow's animatable vector "
                                      "properties."
                                    : "Tool state stays active until another tool is selected.",
@@ -226,13 +228,14 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                                     AF_EDITOR_INSPECTOR_FIELD_HEIGHT) ||
             af_editor_point_in_rect(mouse, panel_x, AF_EDITOR_COLOR_COMPONENT_Y,
                                     editor->right_width - 36.0F,
-                                    AF_EDITOR_INSPECTOR_FIELD_HEIGHT)) {
+                                    2.0F * AF_EDITOR_INSPECTOR_FIELD_STEP)) {
             return (AfEditorTooltip){
                 .id = UINT64_C(0x21000),
                 .title = "Exact Color",
-                .summary = "Click to enter hexadecimal or 0-255 RGBA values.",
-                .details = "Hex accepts #RGB, #RGBA, #RRGGBB, and #RRGGBBAA.",
-                .shortcut = "Enter applies · Esc cancels · Tab moves to the next field"};
+                .summary = "Click to type, drag horizontally, or use the −/+ buttons.",
+                .details = "Hex accepts #RGB, #RGBA, #RRGGBB, and #RRGGBBAA. Hex dragging and "
+                           "stepping adjust RGB while preserving alpha. RGBA values use 0–255.",
+                .shortcut = "Shift fine drag · Ctrl coarse · Enter applies · Tab next"};
         }
         if (af_editor_point_in_rect(mouse, panel_x + editor->right_width - 36.0F - 76.0F,
                                     AF_EDITOR_INSPECTOR_LABEL_Y - 4.0F, 76.0F, 17.0F)) {

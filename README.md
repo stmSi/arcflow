@@ -59,7 +59,8 @@ The red playhead can also be grabbed and dragged from anywhere along its full ve
 In narrow workspaces, timeline controls fit the available width and the active clip tab cycles
 through clips when clicked. Wheel zoom follows fractional trackpad input and stays anchored to
 the pointer. F10 opens the live profiler with CPU upload and GPU frame timings.
-Tool shortcuts are `V` Pick, `Shift+V` Node, `X` Scissors, `D` Segment Delete, `J` Knife, `R` Rectangle,
+Press `V` to toggle between Pick and Node; from another tool, `V` selects Pick.
+`Shift+V` selects Node directly. Other shortcuts are `X` Scissors, `D` Segment Delete, `J` Knife, `R` Rectangle,
 `Shift+R` Rounded Rectangle, `O` Ellipse, `L` Line, `P` Pen, `B` Pencil, `Y` Polygon, `A` Star,
 `C` Arc, and `I` Spiral. In Node mode, the
 existing `C`, `O`, `I`, `F`, `Shift+R`, and `Shift+M` path-editing shortcuts keep their contextual
@@ -68,9 +69,11 @@ Inspector values are directly editable: click the HEX/RGBA, position, width/heig
 rotation, opacity, radius, layer, or stroke-width field and type. `Enter` applies, `Esc` cancels,
 `Tab` advances, and `Shift+Tab` moves backward; standard `Ctrl+A/C/X/V` editing works. Hex colors
 accept `#RGB`, `#RGBA`, `#RRGGBB`, and `#RRGGBBAA`; RGBA component fields use 0–255 values.
-Drag a numeric field horizontally to scrub it (`Shift` for fine control, `Ctrl` for coarse control),
+Drag any numeric or color field horizontally to scrub it (`Shift` for fine control, `Ctrl` for coarse control),
 or use its embedded `−`/`+` buttons for quick steps. `RATIO` links width/height and scale X/Y while
 typing, scrubbing, or stepping.
+RGBA fields step in 0–255 units. Hex dragging and stepping adjust the RGB hex value while
+preserving alpha; use the A field to adjust transparency. Each drag is one undo step.
 New stars and polygons retain their point-count and inner-radius settings in the inspector.
 Canvas **Snap** aligns object left/right/top/bottom edges and horizontal/vertical centers within
 8 screen pixels. Moves preserve group spacing and parent transforms; Pen and node editing use the

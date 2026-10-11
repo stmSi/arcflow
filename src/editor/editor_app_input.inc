@@ -2069,7 +2069,11 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     if (!control && !alt && !editor->timeline_focus) {
         AfEditorVectorTool shortcut_tool = AF_EDITOR_TOOL_COUNT;
         if (event->key == SDLK_V) {
-            shortcut_tool = shift ? AF_EDITOR_TOOL_NODE : AF_EDITOR_TOOL_SELECT;
+            if (event->repeat)
+                return;
+            shortcut_tool = shift || editor->active_tool == AF_EDITOR_TOOL_SELECT
+                                ? AF_EDITOR_TOOL_NODE
+                                : AF_EDITOR_TOOL_SELECT;
         } else if (event->key == SDLK_X) {
             shortcut_tool = AF_EDITOR_TOOL_SCISSORS;
         } else if (event->key == SDLK_D) {
@@ -2389,6 +2393,25 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
     const SDL_KeyboardEvent node_key = {.key = SDLK_V, .mod = SDL_KMOD_SHIFT, .down = true};
     af_editor_key(editor, width, height, &node_key);
     if (editor->active_tool != AF_EDITOR_TOOL_NODE || editor->profiler_visible != saved_profiler)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    const SDL_KeyboardEvent toggle_key = {.key = SDLK_V, .down = true};
+    for (uint32_t index = 0U; index < 4U; ++index) {
+        const AfEditorVectorTool expected =
+            (index & 1U) == 0U ? AF_EDITOR_TOOL_SELECT : AF_EDITOR_TOOL_NODE;
+        af_editor_key(editor, width, height, &toggle_key);
+        if (editor->active_tool != expected)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+        af_editor_key(editor, width, height,
+                      &(SDL_KeyboardEvent){.key = SDLK_V, .down = true, .repeat = true});
+        if (editor->active_tool != expected)
+            return af_editor_interaction_smoke_failure(editor, __LINE__);
+    }
+    af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_RECTANGLE);
+    af_editor_key(editor, width, height, &toggle_key);
+    if (editor->active_tool != AF_EDITOR_TOOL_SELECT)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_key(editor, width, height, &node_key);
+    if (editor->active_tool != AF_EDITOR_TOOL_NODE)
         return af_editor_interaction_smoke_failure(editor, __LINE__);
     const SDL_KeyboardEvent profiler_key = {.key = SDLK_F10, .down = true};
     af_editor_key(editor, width, height, &profiler_key);
@@ -3056,7 +3079,7 @@ static AfResult af_editor_vector_package_smoke(AfEditorState *editor, int width,
     VECTOR_CHECK(style->fill.type == AF_PAINT_LINEAR_GRADIENT && style->fill.stop_count == 2);
     af_editor_gradient_action(editor, 3);
     VECTOR_CHECK(style->fill.stop_count == 3);
-    VECTOR_CHECK(af_editor_apply_inspector_color(editor, (AfColor){.2F, .4F, .8F, .6F}));
+    VECTOR_CHECK(af_editor_apply_inspector_color(editor, (AfColor){.2F, .4F, .8F, .6F}, false));
     VECTOR_CHECK(style->fill.type == AF_PAINT_LINEAR_GRADIENT &&
                  fabsf(style->fill.stops[1].color.a - .6F) < .001F);
     af_editor_gradient_action(editor, 7);
@@ -3467,6 +3490,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->outline_smoke = true;
         } else if (strcmp(arguments[index], "--inspector-smoke") == 0) {
             editor->inspector_smoke = true;
+        } else if (strcmp(arguments[index], "--template-smoke") == 0) {
+            editor->template_smoke = true;
+            if (editor->maximum_frames == 0U)
+                editor->maximum_frames = 2U;
         } else if (strcmp(arguments[index], "--vector-tools-smoke") == 0) {
             editor->vector_tools_smoke = true;
         } else if (strcmp(arguments[index], "--pan-smoke") == 0) {
@@ -3568,7 +3595,7 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->boolean_smoke || editor->vector_package_smoke || editor->gradient_drag_smoke ||
         editor->vfx_smoke || editor->particle_view_smoke || editor->vector_animation_smoke ||
         editor->image_smoke || editor->export_smoke || editor->snapping_smoke ||
-        editor->menu_smoke || editor->workflow_smoke || editor->platform_smoke ||
-        editor->release_smoke || editor->onboarding_smoke;
+        editor->menu_smoke || editor->template_smoke || editor->workflow_smoke ||
+        editor->platform_smoke || editor->release_smoke || editor->onboarding_smoke;
     af_editor_derive_package_path(editor);
 }

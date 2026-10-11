@@ -73,18 +73,18 @@
 #define AF_EDITOR_COLOR_ALPHA_HEIGHT 14.0F
 #define AF_EDITOR_COLOR_HEX_Y 190.0F
 #define AF_EDITOR_COLOR_COMPONENT_Y 218.0F
-#define AF_EDITOR_INSPECTOR_LABEL_Y 249.0F
-#define AF_EDITOR_INSPECTOR_FIELD_Y 264.0F
+#define AF_EDITOR_INSPECTOR_LABEL_Y 279.0F
+#define AF_EDITOR_INSPECTOR_FIELD_Y 294.0F
 #define AF_EDITOR_INSPECTOR_FIELD_HEIGHT 26.0F
 #define AF_EDITOR_INSPECTOR_FIELD_STEP 30.0F
-#define AF_EDITOR_SHAPE_SETTINGS_Y 416.0F
-#define AF_EDITOR_CONVERT_PATH_Y 448.0F
-#define AF_EDITOR_STYLE_BAR_Y 480.0F
-#define AF_EDITOR_STYLE_ROW_Y 512.0F
-#define AF_EDITOR_LAYOUT_ROW_Y 548.0F
-#define AF_EDITOR_PARTICLE_LABEL_Y 591.0F
-#define AF_EDITOR_PARTICLE_PAGE_Y 608.0F
-#define AF_EDITOR_PARTICLE_ROW_Y 638.0F
+#define AF_EDITOR_SHAPE_SETTINGS_Y 446.0F
+#define AF_EDITOR_CONVERT_PATH_Y 478.0F
+#define AF_EDITOR_STYLE_BAR_Y 510.0F
+#define AF_EDITOR_STYLE_ROW_Y 542.0F
+#define AF_EDITOR_LAYOUT_ROW_Y 578.0F
+#define AF_EDITOR_PARTICLE_LABEL_Y 621.0F
+#define AF_EDITOR_PARTICLE_PAGE_Y 638.0F
+#define AF_EDITOR_PARTICLE_ROW_Y 668.0F
 #define AF_EDITOR_PARTICLE_ROW_STEP 29.0F
 #define AF_EDITOR_PARTICLE_ROW_COUNT 8U
 #define AF_EDITOR_PARTICLE_PAGE_COUNT 7U
@@ -416,6 +416,7 @@ typedef struct AfEditorState {
     bool selection_smoke;
     bool outline_smoke;
     bool inspector_smoke;
+    bool template_smoke;
     bool vector_tools_smoke;
     bool pan_smoke;
     uint32_t pan_sample_count;
@@ -620,6 +621,8 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_snap_smoke.inc"
 #include "editor/editor_app_export_smoke.inc"
 #include "editor/editor_app_gradient_smoke.inc"
+#include "editor/editor_app_template_smoke.inc"
+#include "editor/editor_app_color_input_smoke.inc"
 // clang-format on
 
 int af_editor_run(int argument_count, char **arguments) {
@@ -899,6 +902,11 @@ int af_editor_run(int argument_count, char **arguments) {
         }
         if (editor.export_smoke && editor.rendered_frames == 0U) {
             result = af_editor_export_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS)
+                goto cleanup;
+        }
+        if (editor.template_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_template_smoke(&editor, width, height);
             if (result != AF_RESULT_SUCCESS)
                 goto cleanup;
         }
@@ -1234,6 +1242,7 @@ int af_editor_run(int argument_count, char **arguments) {
                 field_click.x = panel_x + 40.0F;
                 field_click.y = AF_EDITOR_COLOR_HEX_Y + 12.0F;
                 af_editor_mouse_down(&editor, width, height, &field_click, SDL_KMOD_NONE);
+                af_editor_mouse_up(&editor, width, height);
                 af_editor_append_inspector_text(&editor, "#3366CC80");
             } else if (editor.inspector_smoke_stage == 2U) {
                 const AfSceneNode *before =
@@ -1325,6 +1334,12 @@ int af_editor_run(int argument_count, char **arguments) {
                     goto cleanup;
                 }
             }
+            ++editor.inspector_smoke_stage;
+        }
+        if (editor.inspector_smoke && editor.inspector_smoke_stage == 7U) {
+            result = af_editor_color_input_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS)
+                goto cleanup;
             ++editor.inspector_smoke_stage;
         }
         if (editor.outline_smoke) {

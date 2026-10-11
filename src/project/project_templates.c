@@ -386,6 +386,11 @@ AfResult af_project_template_build(AfProjectTemplateId id, AfAllocator *allocato
     }
     if (result == AF_RESULT_SUCCESS) {
         *out_project = project;
+        out_project->scene.paths = &out_project->path_data;
+        out_project->scene.styles = &out_project->style_data;
+        out_project->scene.layouts = &out_project->layout_data;
+        out_project->scene.particles = &out_project->particle_data;
+        out_project->scene.images = &out_project->image_data;
         project = (AfProject){0};
     }
     af_project_destroy(&project);

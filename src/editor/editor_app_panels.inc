@@ -385,7 +385,7 @@ static void af_editor_render_inspector_field(AfEditorState *editor, float x, flo
     const bool scrubbing = editor->drag_mode == AF_EDITOR_DRAG_INSPECTOR_SCRUB &&
                            editor->inspector_scrub_field == field;
     const bool active = editing || scrubbing;
-    const bool steppers = field >= AF_EDITOR_INSPECTOR_POSITION_X;
+    const bool steppers = field != AF_EDITOR_INSPECTOR_NONE;
     const bool hovered =
         af_editor_hovered_rect(editor, x, y, width, AF_EDITOR_INSPECTOR_FIELD_HEIGHT);
     char display[64];
@@ -513,7 +513,7 @@ static void af_editor_render_color_picker(AfEditorState *editor, float x,
                                      "HEX", hexadecimal, AF_EDITOR_INSPECTOR_COLOR_HEX);
     {
         const float available = editor->right_width - 36.0F;
-        const float field_width = (available - 12.0F) * 0.25F;
+        const float field_width = (available - 6.0F) * 0.5F;
         char values[4][16];
         const char *labels[4] = {"R", "G", "B", "A"};
         const AfEditorInspectorField fields[4] = {
@@ -525,7 +525,8 @@ static void af_editor_render_color_picker(AfEditorState *editor, float x,
         (void)snprintf(values[3], sizeof(values[3]), "%u", (uint32_t)roundf(color.a * 255.0F));
         for (uint32_t component = 0U; component < 4U; ++component) {
             af_editor_render_inspector_field(
-                editor, x + (float)component * (field_width + 4.0F), AF_EDITOR_COLOR_COMPONENT_Y,
+                editor, x + (float)(component % 2U) * (field_width + 6.0F),
+                AF_EDITOR_COLOR_COMPONENT_Y + (float)(component / 2U) * AF_EDITOR_INSPECTOR_FIELD_STEP,
                 field_width, labels[component], values[component], fields[component]);
         }
     }

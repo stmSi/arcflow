@@ -44,6 +44,12 @@ int main(void) {
         CHECK(info != NULL && info->slug != NULL && info->name != NULL);
         CHECK(af_project_template_find(info->slug) == info);
         CHECK(af_project_template_build(info->id, &allocator, 32U, &project) == AF_RESULT_SUCCESS);
+        /* Templates return an owning project, not references into their builder's stack. */
+        CHECK(project.scene.paths == &project.path_data);
+        CHECK(project.scene.styles == &project.style_data);
+        CHECK(project.scene.layouts == &project.layout_data);
+        CHECK(project.scene.particles == &project.particle_data);
+        CHECK(project.scene.images == &project.image_data);
         CHECK(af_project_validate(&project) == AF_RESULT_SUCCESS);
         CHECK(strcmp(project.metadata.project_id, "arcflow-project") != 0);
         CHECK(af_project_serialize(&project, &allocator, &text) == AF_RESULT_SUCCESS);

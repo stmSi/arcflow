@@ -335,6 +335,12 @@ static AfResult af_editor_adopt_project(AfEditorState *editor, AfProject *projec
     af_editor_collaboration_release(editor);
     af_project_destroy(&editor->project);
     editor->project = *project;
+    /* Scene data references belong to the new owner, not the temporary project. */
+    editor->project.scene.paths = &editor->project.path_data;
+    editor->project.scene.styles = &editor->project.style_data;
+    editor->project.scene.layouts = &editor->project.layout_data;
+    editor->project.scene.particles = &editor->project.particle_data;
+    editor->project.scene.images = &editor->project.image_data;
     *project = (AfProject){0};
     af_editor_history_clear(&editor->history);
     editor->selected_id = 0U;
@@ -368,22 +374,19 @@ static AfResult af_editor_adopt_project(AfEditorState *editor, AfProject *projec
 }
 
 static AfResult af_editor_new_project(AfEditorState *editor) {
-    AfProject project = {0};
     AfEditorState staging = {0};
     AfResult result = AF_RESULT_SUCCESS;
     if (!af_editor_confirm_discard(editor, "Create a new project?")) {
         return AF_RESULT_SUCCESS;
     }
-    result = af_project_create(&project, &editor->allocator, AF_EDITOR_PROJECT_CAPACITY);
+    result = af_project_create(&staging.project, &editor->allocator, AF_EDITOR_PROJECT_CAPACITY);
     if (result == AF_RESULT_SUCCESS) {
-        staging.project = project;
         result = af_editor_default_project(&staging);
-        project = staging.project;
     }
     if (result == AF_RESULT_SUCCESS) {
-        result = af_editor_adopt_project(editor, &project, NULL, false);
+        result = af_editor_adopt_project(editor, &staging.project, NULL, false);
     }
-    af_project_destroy(&project);
+    af_project_destroy(&staging.project);
     af_editor_status(editor, result == AF_RESULT_SUCCESS ? "New project" : "New project failed");
     return result;
 }
