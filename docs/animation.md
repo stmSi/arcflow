@@ -1,7 +1,8 @@
 # Animation
 
 Tracks target stable node IDs and one typed property: position, rotation, scale, skew, opacity, fill
-color, corner radius, or a path point/control. Keyframes store seconds, up to four value components, interpolation, and cubic
+color, corner radius, a path point/control, outline color, or gradient geometry/stop color/offset.
+Keyframes store seconds, up to four value components, interpolation, and cubic
 Bézier easing controls. No pointer is serialized.
 
 ## Authoring workflow

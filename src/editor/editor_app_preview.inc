@@ -32,7 +32,7 @@ static AfVec2 af_editor_node_pivot(const AfEditorState *editor, const AfSceneNod
 static void af_editor_update_preview(AfEditorState *editor) {
     const AfPath *selected_path =
         af_path_find_node_const(&editor->project.path_data, editor->selected_id);
-    if (selected_path == NULL && editor->selected_property >= AF_PROPERTY_PATH_POINT) {
+    if (selected_path == NULL && af_property_is_path(editor->selected_property)) {
         editor->selected_property = AF_PROPERTY_POSITION;
     } else if (selected_path != NULL &&
                editor->selected_path_command >= selected_path->command_count) {
@@ -42,7 +42,13 @@ static void af_editor_update_preview(AfEditorState *editor) {
     editor->preview_scene.count = editor->project.scene.count;
     af_editor_prepare_render_paths(editor);
     editor->preview_scene.paths = &editor->render_path_data;
-    editor->preview_scene.styles = &editor->project.style_data;
+    editor->preview_style_data = editor->project.style_data;
+    editor->preview_style_data.styles = editor->preview_styles;
+    editor->preview_style_data.capacity = AF_MAX_STYLES;
+    if (editor->project.style_data.count)
+        memcpy(editor->preview_styles, editor->project.style_data.styles,
+               (size_t)editor->project.style_data.count * sizeof(AfStyle));
+    editor->preview_scene.styles = &editor->preview_style_data;
     editor->preview_scene.layouts = &editor->project.layout_data;
     editor->preview_scene.particles = &editor->project.particle_data;
     editor->preview_scene.images = &editor->project.image_data;

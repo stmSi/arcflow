@@ -266,6 +266,20 @@ static bool af_project_parse_track_field(const char *line, AfProjectTrackSnapsho
             snapshot->track.property = AF_PROPERTY_PATH_CONTROL_IN;
         } else if (strcmp(value, "path_control_out") == 0) {
             snapshot->track.property = AF_PROPERTY_PATH_CONTROL_OUT;
+        } else if (strcmp(value, "outline_color") == 0) {
+            snapshot->track.property = AF_PROPERTY_OUTLINE_COLOR;
+        } else if (strcmp(value, "gradient_start") == 0) {
+            snapshot->track.property = AF_PROPERTY_GRADIENT_START;
+        } else if (strcmp(value, "gradient_end") == 0) {
+            snapshot->track.property = AF_PROPERTY_GRADIENT_END;
+        } else if (strcmp(value, "gradient_radii") == 0) {
+            snapshot->track.property = AF_PROPERTY_GRADIENT_RADII;
+        } else if (strcmp(value, "gradient_angle") == 0) {
+            snapshot->track.property = AF_PROPERTY_GRADIENT_ANGLE;
+        } else if (strcmp(value, "gradient_stop_color") == 0) {
+            snapshot->track.property = AF_PROPERTY_GRADIENT_STOP_COLOR;
+        } else if (strcmp(value, "gradient_stop_offset") == 0) {
+            snapshot->track.property = AF_PROPERTY_GRADIENT_STOP_OFFSET;
         } else {
             return false;
         }
@@ -352,6 +366,13 @@ static bool af_project_parse_path_line(const char *line, AfProjectPathSnapshot *
     if ((value = af_project_value(line, "generation")) != NULL) {
         return af_project_set_field(fields, AF_PROJECT_PATH_GENERATION) &&
                af_project_parse_u64(value, &snapshot->path.geometry_generation);
+    }
+    if ((value = af_project_value(line, "handle_mode")) != NULL) {
+        uint64_t mode = 0;
+        if (*command_count == 0 || !af_project_parse_u64(value, &mode) || mode > AF_PATH_HANDLE_SYMMETRIC)
+            return false;
+        commands[*command_count - 1].handle_mode = (AfPathHandleMode)mode;
+        return true;
     }
     if (*command_count >= AF_MAX_PATH_COMMANDS_PER_PATH) {
         return false;

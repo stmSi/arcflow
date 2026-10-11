@@ -1,6 +1,38 @@
 #include "web/browser_bridge.h"
 #include <emscripten.h>
 
+EM_ASYNC_JS(char *, af_web_prepare_image, (const char *path), {
+    const filename = UTF8ToString(path);
+    const extension = filename.split(".").pop().toLowerCase();
+    if (![ "webp", "avif", "gif", "bmp" ].includes(extension))
+        return stringToNewUTF8(filename);
+    try {
+        if (Module["setBusy"])
+            Module["setBusy"](true, "Decoding image…");
+        const bitmap = await createImageBitmap(new Blob([FS.readFile(filename)]));
+        if (bitmap.width > 4096 || bitmap.height > 4096 ||
+            bitmap.width * bitmap.height > 16777216) {
+            bitmap.close();
+            throw new Error("Image exceeds 4096 pixels per side");
+        }
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        canvas.getContext("2d").drawImage(bitmap, 0, 0);
+        bitmap.close();
+        const png = await canvas.convertToBlob({type : "image/png"});
+        const output = filename.substring(0, filename.lastIndexOf(".")) + ".png";
+        FS.writeFile(output, new Uint8Array(await png.arrayBuffer()));
+        if (Module["setBusy"])
+            Module["setBusy"](false, "");
+        return stringToNewUTF8(output);
+    }
+    catch(error) {
+        console.error("Image decode failed", error);
+        if (Module["setBusy"])
+            Module["setBusy"](false, "Image could not be decoded");
+        return 0;
+    }
+})
+
 EM_JS(int, af_web_confirm_discard, (const char *title),
       { return window.confirm(UTF8ToString(title) + "\nDiscard unsaved changes?") ? 1 : 0; })
 

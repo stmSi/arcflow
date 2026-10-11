@@ -354,6 +354,27 @@ static bool af_test_editor_vector_tools(void) {
     CHECK_NEAR(simplified[0].x, 0.0F, 0.0001F);
     CHECK_NEAR(simplified[1].x, 7.0F, 0.0001F);
     CHECK(af_editor_vector_tool_simplify(points, 8U, 0.0F, simplified, 2U) == 0U);
+    {
+        const AfPathCommand line[] = {{.type = AF_PATH_MOVE, .point = {0, 0}},
+                                      {.type = AF_PATH_LINE, .point = {10, 10}},
+                                      {.type = AF_PATH_LINE, .point = {20, 0}}};
+        uint32_t result_count = 0, selected = 0;
+        CHECK(af_editor_vector_combine(line, 3, 0, 2, false, commands, 128, &result_count, &selected) == AF_RESULT_SUCCESS);
+        CHECK(result_count == 5 && selected == 3 && commands[selected].type == AF_PATH_LINE && commands[selected].point.x == 0);
+        CHECK(af_editor_vector_combine(line, 3, 1, 2, true, commands, 128, &result_count, &selected) == AF_RESULT_SUCCESS);
+        CHECK(result_count == 2 && selected == 1 && commands[1].point.x == 15 && commands[1].point.y == 5);
+        const AfPathCommand two_contours[] = {
+            {.type = AF_PATH_MOVE, .point = {0, 0}}, {.type = AF_PATH_LINE, .point = {10, 0}},
+            {.type = AF_PATH_MOVE, .point = {20, 0}}, {.type = AF_PATH_CUBIC, .point = {30, 0}, .control1 = {23, 2}, .control2 = {27, 2}}};
+        CHECK(af_editor_vector_combine(two_contours, 4, 1, 2, false, commands, 128, &result_count, &selected) == AF_RESULT_SUCCESS);
+        CHECK(result_count == 4 && selected == 2 && commands[selected].type == AF_PATH_LINE);
+        CHECK(af_editor_vector_combine(two_contours, 4, 1, 2, true, commands, 128, &result_count, &selected) == AF_RESULT_SUCCESS);
+        CHECK(result_count == 3 && selected == 1 && commands[1].point.x == 15);
+        CHECK(commands[2].type == AF_PATH_CUBIC && commands[2].control1.x == 18);
+        AfPathCommand unchanged = commands[0];
+        CHECK(af_editor_vector_combine(line, 3, 0, 2, false, commands, 1, &result_count, &selected) == AF_RESULT_LIMIT_EXCEEDED);
+        CHECK(memcmp(commands, &unchanged, sizeof(unchanged)) == 0);
+    }
     return true;
 }
 

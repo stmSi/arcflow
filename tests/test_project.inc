@@ -188,7 +188,7 @@ static bool af_test_project(void) {
         style->stroke.dash_count = 2U;
     }
     CHECK(af_project_serialize(&project, &allocator, &text) == AF_RESULT_SUCCESS);
-    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 15"));
+    CHECK(af_test_project_contains(text.data, text.size, "arcflow_project 16"));
     CHECK(af_test_project_contains(text.data, text.size, "skew 0.119999997 -0.0799999982"));
     CHECK(af_test_project_contains(text.data, text.size, "property path_control_in"));
     CHECK(af_test_project_contains(text.data, text.size, "element 1"));

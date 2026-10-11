@@ -6,7 +6,7 @@ import {chromium} from '../web/node_modules/playwright/index.mjs';
 
 const root = resolve(process.argv[2] || 'build/web/site');
 const prefix = '/arcflow/';
-const types = {'.html': 'text/html', '.js': 'application/javascript', '.wasm': 'application/wasm', '.data': 'application/octet-stream'};
+const types = {'.html': 'text/html', '.js': 'application/javascript', '.wasm': 'application/wasm', '.data': 'application/octet-stream', '.svg': 'image/svg+xml'};
 const server = createServer(async (request, response) => {
   const path = new URL(request.url, 'http://localhost').pathname;
   if (path === '/favicon.ico') { response.writeHead(204).end(); return; }
@@ -24,7 +24,7 @@ const options = {headless: true};
 if (process.env.ARCFLOW_CHROMIUM) options.executablePath = process.env.ARCFLOW_CHROMIUM;
 const browser = await chromium.launch(options);
 try {
-  for (const [smoke, frames] of [['studio', 4], ['template', 2], ['inspector', 8], ['vector-tools', 8], ['image', 4], ['gradient', 4], ['particle-inputs', 4], ['particle-view', 24]]) {
+  for (const [smoke, frames] of [['studio', 4], ['template', 2], ['inspector', 8], ['vector-tools', 8], ['image', 4], ['gradient-drag', 4], ['editing', 4], ['particle-inputs', 4], ['particle-view', 24]]) {
     const page = await browser.newPage({viewport: {width: 1440, height: 900}});
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
@@ -87,6 +87,32 @@ try {
   await page.waitForFunction(() => Module.canvas.width === 1120 && Module.canvas.height === 680);
   assert.deepEqual(errors, []);
   console.log('PASS resize');
+  await page.setViewportSize({width: 1440, height: 900});
+  await page.keyboard.press('Control+n');
+  const imageBytes = await readFile(new URL('../assets/image_42d2f96b0d5effe1.png', import.meta.url));
+  let imageChooser = page.waitForEvent('filechooser');
+  await page.keyboard.press('Control+i');
+  await (await imageChooser).setFiles({name: 'uploaded.png', mimeType: 'image/png', buffer: imageBytes});
+  await page.waitForFunction(() => Module.FS.analyzePath('/documents/assets').exists);
+  const webp = await page.evaluate(async bytes => {
+    const bitmap = await createImageBitmap(new Blob([new Uint8Array(bytes)], {type: 'image/png'}));
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return Array.from(new Uint8Array(await (await canvas.convertToBlob({type: 'image/webp'})).arrayBuffer()));
+  }, Array.from(imageBytes));
+  imageChooser = page.waitForEvent('filechooser');
+  await page.keyboard.press('Control+i');
+  await (await imageChooser).setFiles({name: 'uploaded.webp', mimeType: 'image/webp', buffer: Buffer.from(webp)});
+  await page.waitForFunction(() => Module.FS.analyzePath('/documents/uploaded.png').exists && Module.canvas === document.activeElement);
+  const imageSave = page.waitForEvent('download');
+  await page.keyboard.press('Control+s');
+  const imageFile = '/documents/' + (await imageSave).suggestedFilename();
+  const imageProject = await page.evaluate(path => Module.FS.readFile(path, {encoding: 'utf8'}), imageFile);
+  assert.equal((imageProject.match(/^image_binding /gm) || []).length, 2, 'New unsaved project imports PNG and WebP');
+  assert.deepEqual(errors, []);
+  assert.equal((await page.request.get(base + 'favicon.svg')).status(), 200);
+  console.log('PASS PNG/WebP imports into a new project and favicon');
   await context.close();
   const particles = await browser.newPage({viewport: {width: 1440, height: 900}, acceptDownloads: true});
   particles.on('dialog', d => d.accept('particles.afproj'));

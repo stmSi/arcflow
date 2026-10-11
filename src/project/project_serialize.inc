@@ -24,8 +24,8 @@ static const char *af_project_type_name(AfNodeType type) {
 static const char *af_project_property_name(AfPropertyType property) {
     static const char *const names[] = {"position",        "rotation",        "scale", "opacity",
                                         "fill_color",      "corner_radius",   "skew",  "path_point",
-                                        "path_control_in", "path_control_out"};
-    return property <= AF_PROPERTY_PATH_CONTROL_OUT ? names[property] : "invalid";
+                                        "path_control_in", "path_control_out", "outline_color", "gradient_start", "gradient_end", "gradient_radii", "gradient_angle", "gradient_stop_color", "gradient_stop_offset"};
+    return property <= AF_PROPERTY_LAST ? names[property] : "invalid";
 }
 
 static const char *af_project_interpolation_name(AfInterpolation interpolation) {
@@ -426,6 +426,8 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
             } else {
                 result = af_project_writer_append(&writer, "close\n");
             }
+            if (result == AF_RESULT_SUCCESS && command->handle_mode != AF_PATH_HANDLE_CUSP)
+                result = af_project_writer_append(&writer, "handle_mode %u\n", (uint32_t)command->handle_mode);
         }
         if (result == AF_RESULT_SUCCESS) {
             result = af_project_writer_append(&writer, "end_path\n");

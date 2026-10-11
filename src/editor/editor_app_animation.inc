@@ -43,6 +43,23 @@ static void af_editor_select_keyframe(AfEditorState *editor, uint64_t id, bool t
 
 static bool af_editor_property_value(const AfEditorState *editor, const AfSceneNode *node,
                                      AfPropertyType property, float value[4]) {
+    if (af_property_is_gradient(property) || property == AF_PROPERTY_OUTLINE_COLOR) {
+        const AfStyle *style = af_style_find_node_const(&editor->preview_style_data, node->id);
+        if (!style)
+            style = af_project_find_node_style((AfProject *)&editor->project, node->id);
+        const AfPaint *paint = af_editor_target_paint(editor, style);
+        if (!paint)
+            return false;
+        if (property == AF_PROPERTY_OUTLINE_COLOR)
+            memcpy(value, &style->stroke_paint.solid, sizeof(AfColor));
+        else {
+            const uint32_t stop = af_editor_gradient_stop(editor, paint);
+            if (property >= AF_PROPERTY_GRADIENT_STOP_COLOR && stop >= paint->stop_count)
+                return false;
+            af_editor_gradient_value(paint, property, stop, value);
+        }
+        return true;
+    }
     switch (property) {
     case AF_PROPERTY_POSITION:
         value[0] = node->local_transform.position.x;
@@ -125,14 +142,12 @@ static AfResult af_editor_add_keyframe(AfEditorState *editor) {
         if (result != AF_RESULT_SUCCESS) {
             return result;
         }
-        new_track =
-            (AfProjectTrack){.id = track_id,
-                             .clip_id = clip->id,
-                             .node_id = node->id,
-                             .property = editor->selected_property,
-                             .element_index = editor->selected_property >= AF_PROPERTY_PATH_POINT
-                                                  ? editor->selected_path_command
-                                                  : 0U};
+        new_track = (AfProjectTrack){
+            .id = track_id,
+            .clip_id = clip->id,
+            .node_id = node->id,
+            .property = editor->selected_property,
+            .element_index = af_editor_property_element(editor, editor->selected_property)};
         command.track_after[0] =
             (AfProjectTrackSnapshot){.track = new_track, .index = editor->project.track_count};
         command.track_after_count = 1U;
@@ -221,7 +236,8 @@ static void af_editor_append_transform_key_drag(AfEditorState *editor, AfPropert
     key_time = af_editor_key_time(editor, clip, key_time);
     for (uint32_t selection = 0U; selection < editor->selection_drag_count; ++selection) {
         const uint64_t node_id = editor->selection_drag_before[selection].node.id;
-        const AfProjectTrack *track = af_editor_find_track(editor, node_id, property, 0U);
+        const AfProjectTrack *track = af_editor_find_track(
+            editor, node_id, property, af_editor_property_element(editor, property));
         const AfSceneNode *preview_node = af_scene_find_const(&editor->preview_scene, node_id);
         AfProjectKeyframe *key = NULL;
         float value[4] = {0};

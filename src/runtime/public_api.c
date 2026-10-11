@@ -93,6 +93,7 @@ void af_runtime_destroy(AfRuntime *runtime) {
     }
     for (index = 0U; index < AF_RUNTIME_MAX_INSTANCES; ++index) {
         if (runtime->instance_handles[index].occupied != 0U) {
+            af_deallocate(&runtime->allocator, runtime->instances[index].styles.styles);
             af_deallocate(&runtime->allocator, runtime->instances[index].scene.nodes);
             af_deallocate(&runtime->allocator, runtime->instances[index].paths.paths);
             af_deallocate(&runtime->allocator, runtime->instances[index].paths.commands);
@@ -176,6 +177,8 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
     *slot = (AfRuntimeInstanceSlot){.package_handle = package,
                                     .playback = {.speed = 1.0F, .direction = 1},
                                     .canvas = {.width = 1280.0F, .height = 720.0F}};
+    slot->styles.styles = af_allocate_array(&runtime->allocator, loaded->style_data.count,
+                                            sizeof(AfStyle), alignof(AfStyle));
     slot->scene.nodes = af_allocate_array(&runtime->allocator, loaded->scene.count,
                                           sizeof(AfSceneNode), alignof(AfSceneNode));
     slot->paths.paths = af_allocate_array(&runtime->allocator, loaded->path_data.path_count,
@@ -187,7 +190,8 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
     slot->binding_values =
         af_allocate_array(&runtime->allocator, loaded->binding_data.property_count,
                           sizeof(AfBindingValue), alignof(AfBindingValue));
-    if ((loaded->scene.count != 0U && slot->scene.nodes == NULL) ||
+    if ((loaded->style_data.count != 0U && slot->styles.styles == NULL) ||
+        (loaded->scene.count != 0U && slot->scene.nodes == NULL) ||
         (loaded->path_data.path_count != 0U && slot->paths.paths == NULL) ||
         (loaded->path_data.command_count != 0U && slot->paths.commands == NULL) ||
         (loaded->image_data.binding_count != 0U && slot->image_bindings == NULL) ||
@@ -196,6 +200,7 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
         af_deallocate(&runtime->allocator, slot->image_bindings);
         af_deallocate(&runtime->allocator, slot->paths.commands);
         af_deallocate(&runtime->allocator, slot->paths.paths);
+        af_deallocate(&runtime->allocator, slot->styles.styles);
         af_deallocate(&runtime->allocator, slot->scene.nodes);
         (void)af_handle_release(&runtime->instance_pool, handle);
         *slot = (AfRuntimeInstanceSlot){0};
@@ -216,7 +221,13 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
                (size_t)slot->paths.command_count * sizeof(AfPathCommand));
     }
     slot->scene.paths = &slot->paths;
-    slot->scene.styles = &loaded->style_data;
+    AfStyle *instance_styles = slot->styles.styles;
+    slot->styles = loaded->style_data;
+    slot->styles.styles = instance_styles;
+    if (loaded->style_data.count)
+        memcpy(instance_styles, loaded->style_data.styles,
+               (size_t)loaded->style_data.count * sizeof(AfStyle));
+    slot->scene.styles = &slot->styles;
     slot->particles = loaded->particle_data;
     slot->particles.emitters = slot->particle_emitters;
     slot->particles.capacity = AF_MAX_PARTICLE_EMITTERS;
@@ -284,6 +295,7 @@ AfResult af_instance_create(AfRuntime *runtime, AfPackageHandle package,
     if (result != AF_RESULT_SUCCESS) {
         af_deallocate(&runtime->allocator, slot->paths.commands);
         af_deallocate(&runtime->allocator, slot->paths.paths);
+        af_deallocate(&runtime->allocator, slot->styles.styles);
         af_deallocate(&runtime->allocator, slot->scene.nodes);
         af_deallocate(&runtime->allocator, slot->image_bindings);
         af_deallocate(&runtime->allocator, slot->binding_values);
@@ -302,6 +314,7 @@ AfResult af_instance_destroy(AfRuntime *runtime, AfInstanceHandle instance) {
     if (result != AF_RESULT_SUCCESS) {
         return result;
     }
+    af_deallocate(&runtime->allocator, slot->styles.styles);
     af_deallocate(&runtime->allocator, slot->scene.nodes);
     af_deallocate(&runtime->allocator, slot->paths.paths);
     af_deallocate(&runtime->allocator, slot->paths.commands);
@@ -340,6 +353,9 @@ AfResult af_instance_update(AfRuntime *runtime, AfInstanceHandle instance, float
         memcpy(slot->paths.commands, loaded->path_data.commands,
                (size_t)loaded->path_data.command_count * sizeof(AfPathCommand));
     }
+    if (loaded->style_data.count)
+        memcpy(slot->styles.styles, loaded->style_data.styles,
+               (size_t)loaded->style_data.count * sizeof(AfStyle));
     result = af_runtime_binding_apply_all(slot, loaded, true);
     if (result == AF_RESULT_SUCCESS && loaded->animation.clip_count != 0U) {
         const AfAnimationClip *clip = &loaded->animation.clips[slot->active_clip_index];

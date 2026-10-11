@@ -205,6 +205,7 @@ AfResult af_package_write(const AfPackageSource *source, AfAllocator *allocator,
         const AfPathCommand *command = &path_data->commands[index];
         uint8_t *record = bytes + offsets[6] + (uint64_t)index * AF_PATH_COMMAND_RECORD_SIZE;
         af_write_u32(record, (uint32_t)command->type);
+        af_write_u32(record + 4U, (uint32_t)command->handle_mode);
         af_write_f32(record + 8U, command->point.x);
         af_write_f32(record + 12U, command->point.y);
         af_write_f32(record + 16U, command->control1.x);

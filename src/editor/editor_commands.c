@@ -640,7 +640,7 @@ AfResult af_editor_command_polygon(const AfProject *project, uint64_t node_id, A
         return AF_RESULT_INVALID_ARGUMENT;
     for (uint32_t i = 0U; i < project->track_count; ++i) {
         if (project->tracks[i].node_id == node_id &&
-            project->tracks[i].property >= AF_PROPERTY_PATH_POINT)
+            af_property_is_path(project->tracks[i].property))
             return AF_RESULT_INVALID_ARGUMENT;
     }
     *out_command = (AfEditorCommand){.type = AF_EDITOR_COMMAND_CONVERT_PATH,

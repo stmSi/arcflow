@@ -48,6 +48,7 @@ foreach(app arcflow_editor arcflow_player)
     add_dependencies(${app} arcflow_demo_package)
 endforeach()
 add_custom_target(arcflow_web DEPENDS arcflow_editor arcflow_player)
+configure_file(web/favicon.svg "${CMAKE_CURRENT_BINARY_DIR}/site/favicon.svg" COPYONLY)
 install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/site/" DESTINATION .)
 
 foreach(target arcflow_core arcflow_runtime arcflow_project arcflow_editor_core arcflow_update

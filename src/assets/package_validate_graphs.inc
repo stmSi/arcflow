@@ -512,8 +512,8 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
         uint32_t key_index = 0U;
         uint32_t other = 0U;
         float last_time = -INFINITY;
-        if (af_read_u64(record) == 0U || af_read_u32(record + 16U) > AF_PROPERTY_PATH_CONTROL_OUT ||
-            !af_track_target_valid(bytes, nodes, paths, path_commands, af_read_u64(record + 8U),
+        if (af_read_u64(record) == 0U || af_read_u32(record + 16U) > AF_PROPERTY_LAST ||
+            !af_track_target_valid(bytes, nodes, paths, path_commands, styles, af_read_u64(record + 8U),
                                    (AfPropertyType)af_read_u32(record + 16U),
                                    af_read_u32(record + 28U)) ||
             start > keys->count || count > keys->count - start) {
@@ -582,7 +582,7 @@ static AfResult af_validate_records(const uint8_t *bytes, const AfSectionView *s
                     bytes + path_commands->offset +
                     (uint64_t)(start + command_index) * AF_PATH_COMMAND_RECORD_SIZE;
                 const uint32_t type = af_read_u32(command);
-                if (type > AF_PATH_CLOSE || af_read_u32(command + 4U) != 0U) {
+                if (type > AF_PATH_CLOSE || af_read_u32(command + 4U) > AF_PATH_HANDLE_SYMMETRIC) {
                     return AF_RESULT_INVALID_PACKAGE;
                 }
                 for (uint32_t float_offset = 8U; float_offset < AF_PATH_COMMAND_RECORD_SIZE;

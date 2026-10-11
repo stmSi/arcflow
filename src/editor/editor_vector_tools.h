@@ -68,6 +68,9 @@ AfResult af_editor_vector_join(const AfPathCommand *commands, uint32_t count, ui
                                uint32_t *out_count);
 void af_editor_vector_reverse_open(const AfPathCommand *commands, uint32_t count,
                                    AfPathCommand *output);
+AfResult af_editor_vector_combine(const AfPathCommand *commands, uint32_t count, uint32_t first,
+                                  uint32_t second, bool merge, AfPathCommand *output,
+                                  uint32_t capacity, uint32_t *out_count, uint32_t *out_selected);
 
 /* Cuts at most once per source segment, including implicit closing edges. Coordinates are local
  * to the path. Closed contours open at the cut instead of acquiring a seam at the original MOVE.

@@ -97,11 +97,27 @@ static void af_editor_modify_scalar(AfEditorState *editor, AfEditorMergeKey merg
 static AfColor af_editor_inspector_color(const AfEditorState *editor, const AfSceneNode *node) {
     const AfStyle *style =
         node == NULL ? NULL : af_style_find_node_const(&editor->project.style_data, node->id);
-    if (editor->color_target_outline && style != NULL) {
-        return style->stroke_paint.solid;
+    if (node) {
+        for (uint32_t i = 0; i < editor->project.track_count; ++i) {
+            const AfProjectTrack *track = &editor->project.tracks[i];
+            if (track->node_id == node->id && track->clip_id == editor->selected_clip_id &&
+                ((af_property_is_gradient(track->property) &&
+                  (track->element_index >= AF_ANIMATION_OUTLINE_ELEMENT) ==
+                      editor->color_target_outline) ||
+                 (track->property == AF_PROPERTY_OUTLINE_COLOR && editor->color_target_outline))) {
+                const AfStyle *animated =
+                    af_style_find_node_const(&editor->preview_style_data, node->id);
+                if (animated)
+                    style = animated;
+                break;
+            }
+        }
     }
-    if (style && style->fill.type != AF_PAINT_SOLID && style->fill.stop_count)
-        return style->fill.stops[af_editor_gradient_stop(editor, &style->fill)].color;
+    const AfPaint *paint = af_editor_target_paint(editor, style);
+    if (paint && paint->type != AF_PAINT_SOLID && paint->stop_count)
+        return paint->stops[af_editor_gradient_stop(editor, paint)].color;
+    if (editor->color_target_outline && paint)
+        return paint->solid;
     return node == NULL ? (AfColor){0.5F, 0.5F, 0.5F, 1.0F} : node->fill;
 }
 
@@ -118,26 +134,21 @@ static void af_editor_apply_fill(AfEditorState *editor, AfColor color) {
         if (node == NULL) {
             continue;
         }
-        if (editor->color_target_outline) {
-            AfStyle *style = af_project_find_node_style(&editor->project, node->id);
-            if (style != NULL) {
-                style->stroke_paint = af_paint_solid(color);
-                (void)af_style_mark_paint_changed(style);
-            }
-        } else if (key != NULL) {
-            key->keyframe.value[0] = color.r;
-            key->keyframe.value[1] = color.g;
-            key->keyframe.value[2] = color.b;
-            key->keyframe.value[3] = color.a;
+        if (key != NULL) {
+            memcpy(key->keyframe.value, &color, sizeof(color));
         } else {
             AfStyle *style = af_project_find_node_style(&editor->project, node->id);
-            node->fill = color;
+            if (!editor->color_target_outline)
+                node->fill = color;
             if (style != NULL) {
-                if (style->fill.type != AF_PAINT_SOLID && style->fill.stop_count)
-                    style->fill.stops[af_editor_gradient_stop(editor, &style->fill)].color = color;
+                AfPaint *paint = editor->color_target_outline ? &style->stroke_paint : &style->fill;
+                if (paint->type != AF_PAINT_SOLID && paint->stop_count)
+                    paint->stops[af_editor_gradient_stop(editor, paint)].color = color;
                 else
-                    style->fill = af_paint_solid(color);
-                style->inherit_flags &= ~(uint32_t)AF_STYLE_INHERIT_FILL;
+                    *paint = af_paint_solid(color);
+                style->inherit_flags &=
+                    ~(uint32_t)(editor->color_target_outline ? AF_STYLE_INHERIT_STROKE_PAINT
+                                                             : AF_STYLE_INHERIT_FILL);
                 (void)af_style_mark_paint_changed(style);
             }
         }
@@ -487,29 +498,22 @@ static AfEditorMergeKey af_editor_inspector_merge_key(AfEditorInspectorField fie
 
 static bool af_editor_apply_inspector_color(AfEditorState *editor, AfColor color,
                                             bool allow_merge) {
-    const AfStyle *selected_style =
-        af_project_find_node_style(&editor->project, editor->selected_id);
-    const bool animatable = !editor->color_target_outline &&
-                            (!selected_style || selected_style->fill.type == AF_PAINT_SOLID);
+    const AfPropertyType color_property = af_editor_color_property(editor);
     if (editor->selected_id == 0U) {
         return false;
     }
     af_editor_begin_selection_modify(editor, false);
-    if (animatable) {
-        editor->selected_property = AF_PROPERTY_FILL_COLOR;
-        af_editor_begin_transform_key_drag(editor, AF_PROPERTY_FILL_COLOR);
-    }
+    editor->selected_property = color_property;
+    af_editor_begin_transform_key_drag(editor, color_property);
     af_editor_apply_fill(editor, color);
     (void)af_scene_evaluate_world(&editor->project.scene);
     af_editor_update_preview(editor);
-    if (!animatable || !af_editor_transform_key_drag_covers_selection(editor)) {
+    if (!af_editor_transform_key_drag_covers_selection(editor)) {
         (void)af_editor_commit_selection_modify(
             editor, editor->color_target_outline ? AF_EDITOR_MERGE_STYLE : AF_EDITOR_MERGE_FILL,
             allow_merge);
     }
-    if (animatable) {
-        (void)af_editor_commit_transform_key_drag(editor, allow_merge);
-    }
+    (void)af_editor_commit_transform_key_drag(editor, allow_merge);
     af_editor_status(editor,
                      editor->color_target_outline ? "Outline color entered" : "Fill color entered");
     return true;
@@ -1591,13 +1595,8 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
         if (editor->selection_drag_count == 0U) {
             return;
         }
-        const AfStyle *fill_style =
-            af_project_find_node_style(&editor->project, editor->selected_id);
-        if (!editor->color_target_outline &&
-            (!fill_style || fill_style->fill.type == AF_PAINT_SOLID)) {
-            editor->selected_property = AF_PROPERTY_FILL_COLOR;
-            af_editor_begin_transform_key_drag(editor, AF_PROPERTY_FILL_COLOR);
-        }
+        editor->selected_property = af_editor_color_property(editor);
+        af_editor_begin_transform_key_drag(editor, editor->selected_property);
         if (y >= AF_EDITOR_COLOR_ALPHA_Y) {
             editor->drag_mode = AF_EDITOR_DRAG_COLOR_ALPHA;
         } else if (x >= panel_x + AF_EDITOR_COLOR_HUE_X) {

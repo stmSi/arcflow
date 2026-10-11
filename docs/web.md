@@ -19,6 +19,7 @@ GitHub Pages: select **Settings → Pages → GitHub Actions**, then run the
 Projects and preferences persist in browser storage. Save/Export download files;
 Open imports local files. The player accepts `.afp` uploads.
 Opening and exporting show progress; downloads also provide a clickable link.
+Image import works before saving; WebP/AVIF/BMP and the first GIF frame are converted to PNG.
 Storage is scoped per site; keep one editor tab open at a time.
 GIF/MP4 export and native plugins require the desktop app. Rendering uses browser Canvas
 and CPU billboard particles; GPU-specific VFX stay on desktop.

@@ -686,7 +686,7 @@ static void af_editor_render_path_actions(AfEditorState *editor, int width, int 
     if (af_editor_path_action_fits(x + 380.0F, 80.0F, right)) {
         af_editor_add_button_rect(editor, x + 380.0F, y, 80.0F, AF_EDITOR_PATH_ACTION_HEIGHT,
                                   (AfColor){0.2F, 0.23F, 0.29F, 0.97F}, 90050);
-        af_editor_add_text(editor, x + 388.0F, y + 12.0F, "OPEN/CLOSE", 0.53F, 66.0F,
+        af_editor_add_text(editor, x + 388.0F, y + 12.0F, "COMBINE v", 0.53F, 66.0F,
                            (AfColor){0.82F, 0.85F, 0.92F, 1.0F}, 90060);
     }
     if (af_editor_path_action_fits(x + 466.0F, 68.0F, right)) {
@@ -750,10 +750,11 @@ static void af_editor_render_path_actions(AfEditorState *editor, int width, int 
                                   enabled ? (AfColor){0.36F, 0.26F, 0.5F, 0.97F}
                                           : (AfColor){0.14F, 0.15F, 0.18F, 0.92F},
                                   90050);
-        af_editor_add_text(editor, x + 852.0F, y + 12.0F, "SMOOTH", 0.55F, 64.0F,
-                           enabled ? (AfColor){0.96F, 0.9F, 1.0F, 1.0F}
-                                   : (AfColor){0.38F, 0.4F, 0.46F, 1.0F},
-                           90060);
+        af_editor_add_text(
+            editor, x + 852.0F, y + 12.0F,
+            command->handle_mode == AF_PATH_HANDLE_CUSP ? "SMOOTH" : "CUSP", 0.55F, 64.0F,
+            enabled ? (AfColor){0.96F, 0.9F, 1.0F, 1.0F} : (AfColor){0.38F, 0.4F, 0.46F, 1.0F},
+            90060);
     }
 }
 
@@ -785,7 +786,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
             : fminf(0.05F, (float)(ui_now - editor->ui_previous_ticks) / 1000000000.0F);
     editor->ui_previous_ticks = ui_now;
     editor->render_scene.count = 0U;
-    editor->render_scene.styles = &editor->project.style_data;
+    editor->render_scene.styles = &editor->preview_style_data;
     editor->render_scene.images = &editor->project.image_data;
     if (editor->export_panel_visible) {
         af_editor_render_export_panel(editor, width, height);

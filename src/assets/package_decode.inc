@@ -205,6 +205,7 @@ AfResult af_package_decode(const void *data, size_t size, AfAllocator *allocator
             bytes + path_commands->offset + (uint64_t)index * AF_PATH_COMMAND_RECORD_SIZE;
         out_package->path_data.commands[index] =
             (AfPathCommand){.type = (AfPathCommandType)af_read_u32(record),
+                            .handle_mode = (AfPathHandleMode)af_read_u32(record + 4U),
                             .point = {af_read_f32(record + 8U), af_read_f32(record + 12U)},
                             .control1 = {af_read_f32(record + 16U), af_read_f32(record + 20U)},
                             .control2 = {af_read_f32(record + 24U), af_read_f32(record + 28U)}};

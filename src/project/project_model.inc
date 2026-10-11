@@ -231,24 +231,8 @@ uint32_t af_project_find_index(const AfProject *project, uint64_t id) {
 }
 
 static bool af_project_track_target_valid(const AfProject *project, const AfProjectTrack *track) {
-    const AfSceneNode *node = af_scene_find_const(&project->scene, track->node_id);
-    const AfPath *path = NULL;
-    const AfPathCommand *command = NULL;
-    if (node == NULL) {
-        return false;
-    }
-    if (track->property < AF_PROPERTY_PATH_POINT) {
-        return track->element_index == 0U;
-    }
-    path = af_path_find_node_const(&project->path_data, track->node_id);
-    if (node->type != AF_NODE_PATH || path == NULL || track->element_index >= path->command_count) {
-        return false;
-    }
-    command = &project->path_data.commands[path->command_start + track->element_index];
-    if (command->type == AF_PATH_CLOSE) {
-        return false;
-    }
-    return track->property == AF_PROPERTY_PATH_POINT || command->type == AF_PATH_CUBIC;
+    return af_animation_target_valid(&project->scene, track->node_id, track->property,
+                                      track->element_index);
 }
 
 const char *af_project_name(const AfProject *project, uint64_t id) {
@@ -381,7 +365,7 @@ AfResult af_project_validate(const AfProject *project) {
         if (track->id == 0U || track->id >= UINT64_MAX - 1U ||
             !af_project_validation_insert(project, track->id) ||
             af_project_find_clip_const(project, track->clip_id) == NULL ||
-            track->property > AF_PROPERTY_PATH_CONTROL_OUT ||
+            track->property > AF_PROPERTY_LAST ||
             !af_project_track_target_valid(project, track)) {
             return AF_RESULT_INVALID_ARGUMENT;
         }

@@ -89,9 +89,23 @@ static bool af_path_id_exists(const uint8_t *bytes, const AfSectionView *paths, 
 
 static bool af_track_target_valid(const uint8_t *bytes, const AfSectionView *nodes,
                                   const AfSectionView *paths, const AfSectionView *path_commands,
+                                  const AfSectionView *styles,
                                   uint64_t node_id, AfPropertyType property,
                                   uint32_t element_index) {
     if (!af_node_id_exists(bytes, nodes, node_id)) {
+        return false;
+    }
+    if (af_property_is_gradient(property) || property == AF_PROPERTY_OUTLINE_COLOR) {
+        for (uint32_t i = 0; i < styles->count; ++i) {
+            const uint8_t *record = bytes + styles->offset + (uint64_t)i * AF_STYLE_RECORD_SIZE;
+            if (af_read_u64(record + 8U) != node_id)
+                continue;
+            AfStyle style = af_read_style(record);
+            AfStyleData data = {.styles = &style, .count = 1, .capacity = 1};
+            AfSceneNode node = {.id = node_id};
+            AfScene scene = {.nodes = &node, .count = 1, .capacity = 1, .styles = &data};
+            return af_animation_target_valid(&scene, node_id, property, element_index);
+        }
         return false;
     }
     if (property < AF_PROPERTY_PATH_POINT) {

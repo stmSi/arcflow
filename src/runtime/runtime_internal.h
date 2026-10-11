@@ -26,6 +26,7 @@ typedef struct AfRuntimeInstanceSlot {
     AfCanvasInfo canvas;
     AfLayoutData layout;
     AfPathData paths;
+    AfStyleData styles;
     AfParticleData particles;
     AfParticleEmitter particle_emitters[AF_MAX_PARTICLE_EMITTERS];
     AfImageData images;

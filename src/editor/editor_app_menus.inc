@@ -907,7 +907,11 @@ static void SDLCALL af_editor_project_dialog_callback(void *userdata, const char
 static void af_editor_show_project_dialog(AfEditorState *editor, AfEditorDialogAction action) {
     static const SDL_DialogFileFilter filters[] = {{"Arcflow Project", "afproj"}};
     static const SDL_DialogFileFilter image_filters[] = {
+#ifdef __EMSCRIPTEN__
+        {"Supported Images", "png;jpg;jpeg;ktx2;svg;webp;avif;gif;bmp"},
+#else
         {"Supported Images", "png;jpg;jpeg;ktx2;svg"},
+#endif
         {"PNG", "png"},
         {"JPEG", "jpg;jpeg"},
         {"KTX2", "ktx2"},
@@ -1064,7 +1068,20 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
     } else if (action == AF_EDITOR_DIALOG_IMPORT_IMAGE) {
         uint64_t asset_id = 0U;
         uint64_t node_id = 0U;
-        const AfResult result = af_project_import_image(&editor->project, editor->project_path,
+        const char *image_project_path = editor->project_path;
+#ifdef __EMSCRIPTEN__
+        if (image_project_path[0] == '\0')
+            image_project_path = "/documents/untitled.afproj";
+        char *decoded_path = af_web_prepare_image(path);
+        if (!decoded_path) {
+            af_editor_status(editor, "Image could not be decoded or is too large");
+            SDL_free(path);
+            return;
+        }
+        SDL_free(path);
+        path = decoded_path;
+#endif
+        const AfResult result = af_project_import_image(&editor->project, image_project_path,
                                                         path, &asset_id, &node_id);
         if (result == AF_RESULT_SUCCESS) {
             editor->selected_asset_id = asset_id;
@@ -1264,11 +1281,15 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         (void)af_editor_delete_clip(editor);
         break;
     case AF_EDITOR_MENU_ACTION_IMPORT_IMAGE:
+#ifndef __EMSCRIPTEN__
         if (editor->project_path[0] == '\0') {
             af_editor_status(editor, "Save the project before importing images");
         } else {
+#endif
             af_editor_show_project_dialog(editor, AF_EDITOR_DIALOG_IMPORT_IMAGE);
+#ifndef __EMSCRIPTEN__
         }
+#endif
         break;
     case AF_EDITOR_MENU_ACTION_ASSET_BROWSER:
         editor->asset_browser_visible = !editor->asset_browser_visible;

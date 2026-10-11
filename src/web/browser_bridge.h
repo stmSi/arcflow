@@ -7,5 +7,6 @@ void af_web_remember_project(const char *path);
 int af_web_confirm_discard(const char *title);
 void af_web_task_begin(const char *message);
 void af_web_task_end(int success);
+char *af_web_prepare_image(const char *path);
 
 #endif

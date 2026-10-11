@@ -469,50 +469,10 @@ AfResult af_project_animation_apply(const AfProject *project, uint64_t clip_id, 
         if (result != AF_RESULT_SUCCESS) {
             return result;
         }
-        switch (track->property) {
-        case AF_PROPERTY_POSITION:
-            node->local_transform.position = (AfVec2){value[0], value[1]};
-            break;
-        case AF_PROPERTY_ROTATION:
-            node->local_transform.rotation = value[0];
-            break;
-        case AF_PROPERTY_SCALE:
-            node->local_transform.scale = (AfVec2){value[0], value[1]};
-            break;
-        case AF_PROPERTY_SKEW:
-            node->local_transform.skew = (AfVec2){value[0], value[1]};
-            break;
-        case AF_PROPERTY_OPACITY:
-            node->opacity = value[0];
-            break;
-        case AF_PROPERTY_FILL_COLOR:
-            node->fill = (AfColor){value[0], value[1], value[2], value[3]};
-            break;
-        case AF_PROPERTY_CORNER_RADIUS:
-            node->corner_radius = value[0];
-            break;
-        case AF_PROPERTY_PATH_POINT:
-        case AF_PROPERTY_PATH_CONTROL_IN:
-        case AF_PROPERTY_PATH_CONTROL_OUT: {
-            AfPathData *paths = (AfPathData *)scene->paths;
-            AfPath *path = af_path_find_node(paths, track->node_id);
-            AfPathCommand *command = &paths->commands[path->command_start + track->element_index];
-            AfVec2 *target =
-                track->property == AF_PROPERTY_PATH_POINT
-                    ? &command->point
-                    : (track->property == AF_PROPERTY_PATH_CONTROL_IN ? &command->control2
-                                                                      : &command->control1);
-            if (target->x != value[0] || target->y != value[1]) {
-                *target = (AfVec2){value[0], value[1]};
-                if (af_path_mark_geometry_changed(path) != AF_RESULT_SUCCESS) {
-                    return AF_RESULT_LIMIT_EXCEEDED;
-                }
-            }
-            break;
-        }
-        default:
-            return AF_RESULT_INVALID_ARGUMENT;
-        }
+        result = af_animation_apply_value(scene, track->node_id, track->property,
+                                           track->element_index, value);
+        if (result != AF_RESULT_SUCCESS)
+            return result;
     }
     return af_scene_evaluate_world(scene);
 }

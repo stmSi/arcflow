@@ -120,7 +120,7 @@ AfResult af_editor_export_project(const AfProject *source, const AfEditorExportO
         for (uint32_t i = 0; i < output->track_count;) {
             const AfProjectTrack *track = &output->tracks[i];
             const AfSceneNode *node = af_scene_find_const(&output->scene, track->node_id);
-            if (!node || (track->property >= AF_PROPERTY_PATH_POINT && node->type != AF_NODE_PATH))
+            if (!node || (af_property_is_path(track->property) && node->type != AF_NODE_PATH))
                 (void)af_project_remove_track_exact(output, track->id);
             else
                 ++i;

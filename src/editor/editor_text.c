@@ -50,7 +50,7 @@ AfResult af_editor_command_text(AfProject *project, AfTextEngine *engine, uint64
             return AF_RESULT_INVALID_ARGUMENT;
         for (uint32_t i = 0; i < project->track_count; ++i)
             if (project->tracks[i].node_id == id &&
-                project->tracks[i].property >= AF_PROPERTY_PATH_POINT)
+                af_property_is_path(project->tracks[i].property))
                 return AF_RESULT_UNSUPPORTED_FEATURE;
         command->before[0] = *snapshot;
         command->before_count = command->path_before_count = 1U;

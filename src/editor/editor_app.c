@@ -238,6 +238,8 @@ typedef struct AfEditorState {
     AfPathCommand *render_path_commands;
     AfPathData render_path_data;
     AfSceneNode *preview_nodes;
+    AfStyleData preview_style_data;
+    AfStyle *preview_styles;
     AfScene preview_scene;
     uint64_t selected_id;
     uint64_t selected_ids[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
@@ -369,6 +371,7 @@ typedef struct AfEditorState {
     AfVec2 tool_pen_outgoing;
     bool tool_pen_has_outgoing;
     uint64_t gradient_target;
+    bool gradient_outline;
     uint32_t gradient_stop;
     AfEditorGradientDrag gradient_drag;
     AfVec2 gradient_drag_origin;
@@ -448,6 +451,7 @@ typedef struct AfEditorState {
     bool boolean_smoke;
     bool vector_package_smoke;
     bool gradient_drag_smoke;
+    bool editing_smoke;
     bool text_panel_smoke;
     bool vfx_smoke;
     bool particle_view_smoke;
@@ -614,6 +618,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_images.inc"
 #include "editor/editor_app_draw.inc"
 #include "editor/editor_app_splitters.inc"
+#include "editor/editor_app_gradient_target.inc"
 #include "editor/editor_app_timeline.inc"
 #include "editor/editor_app_preview.inc"
 #include "editor/editor_app_particle_inputs.inc"
@@ -639,6 +644,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_snap_smoke.inc"
 #include "editor/editor_app_export_smoke.inc"
 #include "editor/editor_app_gradient_smoke.inc"
+#include "editor/editor_app_editing_smoke.inc"
 #include "editor/editor_app_studio_smoke.inc"
 #include "editor/editor_app_template_smoke.inc"
 #include "editor/editor_app_color_input_smoke.inc"
@@ -732,6 +738,8 @@ int af_editor_run(int argument_count, char **arguments) {
                           sizeof(*editor.render_path_commands), _Alignof(AfPathCommand));
     editor.preview_nodes = af_allocate_array(&editor.allocator, AF_EDITOR_PROJECT_CAPACITY,
                                              sizeof(*editor.preview_nodes), _Alignof(AfSceneNode));
+    editor.preview_styles =
+        af_allocate_array(&editor.allocator, AF_MAX_STYLES, sizeof(AfStyle), _Alignof(AfStyle));
     editor.curve_order = af_allocate_array(&editor.allocator, AF_PROJECT_MAX_KEYFRAMES,
                                            sizeof(*editor.curve_order), _Alignof(uint32_t));
     editor.path_scratch = af_allocate(&editor.allocator, sizeof(*editor.path_scratch),
@@ -742,8 +750,8 @@ int af_editor_run(int argument_count, char **arguments) {
                                           sizeof(*editor.text_lines), _Alignof(AfTextLine));
     if (editor.render_nodes == NULL || editor.render_paths == NULL ||
         editor.render_path_commands == NULL || editor.preview_nodes == NULL ||
-        editor.curve_order == NULL || editor.path_scratch == NULL || editor.text_glyphs == NULL ||
-        editor.text_lines == NULL) {
+        editor.preview_styles == NULL || editor.curve_order == NULL ||
+        editor.path_scratch == NULL || editor.text_glyphs == NULL || editor.text_lines == NULL) {
         result = AF_RESULT_OUT_OF_MEMORY;
         goto cleanup;
     }
@@ -949,6 +957,11 @@ int af_editor_run(int argument_count, char **arguments) {
         }
         if (editor.vector_package_smoke && editor.rendered_frames == 0U) {
             result = af_editor_vector_package_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS)
+                goto cleanup;
+        }
+        if (editor.editing_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_editing_smoke(&editor, width, height);
             if (result != AF_RESULT_SUCCESS)
                 goto cleanup;
         }
@@ -1662,6 +1675,7 @@ cleanup:
     af_deallocate(&editor.allocator, editor.text_glyphs);
     af_deallocate(&editor.allocator, editor.path_scratch);
     af_deallocate(&editor.allocator, editor.curve_order);
+    af_deallocate(&editor.allocator, editor.preview_styles);
     af_deallocate(&editor.allocator, editor.preview_nodes);
     af_deallocate(&editor.allocator, editor.render_path_commands);
     af_deallocate(&editor.allocator, editor.render_paths);

@@ -49,12 +49,14 @@ static void af_editor_compound_selection(AfEditorState *editor, bool break_apart
         return;
     }
     AfEditorCommand command = {0};
-    AfResult result = break_apart
-        ? af_editor_command_break_apart(&editor->project, editor->selected_id, &command)
-        : af_editor_command_combine(&editor->project, editor->selected_ids, editor->selected_count,
-                                     editor->selected_id, &command);
+    AfResult result =
+        break_apart
+            ? af_editor_command_break_apart(&editor->project, editor->selected_id, &command)
+            : af_editor_command_combine(&editor->project, editor->selected_ids,
+                                        editor->selected_count, editor->selected_id, &command);
     if (result == AF_RESULT_SUCCESS)
-        result = af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
+        result =
+            af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
     if (result != AF_RESULT_SUCCESS) {
         af_editor_status(
             editor,
@@ -74,9 +76,10 @@ static void af_editor_compound_selection(AfEditorState *editor, bool break_apart
     editor->selected_path_command = UINT32_MAX;
     editor->selected_path_command_count = 0U;
     af_editor_mark_dirty(editor);
-    af_editor_status(editor, break_apart
-        ? "Contours separated; holes become filled objects · Ctrl+Z to undo"
-        : "Combined with primary appearance; overlaps become holes · Ctrl+Z to undo");
+    af_editor_status(
+        editor, break_apart
+                    ? "Contours separated; holes become filled objects · Ctrl+Z to undo"
+                    : "Combined with primary appearance; overlaps become holes · Ctrl+Z to undo");
 }
 
 static void af_editor_boolean_selection(AfEditorState *editor, AfPathBooleanOperation operation) {
@@ -88,19 +91,21 @@ static void af_editor_boolean_selection(AfEditorState *editor, AfPathBooleanOper
         af_editor_status(editor, "Select two closed shapes; Trim cuts the last-selected shape");
         return;
     }
-    const uint64_t other = editor->selected_ids[0] == editor->selected_id
-        ? editor->selected_ids[1] : editor->selected_ids[0];
+    const uint64_t other = editor->selected_ids[0] == editor->selected_id ? editor->selected_ids[1]
+                                                                          : editor->selected_ids[0];
     AfEditorCommand command = {0};
     AfResult result = af_editor_command_boolean(&editor->project, editor->selected_id, other,
-                                                 operation, &command);
+                                                operation, &command);
     if (result == AF_RESULT_SUCCESS)
-        result = af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
+        result =
+            af_editor_history_execute(&editor->history, &editor->project, &command, false, false);
     if (result != AF_RESULT_SUCCESS) {
-        af_editor_status(editor, result == AF_RESULT_NOT_FOUND
-            ? "No filled result; original shapes kept"
-            : result == AF_RESULT_LIMIT_EXCEEDED
-                ? "Shape operation exceeds geometry or undo capacity; simplify the inputs"
-                : "Use closed static sibling shapes with solid paint; complex or tiny details may need simplification");
+        af_editor_status(
+            editor, result == AF_RESULT_NOT_FOUND ? "No filled result; original shapes kept"
+                    : result == AF_RESULT_LIMIT_EXCEEDED
+                        ? "Shape operation exceeds geometry or undo capacity; simplify the inputs"
+                        : "Use closed static sibling shapes with solid paint; complex or tiny "
+                          "details may need simplification");
         return;
     }
     af_editor_cancel_vector_tool(editor, NULL);
@@ -109,11 +114,14 @@ static void af_editor_boolean_selection(AfEditorState *editor, AfPathBooleanOper
     editor->selected_path_command = 0U;
     af_editor_path_selection_only(editor, 0U);
     af_editor_mark_dirty(editor);
-    af_editor_status(editor, operation == AF_PATH_BOOLEAN_UNION
-        ? "Welded · curves approximated as editable lines · Ctrl+Z restores originals"
+    af_editor_status(
+        editor,
+        operation == AF_PATH_BOOLEAN_UNION
+            ? "Welded · curves approximated as editable lines · Ctrl+Z restores originals"
         : operation == AF_PATH_BOOLEAN_SUBTRACT
             ? "Primary trimmed · curves approximated as editable lines · Ctrl+Z restores originals"
-            : "Intersection created · curves approximated as editable lines · Ctrl+Z restores originals");
+            : "Intersection created · curves approximated as editable lines · Ctrl+Z restores "
+              "originals");
 }
 
 static void af_editor_convert_selected_to_path(AfEditorState *editor) {
@@ -419,13 +427,14 @@ static AfPathCommand af_editor_pen_closing_segment(const AfEditorState *editor) 
     const AfVec2 first = editor->tool_commands[0].point;
     const AfVec2 last = editor->tool_commands[editor->tool_command_count - 1U].point;
     const AfPathCommand *next = &editor->tool_commands[1];
-    const AfVec2 incoming = next->type == AF_PATH_CUBIC
-                               ? (AfVec2){2.0F * first.x - next->control1.x,
-                                          2.0F * first.y - next->control1.y}
-                               : first;
+    const AfVec2 incoming =
+        next->type == AF_PATH_CUBIC
+            ? (AfVec2){2.0F * first.x - next->control1.x, 2.0F * first.y - next->control1.y}
+            : first;
     return (AfPathCommand){
         .type = editor->tool_pen_has_outgoing || incoming.x != first.x || incoming.y != first.y
-                    ? AF_PATH_CUBIC : AF_PATH_LINE,
+                    ? AF_PATH_CUBIC
+                    : AF_PATH_LINE,
         .point = first,
         .control1 = editor->tool_pen_has_outgoing ? editor->tool_pen_outgoing : last,
         .control2 = incoming};
@@ -453,11 +462,12 @@ static bool af_editor_commit_pen_path(AfEditorState *editor, bool closed) {
             ? af_editor_commit_pen_continuation(editor, count, closed)
             : af_editor_create_path_commands(editor, editor->tool_commands, count, closed, "Pen");
     if (result != AF_RESULT_SUCCESS) {
-        af_editor_status(editor, "Cannot finish Pen path · drawing kept · Backspace removes a point");
+        af_editor_status(editor,
+                         "Cannot finish Pen path · drawing kept · Backspace removes a point");
         return false;
     }
     af_editor_cancel_vector_tool(editor, closed ? "Pen path closed · endpoints connected"
-                                               : "Pen path finished · open endpoints");
+                                                : "Pen path finished · open endpoints");
     return true;
 }
 
@@ -712,7 +722,7 @@ static AfPath *af_editor_selected_path(AfEditorState *editor) {
 static bool af_editor_selected_path_has_animation(const AfEditorState *editor) {
     for (uint32_t index = 0U; index < editor->project.track_count; ++index) {
         const AfProjectTrack *track = &editor->project.tracks[index];
-        if (track->node_id == editor->selected_id && track->property >= AF_PROPERTY_PATH_POINT) {
+        if (track->node_id == editor->selected_id && af_property_is_path(track->property)) {
             return true;
         }
     }
@@ -1105,6 +1115,8 @@ static AfResult af_editor_smooth_path_points(AfEditorState *editor, bool symmetr
             if (symmetric) {
                 incoming_length = outgoing_length = (incoming_length + outgoing_length) * 0.5F;
             }
+            commands[index].handle_mode =
+                symmetric ? AF_PATH_HANDLE_SYMMETRIC : AF_PATH_HANDLE_SMOOTH;
             commands[index].control2 =
                 af_editor_path_clamp_point((AfVec2){anchor.x - direction.x * incoming_length,
                                                     anchor.y - direction.y * incoming_length});
@@ -1523,11 +1535,13 @@ static AfResult af_editor_reverse_path_contour(AfEditorState *editor) {
     if (segment_end <= start + 1U) {
         return AF_RESULT_INVALID_ARGUMENT;
     }
-    reversed[write++] =
-        (AfPathCommand){.type = AF_PATH_MOVE, .point = commands[segment_end - 1U].point};
+    reversed[write++] = (AfPathCommand){.type = AF_PATH_MOVE,
+                                        .point = commands[segment_end - 1U].point,
+                                        .handle_mode = commands[segment_end - 1U].handle_mode};
     for (uint32_t index = segment_end; index > start + 1U;) {
         AfPathCommand segment = commands[--index];
         segment.point = index == start + 1U ? commands[start].point : commands[index - 1U].point;
+        segment.handle_mode = commands[index - 1U].handle_mode;
         if (segment.type == AF_PATH_CUBIC) {
             const AfVec2 control = segment.control1;
             segment.control1 = segment.control2;
@@ -1872,6 +1886,44 @@ static void af_editor_append_text(AfEditorState *editor, const char *text) {
         strchr(text, '\n') == NULL && strchr(text, '\r') == NULL) {
         memcpy(editor->rename_buffer + current, text, incoming + 1U);
     }
+}
+
+static void af_editor_combine_points(AfEditorState *editor, bool merge) {
+    AfPath *path = af_editor_selected_path(editor);
+    if (!path || editor->selected_path_command_count != 2U ||
+        !af_editor_require_static_path_topology(editor)) {
+        af_editor_status(editor, "Select two path points with the Node tool");
+        return;
+    }
+    AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    uint32_t count = 0, selected = 0;
+    AfResult result = af_editor_vector_combine(
+        editor->project.path_data.commands + path->command_start, path->command_count,
+        editor->selected_path_commands[0], editor->selected_path_commands[1], merge, commands,
+        AF_EDITOR_COMMAND_MAX_PATH_COMMANDS, &count, &selected);
+    if (result == AF_RESULT_SUCCESS)
+        result = af_editor_apply_path_edit(editor, commands, count, path->fill_rule,
+                                           merge ? "Points merged · Ctrl+Z to undo"
+                                                 : "Line added · use To Curve to shape it");
+    if (result == AF_RESULT_SUCCESS)
+        af_editor_path_selection_only(editor, selected);
+    else
+        af_editor_status(editor,
+                         "Points could not be combined; each contour must retain a segment");
+}
+
+static void af_editor_cusp_path_points(AfEditorState *editor) {
+    AfPath *path = af_editor_selected_path(editor);
+    if (!path || path->command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS)
+        return;
+    AfPathCommand commands[AF_EDITOR_COMMAND_MAX_PATH_COMMANDS];
+    memcpy(commands, editor->project.path_data.commands + path->command_start,
+           (size_t)path->command_count * sizeof(*commands));
+    for (uint32_t i = 0; i < path->command_count; ++i)
+        if (i == editor->selected_path_command || af_editor_path_selection_contains(editor, i))
+            commands[i].handle_mode = AF_PATH_HANDLE_CUSP;
+    (void)af_editor_apply_path_edit(editor, commands, path->command_count, path->fill_rule,
+                                    "Cusp handles · drag each handle independently");
 }
 
 static void af_editor_join_endpoints(AfEditorState *editor) {

@@ -412,8 +412,7 @@ static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEven
     if (event->key == SDLK_DELETE && editor->gradient_stop_focus &&
         editor->gradient_target == editor->selected_id && editor->selected_count == 1 &&
         !editor->timeline_focus && !editor->color_target_outline &&
-        (editor->active_tool == AF_EDITOR_TOOL_SELECT ||
-         editor->active_tool == AF_EDITOR_TOOL_TEXT)) {
+        editor->active_tool == AF_EDITOR_TOOL_TEXT) {
         const AfStyle *style = af_project_find_node_style(&editor->project, editor->selected_id);
         if (style && style->fill.type != AF_PAINT_SOLID) {
             af_editor_gradient_action(editor, 4);

@@ -36,4 +36,5 @@ Browser build and GitHub Pages deployment: [Web guide](docs/web.md).
 
 [Build](docs/building.md) · [Architecture](docs/architecture.md) ·
 [Framework](https://github.com/stmSi/af-framework#readme) · [Runtime API](docs/runtime-api.md) ·
+[Export](docs/exporting.md) ·
 [Release](docs/production-release.md)

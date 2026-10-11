@@ -433,7 +433,7 @@ static bool af_lottie_node_geometry(AfInterchangeWriter *writer, const AfProject
         for (uint32_t index = 0U; index < project->track_count; ++index) {
             const AfProjectTrack *track = &project->tracks[index];
             if (track->clip_id == clip->id && track->node_id == node->id &&
-                track->property >= AF_PROPERTY_PATH_POINT &&
+                af_property_is_path(track->property) &&
                 track->property <= AF_PROPERTY_PATH_CONTROL_OUT) {
                 af_interchange_report(
                     diagnostics, AF_INTERCHANGE_DIAGNOSTIC_WARNING,

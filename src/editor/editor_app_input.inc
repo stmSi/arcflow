@@ -82,8 +82,8 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
         return true;
     }
     if (event->y < top + 42.0F) {
-        const float local_x = (event->x - editor->left_width) /
-                              af_editor_timeline_controls_scale(editor, width);
+        const float local_x =
+            (event->x - editor->left_width) / af_editor_timeline_controls_scale(editor, width);
         if (local_x >= 10.0F && local_x < 56.0F) {
             editor->preview_playing = !editor->preview_playing;
             af_editor_status(editor,
@@ -204,7 +204,14 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
         if (clicked_track != NULL) {
             af_editor_select_only(editor, clicked_track->node_id);
             editor->selected_property = clicked_track->property;
-            if (clicked_track->property >= AF_PROPERTY_PATH_POINT) {
+            if (af_property_is_gradient(clicked_track->property)) {
+                editor->color_target_outline =
+                    clicked_track->element_index >= AF_ANIMATION_OUTLINE_ELEMENT;
+                editor->gradient_outline = editor->color_target_outline;
+                editor->gradient_target = clicked_track->node_id;
+                editor->gradient_stop = clicked_track->element_index % AF_MAX_GRADIENT_STOPS;
+            }
+            if (af_property_is_path(clicked_track->property)) {
                 editor->selected_path_command = clicked_track->element_index;
                 af_editor_path_selection_only(editor, editor->selected_path_command);
             }
@@ -286,7 +293,7 @@ static bool af_editor_begin_path_drag(AfEditorState *editor, AfPath *path, AfEdi
         return false;
     }
     if (mode != AF_EDITOR_DRAG_PATH_SEGMENT && track != NULL &&
-        track->property >= AF_PROPERTY_PATH_POINT) {
+        af_property_is_path(track->property)) {
         key = af_editor_track_key_at(editor, track->id, key_time);
         if (key == NULL && af_editor_add_keyframe(editor) == AF_RESULT_SUCCESS) {
             track = af_editor_selected_track(editor);
@@ -560,7 +567,7 @@ static bool af_editor_path_action_mouse_down(AfEditorState *editor, int width, i
     }
     if (af_editor_path_action_fits(x + 380.0F, 80.0F, right) && mouse.x >= x + 380.0F &&
         mouse.x <= x + 460.0F) {
-        (void)af_editor_toggle_path_closed(editor);
+        af_editor_choice_open(editor, 3, width, height, x + 380, y + AF_EDITOR_PATH_ACTION_HEIGHT);
         return true;
     }
     if (af_editor_path_action_fits(x + 466.0F, 68.0F, right) && mouse.x >= x + 466.0F &&
@@ -595,10 +602,36 @@ static bool af_editor_path_action_mouse_down(AfEditorState *editor, int width, i
     }
     if (af_editor_path_action_fits(x + 844.0F, 78.0F, right) && mouse.x >= x + 844.0F &&
         mouse.x <= x + 922.0F) {
-        (void)af_editor_smooth_path_points(editor, (modifiers & SDL_KMOD_SHIFT) != 0U);
+        if (command->handle_mode != AF_PATH_HANDLE_CUSP && (modifiers & SDL_KMOD_SHIFT) == 0U)
+            af_editor_cusp_path_points(editor);
+        else
+            (void)af_editor_smooth_path_points(editor, (modifiers & SDL_KMOD_SHIFT) != 0U);
         return true;
     }
     return false;
+}
+
+static void af_editor_constrain_smooth_handle(AfEditorState *editor, AfPath *path,
+                                              uint32_t anchor_index, bool outgoing) {
+    if (anchor_index >= path->command_count || anchor_index + 1U >= path->command_count)
+        return;
+    AfPathCommand *anchor = &editor->project.path_data.commands[path->command_start + anchor_index];
+    AfPathCommand *next = anchor + 1;
+    if (anchor->handle_mode == AF_PATH_HANDLE_CUSP || anchor->type != AF_PATH_CUBIC ||
+        next->type != AF_PATH_CUBIC)
+        return;
+    const AfVec2 moved = outgoing ? next->control1 : anchor->control2;
+    AfVec2 *opposite = outgoing ? &anchor->control2 : &next->control1;
+    const AfVec2 old = outgoing ? editor->path_drag_commands[anchor_index].control2
+                                : editor->path_drag_commands[anchor_index + 1U].control1;
+    const float dx = moved.x - anchor->point.x, dy = moved.y - anchor->point.y;
+    const float distance = hypotf(dx, dy);
+    const float length = anchor->handle_mode == AF_PATH_HANDLE_SYMMETRIC
+                             ? distance
+                             : hypotf(old.x - anchor->point.x, old.y - anchor->point.y);
+    if (distance > .0001F)
+        *opposite = af_editor_path_clamp_point((AfVec2){anchor->point.x - dx * length / distance,
+                                                        anchor->point.y - dy * length / distance});
 }
 
 static void af_editor_drag_path_handle(AfEditorState *editor, int width, int height, AfVec2 mouse,
@@ -659,6 +692,9 @@ static void af_editor_drag_path_handle(AfEditorState *editor, int width, int hei
             command->control1.x + delta.x / weight, command->control1.y + delta.y / weight});
         command->control2 = af_editor_path_clamp_point((AfVec2){
             command->control2.x + delta.x / weight, command->control2.y + delta.y / weight});
+        if (selected > 0U)
+            af_editor_constrain_smooth_handle(editor, path, selected - 1U, true);
+        af_editor_constrain_smooth_handle(editor, path, selected, false);
         (void)af_path_mark_geometry_changed(path);
         return;
     }
@@ -696,7 +732,9 @@ static void af_editor_drag_path_handle(AfEditorState *editor, int width, int hei
     } else if (editor->drag_mode == AF_EDITOR_DRAG_PATH_CONTROL1 &&
                command->type == AF_PATH_CUBIC) {
         command->control1 = point;
-        if ((modifiers & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0U && selected > 0U &&
+        if (selected > 0U &&
+            ((modifiers & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0U ||
+             editor->path_drag_commands[selected - 1U].handle_mode != AF_PATH_HANDLE_CUSP) &&
             editor->path_drag_commands[selected - 1U].type == AF_PATH_CUBIC) {
             AfPathCommand *opposite = command - 1U;
             const AfPathCommand *opposite_before = before - 1U;
@@ -707,7 +745,12 @@ static void af_editor_drag_path_handle(AfEditorState *editor, int width, int hei
             const AfVec2 old = {opposite_before->control2.x - anchor.x,
                                 opposite_before->control2.y - anchor.y};
             const float old_length = sqrtf(old.x * old.x + old.y * old.y);
-            const float length = (modifiers & SDL_KMOD_CTRL) != 0U ? direction_length : old_length;
+            const float length = (modifiers & SDL_KMOD_CTRL) != 0U ||
+                                         (editor->drag_mode == AF_EDITOR_DRAG_PATH_CONTROL1
+                                              ? opposite_before->handle_mode
+                                              : before->handle_mode) == AF_PATH_HANDLE_SYMMETRIC
+                                     ? direction_length
+                                     : old_length;
             if (direction_length > 0.0001F) {
                 opposite->control2 = af_editor_path_clamp_point(
                     (AfVec2){anchor.x - direction.x / direction_length * length,
@@ -717,7 +760,8 @@ static void af_editor_drag_path_handle(AfEditorState *editor, int width, int hei
     } else if (editor->drag_mode == AF_EDITOR_DRAG_PATH_CONTROL2 &&
                command->type == AF_PATH_CUBIC) {
         command->control2 = point;
-        if ((modifiers & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0U &&
+        if (((modifiers & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0U ||
+             before->handle_mode != AF_PATH_HANDLE_CUSP) &&
             selected + 1U < path->command_count &&
             editor->path_drag_commands[selected + 1U].type == AF_PATH_CUBIC) {
             AfPathCommand *opposite = command + 1U;
@@ -729,7 +773,12 @@ static void af_editor_drag_path_handle(AfEditorState *editor, int width, int hei
             const AfVec2 old = {opposite_before->control1.x - anchor.x,
                                 opposite_before->control1.y - anchor.y};
             const float old_length = sqrtf(old.x * old.x + old.y * old.y);
-            const float length = (modifiers & SDL_KMOD_CTRL) != 0U ? direction_length : old_length;
+            const float length = (modifiers & SDL_KMOD_CTRL) != 0U ||
+                                         (editor->drag_mode == AF_EDITOR_DRAG_PATH_CONTROL1
+                                              ? opposite_before->handle_mode
+                                              : before->handle_mode) == AF_PATH_HANDLE_SYMMETRIC
+                                     ? direction_length
+                                     : old_length;
             if (direction_length > 0.0001F) {
                 opposite->control1 = af_editor_path_clamp_point(
                     (AfVec2){anchor.x - direction.x / direction_length * length,
@@ -1507,8 +1556,9 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
             hypotf(event->x - editor->drag_start_mouse.x, event->y - editor->drag_start_mouse.y) >
                 5.0F) {
             editor->hierarchy_drag_started = true;
-            af_editor_status(editor,
-                             "Drop on a group to move inside; use insertion lines to choose parent and order");
+            af_editor_status(
+                editor,
+                "Drop on a group to move inside; use insertion lines to choose parent and order");
         }
         return;
     }
@@ -1775,11 +1825,14 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
                     af_editor_status(editor, message);
                 } else if (result == AF_RESULT_SUCCESS) {
                     af_editor_mark_dirty(editor);
-                    af_editor_status(editor, inside ? "Object moved into group · Ctrl+Z to undo"
-                                                    : "Object moved to this tree position · Ctrl+Z to undo");
+                    af_editor_status(
+                        editor, inside ? "Object moved into group · Ctrl+Z to undo"
+                                       : "Object moved to this tree position · Ctrl+Z to undo");
                 } else if (target != editor->hierarchy_drag_id) {
-                    af_editor_status(editor, inside ? "Cannot move object into this group"
-                                                    : "Cannot move an object beside itself or into its own descendants");
+                    af_editor_status(
+                        editor,
+                        inside ? "Cannot move object into this group"
+                               : "Cannot move an object beside itself or into its own descendants");
                 }
             }
         }
@@ -1877,10 +1930,15 @@ static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
     if (isfinite(scroll_y) && event->mouse_x >= (float)width - editor->right_width &&
         event->mouse_x < (float)width && event->mouse_y >= 0 &&
         event->mouse_y < (float)height - editor->status_height) {
-        const bool particles = af_project_find_node_emitter_const(&editor->project, editor->selected_id) != NULL;
-        const float bottom = particles ? AF_EDITOR_PARTICLE_ROW_Y + AF_EDITOR_PARTICLE_ROW_COUNT * AF_EDITOR_PARTICLE_ROW_STEP + 42 : AF_EDITOR_PARTICLE_LABEL_Y + 42;
-        editor->inspector_scroll = af_editor_clamp(editor->inspector_scroll - scroll_y * 32, 0,
-            fmaxf(bottom - ((float)height - editor->status_height), 0));
+        const bool particles =
+            af_project_find_node_emitter_const(&editor->project, editor->selected_id) != NULL;
+        const float bottom =
+            particles ? AF_EDITOR_PARTICLE_ROW_Y +
+                            AF_EDITOR_PARTICLE_ROW_COUNT * AF_EDITOR_PARTICLE_ROW_STEP + 42
+                      : AF_EDITOR_PARTICLE_LABEL_Y + 42;
+        editor->inspector_scroll =
+            af_editor_clamp(editor->inspector_scroll - scroll_y * 32, 0,
+                            fmaxf(bottom - ((float)height - editor->status_height), 0));
         return;
     }
     if (!isfinite(scroll_x) || !isfinite(scroll_y) || event->mouse_x < 0.0F ||
@@ -1948,9 +2006,8 @@ static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
                          &canvas_height);
         (void)canvas_width;
         (void)canvas_height;
-        editor->zoom =
-            af_editor_clamp(editor->zoom * powf(1.12F, af_editor_clamp(scroll_y, -64.0F, 64.0F)),
-                            0.1F, 8.0F);
+        editor->zoom = af_editor_clamp(
+            editor->zoom * powf(1.12F, af_editor_clamp(scroll_y, -64.0F, 64.0F)), 0.1F, 8.0F);
         editor->pan.x = mouse.x - canvas_x - project.x * editor->zoom;
         editor->pan.y = mouse.y - canvas_y - project.y * editor->zoom;
     }
@@ -2160,11 +2217,15 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     } else if (control && event->key == SDLK_N) {
         (void)af_editor_new_project(editor);
     } else if (control && event->key == SDLK_I) {
+#ifndef __EMSCRIPTEN__
         if (editor->project_path[0] == '\0') {
             af_editor_status(editor, "Save the project before importing images");
         } else {
+#endif
             af_editor_show_project_dialog(editor, AF_EDITOR_DIALOG_IMPORT_IMAGE);
+#ifndef __EMSCRIPTEN__
         }
+#endif
     } else if (control && event->key == SDLK_A) {
         AfPath *path = editor->active_tool == AF_EDITOR_TOOL_NODE && !editor->timeline_focus &&
                                editor->selected_count == 1U
@@ -2401,8 +2462,9 @@ static AfResult af_editor_interaction_smoke_failure(const AfEditorState *editor,
 static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, int height) {
     /* Hierarchy drags below need several visible rows regardless of saved dock preferences. */
     const float saved_asset_height = editor->asset_height;
-    editor->asset_height = fminf(editor->asset_height, fmaxf(0,
-        af_editor_timeline_top(editor, height) - editor->toolbar_height - 6 * AF_EDITOR_ROW_HEIGHT - 16));
+    editor->asset_height = fminf(
+        editor->asset_height, fmaxf(0, af_editor_timeline_top(editor, height) -
+                                           editor->toolbar_height - 6 * AF_EDITOR_ROW_HEIGHT - 16));
     /* Navigation must preserve the pointer anchor and keep dock input local. */
     const float saved_zoom = editor->zoom;
     const AfVec2 saved_pan = editor->pan;
@@ -2445,8 +2507,8 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
                                  .mouse_x = editor->left_width + 100.0F,
                                  .mouse_y = editor->toolbar_height + 100.0F};
     editor->zoom = 1.0F;
-    const AfVec2 anchor = af_editor_screen_to_project(
-        editor, width, height, (AfVec2){wheel.mouse_x, wheel.mouse_y});
+    const AfVec2 anchor =
+        af_editor_screen_to_project(editor, width, height, (AfVec2){wheel.mouse_x, wheel.mouse_y});
     af_editor_mouse_wheel(editor, width, height, &wheel);
     if (editor->zoom != 1.0F || editor->pan.x != saved_pan.x || editor->pan.y != saved_pan.y)
         return af_editor_interaction_smoke_failure(editor, __LINE__);
@@ -2454,8 +2516,8 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
     wheel.y = 0.5F;
     af_editor_mouse_wheel(editor, width, height, &wheel);
     af_editor_mouse_wheel(editor, width, height, &wheel);
-    const AfVec2 after = af_editor_screen_to_project(
-        editor, width, height, (AfVec2){wheel.mouse_x, wheel.mouse_y});
+    const AfVec2 after =
+        af_editor_screen_to_project(editor, width, height, (AfVec2){wheel.mouse_x, wheel.mouse_y});
     if (fabsf(editor->zoom - 1.12F) > 0.0001F ||
         hypotf(after.x - anchor.x, after.y - anchor.y) > 0.001F)
         return af_editor_interaction_smoke_failure(editor, __LINE__);
@@ -2485,20 +2547,23 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
     const bool saved_playing = editor->preview_playing;
     const uint64_t saved_clip = editor->selected_clip_id;
     const bool saved_timeline_focus = editor->timeline_focus;
-    AfProjectClip extra_clip = {.id = editor->project.next_animation_id,
-                                .name = "Compact clip", .duration = 4.0F};
+    AfProjectClip extra_clip = {
+        .id = editor->project.next_animation_id, .name = "Compact clip", .duration = 4.0F};
     if (af_project_add_clip(&editor->project, &extra_clip) != AF_RESULT_SUCCESS)
         return af_editor_interaction_smoke_failure(editor, __LINE__);
     editor->selected_clip_id = extra_clip.id;
     SDL_MouseButtonEvent compact_click = {
-        .button = SDL_BUTTON_LEFT, .down = true,
+        .button = SDL_BUTTON_LEFT,
+        .down = true,
         .x = editor->left_width + 30.0F * af_editor_timeline_controls_scale(editor, compact_width),
         .y = af_editor_timeline_top(editor, height) + 20.0F};
-    if (!af_editor_timeline_mouse_down(editor, compact_width, height, &compact_click, SDL_KMOD_NONE) ||
+    if (!af_editor_timeline_mouse_down(editor, compact_width, height, &compact_click,
+                                       SDL_KMOD_NONE) ||
         editor->preview_playing == saved_playing)
         return af_editor_interaction_smoke_failure(editor, __LINE__);
     compact_click.x = compact_right - 40.0F;
-    if (!af_editor_timeline_mouse_down(editor, compact_width, height, &compact_click, SDL_KMOD_NONE) ||
+    if (!af_editor_timeline_mouse_down(editor, compact_width, height, &compact_click,
+                                       SDL_KMOD_NONE) ||
         editor->selected_clip_id != editor->project.clips[0].id || editor->playhead != 0.0F ||
         af_project_remove_clip_exact(&editor->project, extra_clip.id) != AF_RESULT_SUCCESS)
         return af_editor_interaction_smoke_failure(editor, __LINE__);
@@ -2628,9 +2693,12 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
         if (editor->project.scene.nodes[editor->hierarchy_order[row]].id == fresh)
             editor->hierarchy_scroll = row;
     SDL_Event direct = {.button = {.type = SDL_EVENT_MOUSE_BUTTON_DOWN,
-        .button = SDL_BUTTON_LEFT, .down = true, .clicks = 1,
-        .x = 100 / metrics.pixel_scale_x,
-        .y = (editor->toolbar_height + 8 + AF_EDITOR_ROW_HEIGHT * 0.5F) / metrics.pixel_scale_y}};
+                                   .button = SDL_BUTTON_LEFT,
+                                   .down = true,
+                                   .clicks = 1,
+                                   .x = 100 / metrics.pixel_scale_x,
+                                   .y = (editor->toolbar_height + 8 + AF_EDITOR_ROW_HEIGHT * 0.5F) /
+                                        metrics.pixel_scale_y}};
     af_editor_handle_event(editor, &direct, width, height);
     if (!af_editor_can_reorder(&editor->project, fresh, star))
         return af_editor_interaction_smoke_failure(editor, __LINE__);
@@ -2643,7 +2711,8 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
     direct.button.y = (editor->toolbar_height + 10) / metrics.pixel_scale_y;
     af_editor_handle_event(editor, &direct, width, height);
     if (af_scene_find(&editor->project.scene, fresh)->parent_id != destination ||
-        af_project_find_index(&editor->project, fresh) >= af_project_find_index(&editor->project, star) ||
+        af_project_find_index(&editor->project, fresh) >=
+            af_project_find_index(&editor->project, star) ||
         af_editor_history_undo(&editor->history, &editor->project) != AF_RESULT_SUCCESS ||
         af_scene_find(&editor->project.scene, fresh)->parent_id != AF_INVALID_NODE_ID)
         return af_editor_interaction_smoke_failure(editor, __LINE__);
@@ -2898,7 +2967,8 @@ static AfResult af_editor_boolean_smoke(AfEditorState *editor, int width, int he
         if (af_editor_action_callback(editor, (AfEditorActionId)actions[op]) != AF_RESULT_SUCCESS)
             return af_editor_interaction_smoke_failure(editor, __LINE__);
         af_log(AF_LOG_INFO, "Boolean command %u: %.3f ms", op,
-            (double)(SDL_GetPerformanceCounter() - started) * 1000.0 / (double)SDL_GetPerformanceFrequency());
+               (double)(SDL_GetPerformanceCounter() - started) * 1000.0 /
+                   (double)SDL_GetPerformanceFrequency());
         const AfPath *path = af_editor_selected_path(editor);
         if (editor->project.scene.count != initial_count + 1U || editor->selected_id != primary ||
             path == NULL || path->fill_rule != AF_PATH_FILL_NON_ZERO)
@@ -2915,7 +2985,9 @@ static AfResult af_editor_boolean_smoke(AfEditorState *editor, int width, int he
     }
     editor->active_tool = AF_EDITOR_TOOL_SELECT;
     af_editor_update_preview(editor);
-    af_editor_status(editor, "Left to right: Weld, Trim Primary, Intersect · curves approximated; undo verified");
+    af_editor_status(
+        editor,
+        "Left to right: Weld, Trim Primary, Intersect · curves approximated; undo verified");
     return AF_RESULT_SUCCESS;
 }
 
@@ -3247,7 +3319,8 @@ static AfResult af_editor_compound_smoke(AfEditorState *editor, int width, int h
     const AfVec2 center = af_editor_visible_center(editor, width, height);
     const AfEditorToolRect outer = {{center.x - 150, center.y - 120}, {300, 240}};
     const AfEditorToolRect inner = {{center.x - 70, center.y - 60}, {140, 120}};
-    if (af_editor_create_primitive_at(editor, AF_NODE_ROUNDED_RECTANGLE, outer) != AF_RESULT_SUCCESS)
+    if (af_editor_create_primitive_at(editor, AF_NODE_ROUNDED_RECTANGLE, outer) !=
+        AF_RESULT_SUCCESS)
         return af_editor_interaction_smoke_failure(editor, __LINE__);
     const uint64_t outer_id = editor->selected_id;
     if (af_editor_create_primitive_at(editor, AF_NODE_ELLIPSE, inner) != AF_RESULT_SUCCESS)
@@ -3310,8 +3383,7 @@ static AfResult af_editor_pen_close_smoke(AfEditorState *editor, int width, int 
             click.y = y + h * (anchor == 2U ? 0.7F : 0.35F);
             af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
             if ((anchor == 0U && first_handle) || (anchor + 1U == anchors && last_handle)) {
-                const SDL_MouseMotionEvent motion = {.x = click.x + 20.0F,
-                                                      .y = click.y - 24.0F};
+                const SDL_MouseMotionEvent motion = {.x = click.x + 20.0F, .y = click.y - 24.0F};
                 af_editor_mouse_motion(editor, width, height, &motion);
             }
             af_editor_mouse_up(editor, width, height);
@@ -3322,10 +3394,11 @@ static AfResult af_editor_pen_close_smoke(AfEditorState *editor, int width, int 
         const AfVec2 last = editor->tool_commands[anchors - 1U].point;
         const AfVec2 outgoing = editor->tool_pen_outgoing;
         const AfVec2 incoming = first_handle
-            ? (AfVec2){2.0F * start.x - editor->tool_commands[1].control1.x,
-                       2.0F * start.y - editor->tool_commands[1].control1.y} : start;
-        const AfVec2 first_screen = af_affine_transform_point(
-            af_editor_camera(editor, width, height), start);
+                                    ? (AfVec2){2.0F * start.x - editor->tool_commands[1].control1.x,
+                                               2.0F * start.y - editor->tool_commands[1].control1.y}
+                                    : start;
+        const AfVec2 first_screen =
+            af_affine_transform_point(af_editor_camera(editor, width, height), start);
         click.x = first_screen.x;
         click.y = first_screen.y;
         af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
@@ -3333,8 +3406,7 @@ static AfResult af_editor_pen_close_smoke(AfEditorState *editor, int width, int 
         const uint64_t node_id = editor->selected_id;
         const AfPath *path = af_editor_selected_path(editor);
         if (editor->tool_command_count != 0U || editor->drag_mode != AF_EDITOR_DRAG_NONE ||
-            editor->project.scene.count != scene_count + 1U ||
-            path == NULL ||
+            editor->project.scene.count != scene_count + 1U || path == NULL ||
             path->command_count != anchors + (mode == 0U ? 1U : 2U)) {
             af_log(AF_LOG_ERROR, "Pen close case %u: pending=%u drag=%u nodes=%u/%u commands=%u",
                    mode, editor->tool_command_count, (unsigned)editor->drag_mode,
@@ -3384,9 +3456,9 @@ static AfResult af_editor_pen_close_smoke(AfEditorState *editor, int width, int 
     af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_PEN);
     editor->tool_command_count = AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY;
     for (uint32_t index = 0U; index < editor->tool_command_count; ++index) {
-        editor->tool_commands[index] = (AfPathCommand){
-            .type = index == 0U ? AF_PATH_MOVE : AF_PATH_LINE,
-            .point = {(float)index, (float)(index % 3U)}};
+        editor->tool_commands[index] =
+            (AfPathCommand){.type = index == 0U ? AF_PATH_MOVE : AF_PATH_LINE,
+                            .point = {(float)index, (float)(index % 3U)}};
     }
     if (af_editor_commit_pen_path(editor, true) ||
         editor->tool_command_count != AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY ||
@@ -3545,6 +3617,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->vector_package_smoke = true;
             if (editor->maximum_frames == 0U)
                 editor->maximum_frames = 4U;
+        } else if (strcmp(arguments[index], "--editing-smoke") == 0) {
+            editor->editing_smoke = true;
+            if (editor->maximum_frames == 0)
+                editor->maximum_frames = 4;
         } else if (strcmp(arguments[index], "--gradient-drag-smoke") == 0) {
             editor->gradient_drag_smoke = true;
             if (editor->maximum_frames == 0U)
@@ -3558,7 +3634,8 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         } else if (strcmp(arguments[index], "--particle-inputs-smoke") == 0) {
             editor->particle_inputs_smoke = true;
             editor->preferences_read_only = true;
-            if (editor->maximum_frames == 0U) editor->maximum_frames = 4U;
+            if (editor->maximum_frames == 0U)
+                editor->maximum_frames = 4U;
         } else if (strcmp(arguments[index], "--particle-view-smoke") == 0) {
             editor->particle_view_smoke = true;
         } else if (strcmp(arguments[index], "--vector-animation-smoke") == 0) {
@@ -3623,9 +3700,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->selection_smoke || editor->outline_smoke || editor->vector_tools_smoke ||
         editor->vector_preview_smoke || editor->pen_close_smoke || editor->compound_smoke ||
         editor->boolean_smoke || editor->vector_package_smoke || editor->gradient_drag_smoke ||
-        editor->vfx_smoke || editor->particle_view_smoke || editor->particle_inputs_smoke || editor->vector_animation_smoke ||
-        editor->image_smoke || editor->export_smoke || editor->snapping_smoke ||
-        editor->menu_smoke || editor->studio_smoke || editor->template_smoke || editor->workflow_smoke ||
+        editor->editing_smoke || editor->vfx_smoke || editor->particle_view_smoke ||
+        editor->particle_inputs_smoke || editor->vector_animation_smoke || editor->image_smoke ||
+        editor->export_smoke || editor->snapping_smoke || editor->menu_smoke ||
+        editor->studio_smoke || editor->template_smoke || editor->workflow_smoke ||
         editor->platform_smoke || editor->release_smoke || editor->onboarding_smoke;
     af_editor_derive_package_path(editor);
 }

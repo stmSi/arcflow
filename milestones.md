@@ -1487,5 +1487,3 @@ Arcflow 1.0 is ready only when:
 
 After Arcflow 1.0, use semantic versioning and plan later features through separate product roadmaps
 rather than extending this initial milestone list indefinitely.
-
-The post-1.0 plan for a full vector-design and motion-authoring product is maintained in

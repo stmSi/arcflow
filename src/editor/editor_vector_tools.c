@@ -494,10 +494,13 @@ AfResult af_editor_vector_tool_knife(const AfPathCommand *commands, uint32_t com
 
 void af_editor_vector_reverse_open(const AfPathCommand *commands, uint32_t count,
                                    AfPathCommand *output) {
-    output[0] = (AfPathCommand){.type = AF_PATH_MOVE, .point = commands[count - 1U].point};
+    output[0] = (AfPathCommand){.type = AF_PATH_MOVE,
+                                .point = commands[count - 1U].point,
+                                .handle_mode = commands[count - 1U].handle_mode};
     for (uint32_t i = 1U; i < count; ++i) {
         AfPathCommand segment = commands[count - i];
         segment.point = commands[count - i - 1U].point;
+        segment.handle_mode = commands[count - i - 1U].handle_mode;
         if (segment.type == AF_PATH_CUBIC) {
             const AfVec2 control = segment.control1;
             segment.control1 = segment.control2;
@@ -564,5 +567,97 @@ AfResult af_editor_vector_join(const AfPathCommand *commands, uint32_t count, ui
         return AF_RESULT_LIMIT_EXCEEDED;
     memcpy(output, joined, (size_t)write * sizeof(*output));
     *out_count = write;
+    return AF_RESULT_SUCCESS;
+}
+
+AfResult af_editor_vector_combine(const AfPathCommand *commands, uint32_t count, uint32_t first,
+                                  uint32_t second, bool merge, AfPathCommand *output,
+                                  uint32_t capacity, uint32_t *out_count, uint32_t *out_selected) {
+    if (!commands || !output || !out_count || !out_selected || first == second || first >= count ||
+        second >= count || count > AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY ||
+        commands[first].type == AF_PATH_CLOSE || commands[second].type == AF_PATH_CLOSE)
+        return AF_RESULT_INVALID_ARGUMENT;
+    AfPathCommand result[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 2U];
+    AfPathCommand source[AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY];
+    memcpy(source, commands, (size_t)count * sizeof(*source));
+    uint32_t a = 0, b = 0, c = 0, d = 0, write = count, selected = 0;
+    const bool endpoints = af_vector_open_endpoint(source, count, first, &a, &b) &&
+                           af_vector_open_endpoint(source, count, second, &c, &d);
+    if (merge) {
+        const AfVec2 point = {(source[first].point.x + source[second].point.x) * .5F,
+                              (source[first].point.y + source[second].point.y) * .5F};
+        const uint32_t indices[] = {first, second};
+        for (uint32_t i = 0; i < 2; ++i) {
+            const uint32_t index = indices[i];
+            const AfVec2 delta = {point.x - source[index].point.x, point.y - source[index].point.y};
+            source[index].point = point;
+            source[index].control2.x += delta.x;
+            source[index].control2.y += delta.y;
+            if (index + 1 < count && source[index + 1].type == AF_PATH_CUBIC) {
+                source[index + 1].control1.x += delta.x;
+                source[index + 1].control1.y += delta.y;
+            }
+        }
+        if (endpoints && a != c) {
+            const AfResult joined =
+                af_editor_vector_join(source, count, first, second, result,
+                                      AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 2U, &write);
+            if (joined != AF_RESULT_SUCCESS)
+                return joined;
+            selected = b - a - 1U;
+        } else {
+            const uint32_t keep = first < second ? first : second;
+            const uint32_t remove = first < second ? second : first;
+            if (source[remove].type == AF_PATH_MOVE)
+                return AF_RESULT_INVALID_ARGUMENT;
+            memcpy(result, source, (size_t)remove * sizeof(*result));
+            memcpy(result + remove, source + remove + 1,
+                   (size_t)(count - remove - 1U) * sizeof(*result));
+            write = count - 1U;
+            selected = keep;
+            if (endpoints && a == c) {
+                memmove(result + b, result + b - 1U, (size_t)(write - b + 1U) * sizeof(*result));
+                result[b - 1U] = (AfPathCommand){.type = AF_PATH_CLOSE};
+                ++write;
+            }
+        }
+    } else if (endpoints) {
+        const AfResult joined =
+            af_editor_vector_join(source, count, first, second, result,
+                                  AF_EDITOR_VECTOR_TOOL_POINT_CAPACITY + 2U, &write);
+        if (joined != AF_RESULT_SUCCESS)
+            return joined;
+        if (a == c) {
+            memmove(result + b + 1U, result + b, (size_t)(write - b) * sizeof(*result));
+            result[b] = (AfPathCommand){.type = AF_PATH_LINE, .point = source[a].point};
+            ++write;
+            selected = b;
+        } else
+            selected = b - a;
+    } else if ((first + 1U == second || second + 1U == first) &&
+               source[first > second ? first : second].type != AF_PATH_MOVE) {
+        memcpy(result, source, (size_t)count * sizeof(*result));
+        selected = first > second ? first : second;
+        result[selected].type = AF_PATH_LINE;
+    } else {
+        memcpy(result, source, (size_t)count * sizeof(*result));
+        result[write++] = (AfPathCommand){.type = AF_PATH_MOVE, .point = source[first].point};
+        selected = write;
+        result[write++] = (AfPathCommand){.type = AF_PATH_LINE, .point = source[second].point};
+    }
+    if (write > capacity)
+        return AF_RESULT_LIMIT_EXCEEDED;
+    AfPath path = {.id = 1, .node_id = 1, .command_count = write, .geometry_generation = 1};
+    AfPathData data = {.paths = &path,
+                       .path_count = 1,
+                       .path_capacity = 1,
+                       .commands = result,
+                       .command_count = write,
+                       .command_capacity = write};
+    if (af_path_data_validate(&data) != AF_RESULT_SUCCESS)
+        return AF_RESULT_INVALID_ARGUMENT;
+    memcpy(output, result, (size_t)write * sizeof(*output));
+    *out_count = write;
+    *out_selected = selected;
     return AF_RESULT_SUCCESS;
 }

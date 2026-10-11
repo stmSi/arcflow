@@ -53,8 +53,7 @@ static const AfProjectTrack *af_editor_find_track(const AfEditorState *editor, u
     for (index = 0U; index < editor->project.track_count; ++index) {
         const AfProjectTrack *track = &editor->project.tracks[index];
         if (track->clip_id == editor->selected_clip_id && track->node_id == node_id &&
-            track->property == property &&
-            (track->property < AF_PROPERTY_PATH_POINT || track->element_index == element_index)) {
+            track->property == property && track->element_index == element_index) {
             return track;
         }
     }
@@ -63,7 +62,7 @@ static const AfProjectTrack *af_editor_find_track(const AfEditorState *editor, u
 
 static const AfProjectTrack *af_editor_selected_track(const AfEditorState *editor) {
     return af_editor_find_track(editor, editor->selected_id, editor->selected_property,
-                                editor->selected_path_command);
+                                af_editor_property_element(editor, editor->selected_property));
 }
 
 static AfProjectKeyframe *af_editor_track_key_at(AfEditorState *editor, uint64_t track_id,
@@ -98,40 +97,25 @@ static AfColor af_editor_property_color(AfPropertyType property) {
 }
 
 static const char *af_editor_property_name(AfPropertyType property) {
-    static const char *const names[] = {"POSITION",  "ROTATION",  "SCALE", "OPACITY",
-                                        "FILL",      "RADIUS",    "SKEW",  "PATH POINT",
-                                        "HANDLE IN", "HANDLE OUT"};
-    return property <= AF_PROPERTY_PATH_CONTROL_OUT ? names[property] : "UNKNOWN";
+    static const char *const names[] = {
+        "POSITION", "ROTATION",   "SCALE",      "OPACITY",    "FILL",         "RADIUS",
+        "SKEW",     "PATH POINT", "HANDLE IN",  "HANDLE OUT", "OUTLINE",      "GRAD START",
+        "GRAD END", "GRAD RADII", "GRAD ANGLE", "STOP COLOR", "STOP POSITION"};
+    return property <= AF_PROPERTY_LAST ? names[property] : "UNKNOWN";
 }
 
 static bool af_editor_property_available(const AfEditorState *editor, AfPropertyType property) {
-    const AfSceneNode *node = af_scene_find_const(&editor->project.scene, editor->selected_id);
-    const AfPath *path = NULL;
-    const AfPathCommand *command = NULL;
-    if (node == NULL || property > AF_PROPERTY_PATH_CONTROL_OUT) {
-        return false;
-    }
-    if (property < AF_PROPERTY_PATH_POINT) {
-        return true;
-    }
-    path = af_path_find_node_const(&editor->project.path_data, node->id);
-    if (node->type != AF_NODE_PATH || path == NULL ||
-        editor->selected_path_command >= path->command_count) {
-        return false;
-    }
-    command =
-        &editor->project.path_data.commands[path->command_start + editor->selected_path_command];
-    return command->type != AF_PATH_CLOSE &&
-           (property == AF_PROPERTY_PATH_POINT || command->type == AF_PATH_CUBIC);
+    return af_animation_target_valid(&editor->project.scene, editor->selected_id, property,
+                                     af_editor_property_element(editor, property));
 }
 
 static void af_editor_select_adjacent_property(AfEditorState *editor, int direction) {
     int32_t candidate = (int32_t)editor->selected_property;
-    for (uint32_t step = 0U; step <= (uint32_t)AF_PROPERTY_PATH_CONTROL_OUT; ++step) {
+    for (uint32_t step = 0U; step <= (uint32_t)AF_PROPERTY_LAST; ++step) {
         candidate += direction;
         if (candidate < 0) {
-            candidate = (int32_t)AF_PROPERTY_PATH_CONTROL_OUT;
-        } else if (candidate > (int32_t)AF_PROPERTY_PATH_CONTROL_OUT) {
+            candidate = (int32_t)AF_PROPERTY_LAST;
+        } else if (candidate > (int32_t)AF_PROPERTY_LAST) {
             candidate = 0;
         }
         if (af_editor_property_available(editor, (AfPropertyType)candidate)) {
@@ -426,15 +410,18 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                            (AfColor){0.96F, 0.97F, 1.0F, 1.0F}, 100140);
     }
     editor->mouse_position.x = mouse_x;
-    for (uint32_t node_index = controls_start; node_index < editor->render_scene.count; ++node_index) {
+    for (uint32_t node_index = controls_start; node_index < editor->render_scene.count;
+         ++node_index) {
         AfAffine2 *transform = &editor->render_scene.nodes[node_index].world_transform;
         transform->tx = center_left + (transform->tx - center_left) * controls_scale;
         transform->m00 *= controls_scale;
         transform->m01 *= controls_scale;
     }
     const bool compact_clips = af_editor_timeline_compact_clips(editor, width);
-    for (index = 0U; index < editor->project.clip_count && index < (compact_clips ? 1U : 8U); ++index) {
-        const AfProjectClip *tab = compact_clips && clip != NULL ? clip : &editor->project.clips[index];
+    for (index = 0U; index < editor->project.clip_count && index < (compact_clips ? 1U : 8U);
+         ++index) {
+        const AfProjectClip *tab =
+            compact_clips && clip != NULL ? clip : &editor->project.clips[index];
         const float x = center_right - 74.0F * (float)(index + 1U);
         af_editor_add_button_rect(editor, x, top + 8.0F, 68.0F, 28.0F,
                                   tab->id == editor->selected_clip_id
@@ -469,7 +456,8 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
             af_editor_add_rect(editor, x, top + 44.0F, 1.0F, 15.0F,
                                (AfColor){0.48F, 0.5F, 0.58F, 1.0F}, 100120);
             (void)snprintf(tick_label, sizeof(tick_label), "%.1f", (double)tick_time);
-            af_editor_add_text(editor, x + 3.0F, top + 53.0F, tick_label, 0.72F, fminf(28.0F, center_right - x - 3.0F),
+            af_editor_add_text(editor, x + 3.0F, top + 53.0F, tick_label, 0.72F,
+                               fminf(28.0F, center_right - x - 3.0F),
                                (AfColor){0.58F, 0.61F, 0.69F, 1.0F}, 100125);
         }
         tick_time += 0.5F;
@@ -491,22 +479,22 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
         const float visible_end = fminf(center_right, loop_end);
         if (visible_end > visible_start)
             af_editor_add_rect(editor, visible_start, top + 65.5F - bar_height * 0.5F,
-                           visible_end - visible_start, bar_height,
-                           range_hovered ? (AfColor){0.42F, 1.0F, 0.62F, 1.0F}
-                                         : (AfColor){0.25F, 0.7F, 0.42F, 1.0F},
-                           100125);
+                               visible_end - visible_start, bar_height,
+                               range_hovered ? (AfColor){0.42F, 1.0F, 0.62F, 1.0F}
+                                             : (AfColor){0.25F, 0.7F, 0.42F, 1.0F},
+                               100125);
         if (loop_start >= ruler_x + 5.0F && loop_start <= center_right - 5.0F)
             af_editor_add_rect(editor, loop_start - (start_hovered ? 5.0F : 3.0F), top + 58.0F,
-                           start_hovered ? 10.0F : 6.0F, 14.0F,
-                           start_hovered ? (AfColor){0.72F, 1.0F, 0.82F, 1.0F}
-                                         : (AfColor){0.35F, 0.9F, 0.5F, 1.0F},
-                           100130);
+                               start_hovered ? 10.0F : 6.0F, 14.0F,
+                               start_hovered ? (AfColor){0.72F, 1.0F, 0.82F, 1.0F}
+                                             : (AfColor){0.35F, 0.9F, 0.5F, 1.0F},
+                               100130);
         if (loop_end >= ruler_x + 5.0F && loop_end <= center_right - 5.0F)
             af_editor_add_rect(editor, loop_end - (end_hovered ? 5.0F : 3.0F), top + 58.0F,
-                           end_hovered ? 10.0F : 6.0F, 14.0F,
-                           end_hovered ? (AfColor){0.72F, 1.0F, 0.82F, 1.0F}
-                                       : (AfColor){0.35F, 0.9F, 0.5F, 1.0F},
-                           100130);
+                               end_hovered ? 10.0F : 6.0F, 14.0F,
+                               end_hovered ? (AfColor){0.72F, 1.0F, 0.82F, 1.0F}
+                                           : (AfColor){0.35F, 0.9F, 0.5F, 1.0F},
+                               100130);
     }
     if (editor->curve_visible) {
         af_editor_render_curve(editor, width, height);
@@ -533,8 +521,7 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                 AF_EDITOR_TIMELINE_TRACK_HEIGHT - 1.0F,
                 track->node_id == editor->selected_id &&
                         track->property == editor->selected_property &&
-                        (track->property < AF_PROPERTY_PATH_POINT ||
-                         track->element_index == editor->selected_path_command)
+                        track->element_index == af_editor_property_element(editor, track->property)
                     ? (AfColor){0.16F, 0.27F, 0.42F, 1.0F}
                     : (AfColor){0.11F, 0.12F, 0.15F, 1.0F},
                 100115);
@@ -548,7 +535,7 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                                af_editor_property_name(track->property), 1.0F,
                                editor->timeline_header_width - 54.0F,
                                (AfColor){0.72F, 0.75F, 0.82F, 1.0F}, 100125);
-            if (track->property >= AF_PROPERTY_PATH_POINT) {
+            if (af_property_is_path(track->property)) {
                 char point_label[16];
                 (void)snprintf(point_label, sizeof(point_label), "#%u", track->element_index + 1U);
                 af_editor_add_text(editor, center_left + editor->timeline_header_width - 31.0F,
