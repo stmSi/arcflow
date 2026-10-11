@@ -5,6 +5,24 @@
 #define AF_EDITOR_WORKFLOW_PALETTE_ROWS 9U
 #define AF_EDITOR_WORKFLOW_SHORTCUT_ROWS 12U
 
+typedef struct AfEditorPaletteLayout {
+    float x, y, width, height;
+    float row_height;
+    uint32_t rows;
+} AfEditorPaletteLayout;
+
+static AfEditorPaletteLayout af_editor_palette_layout(int width, int height) {
+    AfEditorPaletteLayout layout = {
+        .width = fminf(AF_EDITOR_WORKFLOW_OVERLAY_WIDTH, fmaxf(160, (float)width - 32)),
+        .row_height = 46};
+    layout.rows = (uint32_t)af_editor_clamp(floorf(((float)height - 180) / layout.row_height), 1,
+                                            (float)AF_EDITOR_WORKFLOW_PALETTE_ROWS);
+    layout.height = 148 + (float)layout.rows * layout.row_height;
+    layout.x = ((float)width - layout.width) * .5F;
+    layout.y = fmaxf(16, fminf(86, (float)height - layout.height - 16));
+    return layout;
+}
+
 static uint32_t af_editor_shortcut_modifiers(SDL_Keymod modifiers) {
     uint32_t result = 0U;
     result |= (modifiers & SDL_KMOD_CTRL) != 0U ? AF_EDITOR_SHORTCUT_MODIFIER_CTRL : 0U;
@@ -151,6 +169,97 @@ static AfResult af_editor_register_action(AfEditorState *editor, AfEditorMenuAct
                : af_editor_action_register(&editor->actions, &definition);
 }
 
+static const char *af_editor_action_description(AfEditorMenuAction action, AfEditorTopMenu menu) {
+    switch (action) {
+    case AF_EDITOR_MENU_ACTION_NEW_PROJECT:
+        return "Begin with a fresh canvas.";
+    case AF_EDITOR_MENU_ACTION_NEW_FROM_TEMPLATE:
+        return "Get a head start with a ready-made scene.";
+    case AF_EDITOR_MENU_ACTION_OPEN_PROJECT:
+        return "Continue working on an Arcflow project.";
+    case AF_EDITOR_MENU_ACTION_OPEN_RECENT:
+        return "Pick up where you left off.";
+    case AF_EDITOR_MENU_ACTION_SAVE_PROJECT:
+        return "Save your latest changes to this project.";
+    case AF_EDITOR_MENU_ACTION_SAVE_PROJECT_AS:
+        return "Save a copy with a new name or location.";
+    case AF_EDITOR_MENU_ACTION_EXPORT:
+        return "Share your work as video, GIF, SVG or animation.";
+    case AF_EDITOR_MENU_ACTION_UNDO:
+        return "Take one step back. Experiment freely.";
+    case AF_EDITOR_MENU_ACTION_REDO:
+        return "Restore the change you just undid.";
+    case AF_EDITOR_MENU_ACTION_DUPLICATE:
+        return "Make another copy of the selected objects.";
+    case AF_EDITOR_MENU_ACTION_RENAME:
+        return "Give the selected layer a meaningful name.";
+    case AF_EDITOR_MENU_ACTION_DELETE:
+        return "Remove selected objects. Undo brings them back.";
+    case AF_EDITOR_MENU_ACTION_GRID:
+        return "Show or hide the canvas grid.";
+    case AF_EDITOR_MENU_ACTION_SNAP:
+        return "Align precisely with nearby edges and centers.";
+    case AF_EDITOR_MENU_ACTION_FIT_CANVAS:
+        return "See the entire document in your workspace.";
+    case AF_EDITOR_MENU_ACTION_RESET_VIEW:
+        return "Return to the default canvas view.";
+    case AF_EDITOR_MENU_ACTION_PLAY:
+        return "Preview your animation, or pause at this moment.";
+    case AF_EDITOR_MENU_ACTION_STOP:
+        return "Return the playhead to the start.";
+    case AF_EDITOR_MENU_ACTION_ADD_KEY:
+        return "Capture the selected property at the playhead.";
+    case AF_EDITOR_MENU_ACTION_CURVES:
+        return "Shape the speed and feel of your animation.";
+    case AF_EDITOR_MENU_ACTION_IMPORT_IMAGE:
+        return "Bring an image into your scene.";
+    case AF_EDITOR_MENU_ACTION_FIND_HIERARCHY:
+        return "Find a layer by name in your scene.";
+    case AF_EDITOR_MENU_ACTION_COMMAND_PALETTE:
+        return "Find any action without leaving your canvas.";
+    case AF_EDITOR_MENU_ACTION_RESET_WORKSPACE:
+        return "Restore the default panel arrangement.";
+    case AF_EDITOR_MENU_ACTION_SHORTCUTS:
+        return "Learn or customize your keyboard shortcuts.";
+    case AF_EDITOR_MENU_ACTION_GUIDED_PROJECT:
+        return "Create your first animation in six steps.";
+    case AF_EDITOR_MENU_ACTION_COMBINE:
+        return "Turn selected shapes into one editable compound path.";
+    case AF_EDITOR_MENU_ACTION_BREAK_APART:
+        return "Separate a compound path into individual objects.";
+    case AF_EDITOR_MENU_ACTION_WELD:
+        return "Merge two closed shapes into one silhouette.";
+    case AF_EDITOR_MENU_ACTION_TRIM:
+        return "Cut the other shape out of the primary selection.";
+    case AF_EDITOR_MENU_ACTION_INTERSECT:
+        return "Keep the area shared by two closed shapes.";
+    case AF_EDITOR_MENU_ACTION_TEXT:
+        return "Create or edit text directly on the canvas.";
+    default:
+        break;
+    }
+    switch (menu) {
+    case AF_EDITOR_MENU_FILE:
+        return "Manage your project and its files.";
+    case AF_EDITOR_MENU_EDIT:
+        return "Work with the objects in your selection.";
+    case AF_EDITOR_MENU_VIEW:
+        return "Make the canvas work for you.";
+    case AF_EDITOR_MENU_ANIMATION:
+        return "Build and refine your animation.";
+    case AF_EDITOR_MENU_ASSETS:
+        return "Organize the images in your project.";
+    case AF_EDITOR_MENU_WORKSPACE:
+        return "Arrange your creative workspace.";
+    case AF_EDITOR_MENU_TOOLS:
+        return "Position and align your objects precisely.";
+    case AF_EDITOR_MENU_SHAPE:
+        return "Refine the geometry of your selection.";
+    default:
+        return "Explore Arcflow and learn something new.";
+    }
+}
+
 static AfResult af_editor_register_actions(AfEditorState *editor) {
     AfResult result = af_editor_action_registry_init(&editor->actions, editor->action_storage,
                                                      AF_EDITOR_MAX_ACTIONS);
@@ -159,39 +268,39 @@ static AfResult af_editor_register_actions(AfEditorState *editor) {
          menu = (AfEditorTopMenu)(menu + 1)) {
         const AfEditorTopMenuInfo *info = af_editor_top_menu_info(menu);
         for (uint32_t item = 0U; info != NULL && item < info->item_count; ++item) {
-            result =
-                af_editor_register_action(editor, info->items[item].action, info->items[item].label,
-                                          "Run this editor command.", info->label);
+            result = af_editor_register_action(
+                editor, info->items[item].action, info->items[item].label,
+                af_editor_action_description(info->items[item].action, menu), info->label);
         }
     }
     if (result == AF_RESULT_SUCCESS) {
-        result = af_editor_register_action(editor, AF_EDITOR_MENU_ACTION_ALIGN_RIGHT, "ALIGN RIGHT",
+        result = af_editor_register_action(editor, AF_EDITOR_MENU_ACTION_ALIGN_RIGHT, "Align right",
                                            "Align selected objects to the right.",
                                            "layout selection tools");
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_editor_register_action(editor, AF_EDITOR_MENU_ACTION_ALIGN_BOTTOM,
-                                           "ALIGN BOTTOM", "Align selected objects to the bottom.",
+                                           "Align bottom", "Align selected objects to the bottom.",
                                            "layout selection tools");
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_editor_register_action(
-            editor, AF_EDITOR_MENU_ACTION_ADD_HORIZONTAL_GUIDE, "ADD HORIZONTAL GUIDE",
+            editor, AF_EDITOR_MENU_ACTION_ADD_HORIZONTAL_GUIDE, "Add horizontal guide",
             "Add a guide through the canvas center.", "canvas ruler guide");
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_editor_register_action(editor, AF_EDITOR_MENU_ACTION_CLEAR_GUIDES,
-                                           "CLEAR CANVAS GUIDES", "Remove all canvas guides.",
+                                           "Clear canvas guides", "Remove all canvas guides.",
                                            "canvas ruler guide");
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_editor_register_action(editor, AF_EDITOR_MENU_ACTION_RECOVERY,
-                                           "RECOVERY OPTIONS", "Open autosave recovery controls.",
+                                           "Recovery options", "Open autosave recovery controls.",
                                            "autosave restore discard backup");
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_editor_register_action(
-            editor, AF_EDITOR_MENU_ACTION_PRESET_LIBRARY, "STYLE PRESET LIBRARY",
+            editor, AF_EDITOR_MENU_ACTION_PRESET_LIBRARY, "Style preset library",
             "Save and apply reusable style presets.", "style fill stroke reusable");
     }
     return result;
@@ -798,6 +907,7 @@ static void af_editor_execute_workflow_action(AfEditorState *editor, AfEditorMen
         af_editor_status(editor, "Type to filter the scene hierarchy; Esc clears");
         break;
     case AF_EDITOR_MENU_ACTION_COMMAND_PALETTE:
+        editor->hierarchy_search_active = false;
         (void)af_editor_command_palette_open(&editor->command_palette,
                                              AF_EDITOR_ACTION_CONTEXT_ALL);
         (void)af_platform_text_input_set(&editor->window, true);

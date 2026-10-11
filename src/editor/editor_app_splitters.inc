@@ -51,8 +51,8 @@ static void af_editor_render_splitters(AfEditorState *editor, int width, int hei
                                       : AF_EDITOR_DRAG_NONE;
     const float right = (float)width - editor->right_width;
     const float timeline = (float)height - editor->status_height - editor->timeline_height;
-    const AfColor idle = {0.25F, 0.3F, 0.38F, 1};
-    const AfColor hover = {0.25F, 0.73F, 1, 1};
+    const AfColor idle = AF_UI_BORDER;
+    const AfColor hover = AF_UI_ACCENT;
     const AfEditorDragMode modes[] = {AF_EDITOR_DRAG_LEFT_DOCK,       AF_EDITOR_DRAG_RIGHT_DOCK,
                                       AF_EDITOR_DRAG_TIMELINE_HEIGHT, AF_EDITOR_DRAG_TOOLBAR_HEIGHT,
                                       AF_EDITOR_DRAG_STATUS_HEIGHT,   AF_EDITOR_DRAG_ASSET_HEIGHT,
@@ -71,8 +71,13 @@ static void af_editor_render_splitters(AfEditorState *editor, int width, int hei
     for (uint32_t index = 0U; index < 7U; ++index) {
         if (modes[index] == AF_EDITOR_DRAG_ASSET_HEIGHT && !editor->asset_browser_visible)
             continue;
-        af_editor_add_rect(editor, rects[index][0], rects[index][1], rects[index][2],
-                           rects[index][3], mode == modes[index] ? hover : idle, 100145);
+        const bool vertical = rects[index][2] == 4;
+        const float inset = mode == modes[index] ? 0 : 1.5F;
+        af_editor_add_rect(editor, rects[index][0] + (vertical ? inset : 0),
+                           rects[index][1] + (vertical ? 0 : inset),
+                           rects[index][2] - (vertical ? inset * 2 : 0),
+                           rects[index][3] - (vertical ? 0 : inset * 2),
+                           mode == modes[index] ? hover : idle, 100145);
     }
     if (editor->resize_horizontal_cursor == NULL) {
         editor->resize_horizontal_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);

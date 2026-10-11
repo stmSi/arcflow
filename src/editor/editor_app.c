@@ -16,6 +16,7 @@
 #include "editor/editor_recovery.h"
 #include "editor/editor_snapping.h"
 #include "editor/editor_text.h"
+#include "editor/editor_theme.h"
 #include "editor/editor_vector_tools.h"
 #include "editor/editor_workflow.h"
 #include "onboarding/onboarding.h"
@@ -217,6 +218,12 @@ typedef struct AfEditorTooltip {
     const char *shortcut;
 } AfEditorTooltip;
 
+typedef struct AfEditorHoverFeedback {
+    uint64_t key;
+    uint32_t frame;
+    float amount;
+} AfEditorHoverFeedback;
+
 typedef struct AfEditorState {
     AfAllocator allocator;
     AfProject project;
@@ -406,6 +413,9 @@ typedef struct AfEditorState {
     char output_path[AF_EDITOR_PATH_CAPACITY];
     char sequence_prefix[AF_EDITOR_PATH_CAPACITY];
     char status[AF_EDITOR_STATUS_CAPACITY];
+    AfEditorHoverFeedback hover_feedback[256];
+    uint64_t ui_previous_ticks;
+    float ui_delta_seconds;
     uint32_t dialog_event_type;
     AfEditorDialogAction dialog_action;
     uint32_t maximum_frames;
@@ -416,6 +426,7 @@ typedef struct AfEditorState {
     bool selection_smoke;
     bool outline_smoke;
     bool inspector_smoke;
+    bool studio_smoke;
     bool template_smoke;
     bool vector_tools_smoke;
     bool pan_smoke;
@@ -614,6 +625,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_export.inc"
 #include "editor/editor_app_workflow_core.inc"
 #include "editor/editor_app_onboarding.inc"
+#include "editor/editor_app_studio.inc"
 #include "editor/editor_app_workflow_render.inc"
 #include "editor/editor_app_workflow_input.inc"
 #include "editor/editor_app_input.inc"
@@ -621,6 +633,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_snap_smoke.inc"
 #include "editor/editor_app_export_smoke.inc"
 #include "editor/editor_app_gradient_smoke.inc"
+#include "editor/editor_app_studio_smoke.inc"
 #include "editor/editor_app_template_smoke.inc"
 #include "editor/editor_app_color_input_smoke.inc"
 // clang-format on
@@ -736,8 +749,8 @@ int af_editor_run(int argument_count, char **arguments) {
                                   &editor.font_file);
     if (result != AF_RESULT_SUCCESS) {
         char font_path[AF_EDITOR_PATH_CAPACITY];
-        if (af_platform_resource_path("fonts/NotoSans-Bold.ttf", font_path, sizeof(font_path)) ==
-            AF_RESULT_SUCCESS) {
+        if (af_platform_resource_path("fonts/LiberationSans-Regular.ttf", font_path,
+                                      sizeof(font_path)) == AF_RESULT_SUCCESS) {
             result = af_file_read_limited(font_path, 4U * 1024U * 1024U, &editor.allocator,
                                           &editor.font_file);
         }
@@ -909,6 +922,11 @@ int af_editor_run(int argument_count, char **arguments) {
             result = af_editor_template_smoke(&editor, width, height);
             if (result != AF_RESULT_SUCCESS)
                 goto cleanup;
+        }
+        if (editor.studio_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_studio_smoke(&editor, width, height);
+            if (result != AF_RESULT_SUCCESS)
+                break;
         }
         if (editor.menu_smoke && editor.rendered_frames == 0U) {
             result = af_editor_menu_interaction_smoke(&editor, width, height);

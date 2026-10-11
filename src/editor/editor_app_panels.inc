@@ -2,20 +2,23 @@ static void af_editor_render_hierarchy(AfEditorState *editor, int height) {
     uint32_t visible_rows = 0U;
     uint32_t row = 0U;
     const float top = editor->toolbar_height + 8.0F;
-    af_editor_add_text(editor, 14.0F, 15.0F, "SCENE HIERARCHY", 1.5F, editor->left_width - 28.0F,
-                       (AfColor){0.78F, 0.81F, 0.88F, 1.0F}, 100125);
-    af_editor_add_button_rect(editor, 12.0F, 30.0F, 94.0F, 17.0F,
-                              af_editor_hovered_rect(editor, 12, 30, 94, 17)
-                                  ? (AfColor){0.22F, 0.42F, 0.62F, 1}
-                                  : (AfColor){0.16F, 0.23F, 0.32F, 1},
-                              100120);
-    af_editor_add_text(editor, 18, 35, "GROUP  CTRL+G", 0.57F, 84, (AfColor){0.7F, 0.84F, 1, 1},
-                       100125);
+    char count[24];
+    (void)snprintf(count, sizeof(count), "%u", editor->project.scene.count);
+    af_editor_add_text(editor, 14, 13, "Layers", 1.7F, editor->left_width - 68, AF_UI_TEXT, 100125);
+    af_editor_add_text(editor, editor->left_width - 40, 16, count, 0.8F, 28, AF_UI_MUTED, 100125);
+    af_editor_add_button_rect(editor, 12, 30, 94, 17, AF_UI_SURFACE, 100120);
+    af_editor_add_text(editor, 18, 34, "Group   Ctrl+G", 0.57F, 84, AF_UI_MUTED, 100125);
     if ((float)height > top + editor->status_height) {
         const float browser_height = editor->asset_browser_visible ? editor->asset_height : 0.0F;
         visible_rows = (uint32_t)(fmaxf(0.0F, (float)height - top - editor->status_height -
                                                   editor->timeline_height - browser_height) /
                                   AF_EDITOR_ROW_HEIGHT);
+    }
+    if (editor->hierarchy_count == 0 && editor->hierarchy_search[0] && visible_rows >= 3) {
+        af_editor_add_text(editor, 16, top + 18, "No matching layers", 1, editor->left_width - 32,
+                           AF_UI_TEXT, 100125);
+        af_editor_add_text(editor, 16, top + 42, "Try another name. Esc clears.", .7F,
+                           editor->left_width - 32, AF_UI_MUTED, 100125);
     }
     for (row = 0U; row < visible_rows && editor->hierarchy_scroll + row < editor->hierarchy_count;
          ++row) {
@@ -24,29 +27,38 @@ static void af_editor_render_hierarchy(AfEditorState *editor, int height) {
         const AfSceneNode *node = &editor->project.scene.nodes[node_index];
         const float y = top + (float)row * AF_EDITOR_ROW_HEIGHT;
         const float indent = 12.0F + (float)editor->hierarchy_depth[hierarchy_index] * 14.0F;
-        AfColor row_color = (row & 1U) != 0U ? (AfColor){0.105F, 0.115F, 0.14F, 1.0F}
-                                             : (AfColor){0.12F, 0.13F, 0.155F, 1.0F};
+        AfColor row_color = AF_UI_PANEL;
         if (node->id == editor->selected_id) {
-            row_color = (AfColor){0.16F, 0.34F, 0.58F, 1.0F};
+            row_color = AF_UI_SELECTION;
         } else if (af_editor_selection_contains(editor, node->id)) {
-            row_color = (AfColor){0.12F, 0.25F, 0.4F, 1.0F};
+            row_color = AF_UI_SELECTION;
         } else if (af_editor_hovered_rect(editor, 6.0F, y, editor->left_width - 12.0F,
                                           AF_EDITOR_ROW_HEIGHT - 2.0F)) {
-            row_color = (AfColor){0.18F, 0.2F, 0.24F, 1.0F};
+            row_color = AF_UI_SURFACE;
         }
-        af_editor_add_rect(editor, 6.0F, y, editor->left_width - 12.0F, AF_EDITOR_ROW_HEIGHT - 2.0F,
-                           row_color, 100110);
+        af_editor_add_surface(editor, 6, y, editor->left_width - 12, AF_EDITOR_ROW_HEIGHT - 2,
+                              row_color, 5, 100110);
+        if (af_editor_selection_contains(editor, node->id))
+            af_editor_add_surface(editor, 6, y + 5, 3, AF_EDITOR_ROW_HEIGHT - 12, AF_UI_ACCENT,
+                                  1.5F, 100115);
         af_editor_add_shape(
             editor,
             node->type == AF_NODE_GROUP || node->type == AF_NODE_PATH || node->type == AF_NODE_IMAGE
                 ? AF_NODE_ROUNDED_RECTANGLE
                 : node->type,
             (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = indent, .ty = y + 6.0F},
-            (AfVec2){15.0F, 15.0F},
-            node->type == AF_NODE_GROUP ? (AfColor){0.72F, 0.58F, 0.22F, 1.0F} : node->fill,
+            (AfVec2){15.0F, 15.0F}, node->type == AF_NODE_GROUP ? AF_UI_MUTED : node->fill,
             node->type == AF_NODE_GROUP ? 3.0F : node->corner_radius, 100120);
-        af_editor_add_text(editor, indent + 23.0F, y + 10.0F, editor->project.names[node_index],
-                           1.2F, editor->left_width - indent - 34.0F,
+        char rename_label[AF_PROJECT_NAME_CAPACITY + 2];
+        const bool renaming = editor->rename_active && node->id == editor->selected_id;
+        if (renaming) {
+            (void)snprintf(rename_label, sizeof(rename_label), "%s|", editor->rename_buffer);
+            af_editor_add_rect(editor, indent + 22, y + AF_EDITOR_ROW_HEIGHT - 4,
+                               editor->left_width - indent - 32, 1, AF_UI_ACCENT, 100120);
+        }
+        af_editor_add_text(editor, indent + 23.0F, y + 8.0F,
+                           renaming ? rename_label : editor->project.names[node_index],
+                           1.0F, editor->left_width - indent - 34.0F,
                            (AfColor){0.78F, 0.81F, 0.88F, 1.0F}, 100125);
         if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY && editor->hierarchy_drag_started &&
             af_editor_hovered_rect(editor, 0, y, editor->left_width, AF_EDITOR_ROW_HEIGHT)) {
@@ -93,9 +105,9 @@ static void af_editor_render_asset_browser(AfEditorState *editor, int height) {
                        (AfColor){0.07F, 0.078F, 0.098F, 1.0F}, 100105);
     af_editor_add_rect(editor, 0.0F, top, editor->left_width, 2.0F,
                        (AfColor){0.24F, 0.28F, 0.36F, 1.0F}, 100115);
-    af_editor_add_text(editor, 12.0F, top + 12.0F, "IMAGE ASSETS", 1.1F, editor->left_width - 24.0F,
+    af_editor_add_text(editor, 12.0F, top + 12.0F, "Assets", 1.1F, editor->left_width - 24.0F,
                        (AfColor){0.68F, 0.78F, 0.94F, 1.0F}, 100125);
-    af_editor_add_text(editor, 12.0F, top + 29.0F, "ASSETS > IMPORT IMAGE", 0.58F,
+    af_editor_add_text(editor, 12.0F, top + 29.0F, "Images for your scene", 0.58F,
                        editor->left_width - 24.0F, (AfColor){0.42F, 0.47F, 0.56F, 1.0F}, 100125);
     for (uint32_t row = 0U;
          row < visible_rows && editor->asset_scroll + row < editor->project.image_data.asset_count;
@@ -120,9 +132,14 @@ static void af_editor_render_asset_browser(AfEditorState *editor, int height) {
                            (AfColor){0.76F, 0.8F, 0.88F, 1.0F}, 100130);
     }
     if (editor->project.image_data.asset_count == 0U) {
-        af_editor_add_text(editor, 12.0F, top + 62.0F, "NO IMAGES IMPORTED", 0.75F,
-                           editor->left_width - 24.0F, (AfColor){0.42F, 0.47F, 0.56F, 1.0F},
-                           100125);
+        if (editor->asset_height >= 128) {
+            af_editor_add_text(editor, 14, top + 61, "Drop images here to begin", 0.85F,
+                               editor->left_width - 28, AF_UI_MUTED, 100125);
+            af_editor_add_button_rect(editor, 12, top + 88, editor->left_width - 24, 30,
+                                      AF_UI_SURFACE, 100120);
+            af_editor_add_text(editor, 22, top + 97, "+ Import image", 0.9F,
+                               editor->left_width - 44, AF_UI_TEXT, 100125);
+        }
     } else if (editor->project.image_data.asset_count > visible_rows) {
         char range[48];
         const uint32_t last =
@@ -345,16 +362,10 @@ static void af_editor_render_toolbar(AfEditorState *editor, int width) {
         if (x < editor->left_width + 4.0F || x + 38.0F > right - 4.0F)
             continue;
         const bool active = editor->active_tool == (AfEditorVectorTool)index;
-        const bool hovered = af_editor_hovered_rect(editor, x, top + 5.0F, 38.0F, 34.0F);
-        const AfColor button = active    ? (AfColor){0.15F, 0.48F, 0.78F, 1.0F}
-                               : hovered ? (AfColor){0.25F, 0.31F, 0.41F, 1.0F}
-                                         : (AfColor){0.18F, 0.2F, 0.25F, 1.0F};
+        const AfColor button = active ? AF_UI_PRIMARY : AF_UI_SURFACE;
         af_editor_add_button_rect(editor, x, top + 5.0F, 38.0F, 34.0F, button, 100110);
-        af_editor_render_tool_icon(editor, (AfEditorVectorTool)index, x + 9.0F, top + 7.0F,
-                                   (AfColor){0.76F, 0.87F, 1.0F, 1.0F});
-        af_editor_add_text(editor, x + 3.0F, top + 30.0F,
-                           af_editor_vector_tool_label((AfEditorVectorTool)index), 0.43F, 32.0F,
-                           (AfColor){0.9F, 0.92F, 0.97F, 1.0F}, 100135);
+        af_editor_render_tool_icon(editor, (AfEditorVectorTool)index, x + 9.0F, top + 12.0F,
+                                   active ? AF_UI_TEXT : AF_UI_MUTED);
     }
     if (grid_x < editor->left_width + 4.0F || grid_x + 88.0F > right - 4.0F)
         return;
@@ -371,10 +382,10 @@ static void af_editor_render_toolbar(AfEditorState *editor, int width) {
                                         : (AfColor){0.4F, 0.42F, 0.48F, 1.0F},
                        100125);
     af_editor_add_text(editor, grid_x + 19.0F, top + 8.0F,
-                       editor->grid_visible ? "GRID ON" : "GRID OFF", 0.65F, 62.0F,
+                       editor->grid_visible ? "Grid on" : "Grid off", 0.65F, 62.0F,
                        (AfColor){0.76F, 0.79F, 0.86F, 1.0F}, 100130);
     af_editor_add_text(editor, grid_x + 19.0F, top + 27.0F,
-                       editor->snapping ? "SNAP ON" : "SNAP OFF", 0.65F, 62.0F,
+                       editor->snapping ? "Snap on" : "Snap off", 0.65F, 62.0F,
                        (AfColor){0.76F, 0.79F, 0.86F, 1.0F}, 100130);
 }
 
@@ -391,11 +402,10 @@ static void af_editor_render_inspector_field(AfEditorState *editor, float x, flo
     char display[64];
     (void)snprintf(display, sizeof(display), "%s  %s", label,
                    editing ? editor->inspector_buffer : value);
-    af_editor_add_button_rect(editor, x, y, width, AF_EDITOR_INSPECTOR_FIELD_HEIGHT,
-                              active ? (AfColor){0.16F, 0.43F, 0.72F, 1.0F}
-                                     : (hovered ? (AfColor){0.2F, 0.23F, 0.29F, 1.0F}
-                                                : (AfColor){0.135F, 0.15F, 0.19F, 1.0F}),
-                              100120);
+    af_editor_add_button_rect(
+        editor, x, y, width, AF_EDITOR_INSPECTOR_FIELD_HEIGHT,
+        active ? AF_UI_SELECTION : (hovered ? (AfColor){0.2F, 0.23F, 0.29F, 1.0F} : AF_UI_FIELD),
+        100120);
     af_editor_add_text(
         editor, x + 7.0F, y + 8.0F, display, 0.68F, width - (steppers ? 52.0F : 12.0F),
         active ? (AfColor){0.96F, 0.98F, 1.0F, 1.0F} : (AfColor){0.74F, 0.78F, 0.87F, 1.0F},
@@ -424,8 +434,7 @@ static void af_editor_render_inspector_field(AfEditorState *editor, float x, flo
     }
     if (active) {
         af_editor_add_rect(editor, x + 3.0F, y + AF_EDITOR_INSPECTOR_FIELD_HEIGHT - 3.0F,
-                           width - (steppers ? 46.0F : 6.0F), 2.0F,
-                           (AfColor){0.48F, 0.82F, 1.0F, 1.0F}, 100140);
+                           width - (steppers ? 46.0F : 6.0F), 2.0F, AF_UI_ACCENT, 100140);
     }
 }
 
@@ -442,19 +451,15 @@ static void af_editor_render_color_picker(AfEditorState *editor, float x,
     } else {
         hue = editor->color_hue;
     }
-    af_editor_add_button_rect(editor, x, AF_EDITOR_COLOR_TARGET_Y, 72.0F,
-                              AF_EDITOR_COLOR_TARGET_HEIGHT,
-                              editor->color_target_outline ? (AfColor){0.18F, 0.2F, 0.25F, 1.0F}
-                                                           : (AfColor){0.18F, 0.46F, 0.74F, 1.0F},
-                              100120);
-    af_editor_add_button_rect(editor, x + 78.0F, AF_EDITOR_COLOR_TARGET_Y, 96.0F,
-                              AF_EDITOR_COLOR_TARGET_HEIGHT,
-                              editor->color_target_outline ? (AfColor){0.18F, 0.46F, 0.74F, 1.0F}
-                                                           : (AfColor){0.18F, 0.2F, 0.25F, 1.0F},
-                              100120);
-    af_editor_add_text(editor, x + 19.0F, AF_EDITOR_COLOR_TARGET_Y + 6.0F, "FILL", 0.62F, 40.0F,
+    af_editor_add_button_rect(
+        editor, x, AF_EDITOR_COLOR_TARGET_Y, 72.0F, AF_EDITOR_COLOR_TARGET_HEIGHT,
+        editor->color_target_outline ? (AfColor){0.18F, 0.2F, 0.25F, 1.0F} : AF_UI_PRIMARY, 100120);
+    af_editor_add_button_rect(
+        editor, x + 78.0F, AF_EDITOR_COLOR_TARGET_Y, 96.0F, AF_EDITOR_COLOR_TARGET_HEIGHT,
+        editor->color_target_outline ? AF_UI_PRIMARY : (AfColor){0.18F, 0.2F, 0.25F, 1.0F}, 100120);
+    af_editor_add_text(editor, x + 19.0F, AF_EDITOR_COLOR_TARGET_Y + 6.0F, "Fill", 0.62F, 40.0F,
                        (AfColor){0.88F, 0.91F, 0.97F, 1.0F}, 100130);
-    af_editor_add_text(editor, x + 88.0F, AF_EDITOR_COLOR_TARGET_Y + 6.0F, "OUTLINE", 0.62F, 74.0F,
+    af_editor_add_text(editor, x + 88.0F, AF_EDITOR_COLOR_TARGET_Y + 6.0F, "Outline", 0.62F, 74.0F,
                        (AfColor){0.88F, 0.91F, 0.97F, 1.0F}, 100130);
     for (uint32_t row = 0U; row < 8U; ++row) {
         for (uint32_t column = 0U; column < 12U; ++column) {
@@ -622,17 +627,58 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
                        editor->selected_count);
         selected_name = selection_name;
     }
-    af_editor_add_text(editor, x, 15.0F, "INSPECTOR", 1.5F, editor->right_width - 36.0F,
+    af_editor_add_text(editor, x, 15.0F, "Inspector", 1.5F, editor->right_width - 36.0F,
                        (AfColor){0.78F, 0.81F, 0.88F, 1.0F}, 100125);
-    af_editor_add_text(editor, x, 35.0F, selected_name == NULL ? "NO SELECTION" : selected_name,
-                       1.0F, editor->right_width - 36.0F, (AfColor){0.5F, 0.55F, 0.65F, 1.0F},
-                       100125);
+    af_editor_add_text(editor, x, 35.0F,
+                       selected_name == NULL ? "Document overview" : selected_name, 1.0F,
+                       editor->right_width - 36.0F, (AfColor){0.5F, 0.55F, 0.65F, 1.0F}, 100125);
+    if (selected == NULL) {
+        const float available = editor->right_width - 36;
+        char document[80];
+        af_editor_add_surface(editor, x, 82, 48, 48, AF_UI_SELECTION, 12, 100110);
+        af_editor_render_tool_icon(editor, AF_EDITOR_TOOL_SELECT, x + 14, 94, AF_UI_ACCENT);
+        af_editor_add_text(editor, x, 151, "A little space to create.", 1.7F, available, AF_UI_TEXT,
+                           100125);
+        af_editor_add_text(editor, x, 180, "Select an object to edit its details.", 0.9F, available,
+                           AF_UI_MUTED, 100125);
+        af_editor_add_surface(editor, x, 219, available, 80, AF_UI_SURFACE, 8, 100110);
+        af_editor_add_text(editor, x + 12, 234, "DOCUMENT", 0.55F, available - 24, AF_UI_MUTED,
+                           100125);
+        (void)snprintf(document, sizeof(document), "%.0f × %.0f px",
+                       (double)editor->project.canvas_size.x,
+                       (double)editor->project.canvas_size.y);
+        af_editor_add_text(editor, x + 12, 256, document, 1.2F, available - 24, AF_UI_TEXT, 100125);
+        (void)snprintf(document, sizeof(document), "%u objects  ·  %u %s",
+                       editor->project.scene.count, editor->project.clip_count,
+                       editor->project.clip_count == 1 ? "animation clip" : "animation clips");
+        af_editor_add_text(editor, x + 12, 280, document, 0.65F, available - 24, AF_UI_MUTED,
+                           100125);
+        af_editor_add_button_rect(editor, x, 313, available, 32, AF_UI_SURFACE, 100120);
+        af_editor_add_text(editor, x + 12, 323, "Fit canvas", 0.9F, available - 84, AF_UI_TEXT,
+                           100135);
+        af_editor_add_text(editor, x + available - 60, 323, "Shift+0", 0.7F, 50, AF_UI_MUTED,
+                           100135);
+        af_editor_add_rect(editor, x, 372, available, 1, AF_UI_BORDER, 100110);
+        af_editor_add_text(editor, x, 394, "Make your first move", 1.1F, available, AF_UI_TEXT,
+                           100125);
+        const char *labels[] = {"Draw a rectangle", "Create a path", "Add some text"};
+        const char *keys[] = {"R", "P", "T"};
+        for (uint32_t row = 0; row < 3; ++row) {
+            const float row_y = 423 + (float)row * 38;
+            af_editor_add_button_rect(editor, x, row_y, available, 30, AF_UI_PANEL, 100120);
+            af_editor_add_text(editor, x + 10, row_y + 9, labels[row], 0.85F, available - 40,
+                               AF_UI_MUTED, 100135);
+            af_editor_add_text(editor, x + available - 24, row_y + 9, keys[row], 0.85F, 16,
+                               AF_UI_ACCENT, 100135);
+        }
+        return;
+    }
     if (selected != NULL && selected->type == AF_NODE_IMAGE) {
         af_editor_render_image_inspector(editor, width, selected);
         return;
     }
     af_editor_render_color_picker(editor, x, selected);
-    af_editor_add_text(editor, x, AF_EDITOR_INSPECTOR_LABEL_Y, "TRANSFORM & GEOMETRY", 0.62F,
+    af_editor_add_text(editor, x, AF_EDITOR_INSPECTOR_LABEL_Y, "Transform", 0.62F,
                        editor->right_width - 36.0F, (AfColor){0.48F, 0.55F, 0.68F, 1.0F}, 100125);
     {
         const float ratio_width = 76.0F;
@@ -641,7 +687,7 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
             editor, ratio_x, AF_EDITOR_INSPECTOR_LABEL_Y - 4.0F, ratio_width, 17.0F);
         af_editor_add_button_rect(
             editor, ratio_x, AF_EDITOR_INSPECTOR_LABEL_Y - 4.0F, ratio_width, 17.0F,
-            editor->inspector_ratio_locked ? (AfColor){0.16F, 0.48F, 0.78F, 1.0F}
+            editor->inspector_ratio_locked ? AF_UI_PRIMARY
                                            : (hovered ? (AfColor){0.22F, 0.27F, 0.35F, 1.0F}
                                                       : (AfColor){0.16F, 0.18F, 0.23F, 1.0F}),
             100130);
@@ -744,7 +790,7 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
                                af_editor_is_text(editor, selected->id) ? "CONVERT TEXT TO PATH"
                                : selected->type == AF_NODE_PATH && selected->polygon_sides == 0U
                                    ? "EDIT VECTOR POINTS"
-                                   : "CONVERT TO PATH",
+                                   : "Convert to path",
                                0.7F, editor->right_width - 56.0F,
                                enabled ? (AfColor){0.78F, 0.88F, 1.0F, 1.0F}
                                        : (AfColor){0.4F, 0.44F, 0.5F, 1.0F},
@@ -779,14 +825,14 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
                                AF_EDITOR_LAYOUT_ROW_Y + 9.0F, layout_labels[index], 0.58F, 27.0F,
                                (AfColor){0.82F, 0.84F, 0.9F, 1.0F}, 100135);
         }
-        af_editor_add_text(editor, x, AF_EDITOR_PARTICLE_LABEL_Y, "PARTICLE EMITTER", 0.85F,
+        af_editor_add_text(editor, x, AF_EDITOR_PARTICLE_LABEL_Y, "Particles", 0.85F,
                            editor->right_width - 36.0F,
                            emitter == NULL ? (AfColor){0.45F, 0.49F, 0.58F, 1.0F}
                                            : (AfColor){0.45F, 0.78F, 1.0F, 1.0F},
                            100125);
         if (emitter == NULL) {
             af_editor_add_text(editor, x, AF_EDITOR_PARTICLE_LABEL_Y + 21.0F,
-                               "RIGHT CLICK > TOGGLE PARTICLES", 0.62F, editor->right_width - 36.0F,
+                               "Right-click to add an emitter", 0.62F, editor->right_width - 36.0F,
                                (AfColor){0.52F, 0.56F, 0.64F, 1.0F}, 100125);
         } else {
             static const char *const page_names[] = {"EMIT", "MOVE",  "FORCE", "COLL",

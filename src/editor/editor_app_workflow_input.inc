@@ -60,20 +60,29 @@ static bool af_editor_workflow_mouse_down(AfEditorState *editor, int width, int 
         return true;
     }
     if (editor->command_palette.open) {
-        const float box_x = ((float)width - AF_EDITOR_WORKFLOW_OVERLAY_WIDTH) * 0.5F;
-        const float first_y = 170.0F;
-        if (x >= box_x + 12.0F && x < box_x + AF_EDITOR_WORKFLOW_OVERLAY_WIDTH - 12.0F &&
-            y >= first_y) {
-            const uint32_t row = (uint32_t)((y - first_y) / 38.0F);
-            const float row_y = first_y + (float)row * 38.0F;
+        const AfEditorPaletteLayout box = af_editor_palette_layout(width, height);
+        editor->command_palette.page_size = box.rows;
+        const bool outside =
+            x < box.x || x >= box.x + box.width || y < box.y || y >= box.y + box.height;
+        const bool close = x >= box.x + box.width - 60 && x < box.x + box.width - 20 &&
+                           y >= box.y + 14 && y < box.y + 39;
+        if (outside || close) {
+            af_editor_command_palette_close(&editor->command_palette);
+            (void)af_platform_text_input_set(&editor->window, false);
+            return true;
+        }
+        const float first_y = box.y + 104;
+        if (x >= box.x + 12 && x < box.x + box.width - 12 && y >= first_y) {
+            const uint32_t row = (uint32_t)((y - first_y) / box.row_height);
+            const float row_y = first_y + (float)row * box.row_height;
             const uint32_t first_result =
-                (editor->command_palette.selected_index / AF_EDITOR_WORKFLOW_PALETTE_ROWS) *
-                AF_EDITOR_WORKFLOW_PALETTE_ROWS;
-            if (first_result + row < editor->command_palette.result_count &&
-                row < AF_EDITOR_WORKFLOW_PALETTE_ROWS && y < row_y + 34.0F) {
+                (editor->command_palette.selected_index / box.rows) * box.rows;
+            if (first_result + row < editor->command_palette.result_count && row < box.rows &&
+                y < row_y + box.row_height - 4) {
                 const AfEditorActionId action_id =
                     editor->command_palette.results[first_result + row].action_id;
                 af_editor_command_palette_close(&editor->command_palette);
+                (void)af_platform_text_input_set(&editor->window, false);
                 (void)af_editor_action_execute(&editor->actions, action_id);
             }
         }
@@ -338,6 +347,8 @@ static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEven
         return true;
     }
     if (editor->command_palette.open) {
+        editor->command_palette.page_size =
+            af_editor_palette_layout(editor->window_width, editor->window_height).rows;
         AfEditorCommandPaletteKey palette_key = AF_EDITOR_COMMAND_PALETTE_CANCEL;
         AfEditorActionId action_id = 0U;
         bool handled = true;
@@ -365,11 +376,12 @@ static bool af_editor_workflow_key(AfEditorState *editor, const SDL_KeyboardEven
         } else {
             handled = false;
         }
-        if (handled &&
-            af_editor_command_palette_handle_key(&editor->command_palette, palette_key,
-                                                 &action_id) == AF_RESULT_SUCCESS &&
-            action_id != 0U) {
-            (void)af_editor_action_execute(&editor->actions, action_id);
+        if (handled && af_editor_command_palette_handle_key(&editor->command_palette, palette_key,
+                                                            &action_id) == AF_RESULT_SUCCESS) {
+            if (!editor->command_palette.open)
+                (void)af_platform_text_input_set(&editor->window, false);
+            if (action_id != 0)
+                (void)af_editor_action_execute(&editor->actions, action_id);
         }
         return true;
     }

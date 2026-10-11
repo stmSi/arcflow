@@ -22,6 +22,15 @@ The build generates `build/debug/assets/arcflow_demo.afp`. Pass another `.afp` p
 argument. `--frames N` is available for automated smoke runs.
 Add `--resize-smoke` to force swapchain recreation during that run.
 
+The editor's studio workspace uses a graphite palette, violet selection accents, readable
+regular-weight type, and soft hover/press feedback. Button transitions respect the saved reduced
+motion preference. With nothing selected, the Inspector shows document details and quick actions
+for rectangles, paths, text, and fitting the canvas. The empty Assets panel offers image import.
+The status bar shows whether the document is modified, the current zoom (click to fit), and a
+**Commands** launcher. **Ctrl+Shift+P** opens command search with action descriptions, keyboard
+shortcuts, and a layout that fits smaller windows. Use arrows or the mouse wheel to navigate,
+Enter or a click to run, and Escape or an outside click to dismiss.
+
 The editor provides resizable docked panels, persistent vector tools, transform gizmos, a dope
 sheet, and a curve editor. The toolbar includes Pick, Node, Scissors, Segment Delete, Knife,
 Rectangle, Rounded Rectangle, Ellipse, Line, Pen, Pencil, Polygon, Star, Arc, and Spiral tools.
@@ -32,6 +41,8 @@ drags, and text/modal editing. Open popups capture scrolling and suppress underl
 resize handles. Long menu labels and shortcuts have separate columns, and popups stay inside the
 window.
 Tool buttons have vector icons; scroll over the toolbar to reveal tools in a narrow workspace.
+Hover a tool to see its name, usage, and shortcut. A native interaction regression check is available
+with `./build/debug/arcflow_editor assets/editor_demo.afproj --studio-smoke`.
 Canvas rulers follow the visible world, including negative coordinates, with zoom-dependent ticks.
 Dock edges, the hierarchy/assets divider, toolbar/status boundaries, and timeline label divider
 highlight on hover and show resize cursors. Drag them to resize their sections.

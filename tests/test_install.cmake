@@ -23,8 +23,9 @@ set(installed_release_guide
     "${ARCFLOW_INSTALL_PREFIX}/share/doc/arcflow/production-release.md")
 if(NOT EXISTS "${compiler}" OR NOT EXISTS "${runtime_sample}" OR
    NOT EXISTS "${guided_example}" OR NOT EXISTS "${sample_source}" OR
-   NOT EXISTS "${installed_readme}" OR NOT EXISTS "${installed_release_guide}")
-    message(FATAL_ERROR "installed compiler, examples, runtime sample, or documentation is missing")
+   NOT EXISTS "${installed_readme}" OR NOT EXISTS "${installed_release_guide}" OR
+   NOT EXISTS "${ARCFLOW_INSTALL_PREFIX}/bin/fonts/LiberationSans-Regular.ttf")
+    message(FATAL_ERROR "installed compiler, examples, runtime sample, editor font, or documentation is missing")
 endif()
 file(READ "${installed_readme}" readme)
 string(FIND "${readme}" "Arcflow 1.0" readme_version)

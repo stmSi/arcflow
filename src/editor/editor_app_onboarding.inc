@@ -46,58 +46,48 @@ static void af_editor_onboarding_start_guided(AfEditorState *editor) {
 }
 
 static void af_editor_render_welcome(AfEditorState *editor, int width, int height) {
-    static const char *const labels[] = {"START GUIDED PROJECT", "BROWSE PROJECT TEMPLATES",
-                                         "OPEN EXAMPLE BROWSER", "REFERENCE TOPICS"};
+    static const char *const labels[] = {"Create your first animation", "Start with a template",
+                                         "Explore example projects", "Find a little guidance"};
     static const char *const details[] = {
-        "Create a ready-to-animate project and follow six steps",
-        "Blank, vector, button, responsive, and particle starters",
-        "Inspect feature-focused projects that compile and play",
-        "Installation, API, Vulkan, formats, security, and more"};
+        "A ready-to-animate scene. Six simple steps. Your first moment of motion.",
+        "From a blank canvas to buttons, vectors and particles.",
+        "Open a working scene and discover how it all comes together.",
+        "Practical guides for creating, animating and sharing your work."};
     char version[160];
     const float x = ((float)width - AF_EDITOR_WELCOME_WIDTH) * 0.5F;
     const float y = ((float)height - AF_EDITOR_WELCOME_HEIGHT) * 0.5F;
     if (!editor->welcome_visible) {
         return;
     }
-    (void)snprintf(version, sizeof(version), "VERSION %s  %s  PROJECT %u  PACKAGE %u  RUNTIME %u",
-                   AF_VERSION_STRING, AF_RELEASE_CHANNEL, AF_PROJECT_FORMAT_VERSION,
-                   AF_PACKAGE_FORMAT_VERSION, AF_RUNTIME_VERSION);
-    af_editor_add_rect(editor, 0.0F, 0.0F, (float)width, (float)height,
-                       (AfColor){0.0F, 0.0F, 0.0F, 0.68F}, 249000);
-    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = y},
-                        (AfVec2){AF_EDITOR_WELCOME_WIDTH, AF_EDITOR_WELCOME_HEIGHT},
-                        (AfColor){0.075F, 0.085F, 0.115F, 1.0F}, 10.0F, 249010);
-    af_editor_add_text(editor, x + 30.0F, y + 25.0F, "WELCOME TO ARCFLOW", 1.65F,
-                       AF_EDITOR_WELCOME_WIDTH - 60.0F, (AfColor){0.62F, 0.84F, 1.0F, 1.0F},
-                       249020);
-    af_editor_add_text(editor, x + 30.0F, y + 62.0F,
-                       "Create, animate, compile, and play without leaving the editor.", 0.9F,
-                       AF_EDITOR_WELCOME_WIDTH - 60.0F, (AfColor){0.72F, 0.77F, 0.87F, 1.0F},
-                       249020);
-    af_editor_add_text(editor, x + 30.0F, y + 88.0F, version, 0.64F,
-                       AF_EDITOR_WELCOME_WIDTH - 60.0F, (AfColor){0.48F, 0.57F, 0.7F, 1.0F},
-                       249020);
+    (void)snprintf(version, sizeof(version), "ARCFLOW   /   %s", AF_VERSION_STRING);
+    af_editor_add_rect(editor, 0, 0, (float)width, (float)height,
+                       (AfColor){.025F, .028F, .04F, .92F}, 249000);
+    af_editor_add_surface(editor, x - 1, y - 1, AF_EDITOR_WELCOME_WIDTH + 2,
+                          AF_EDITOR_WELCOME_HEIGHT + 2, AF_UI_BORDER, 17, 249010);
+    af_editor_add_surface(editor, x, y, AF_EDITOR_WELCOME_WIDTH, AF_EDITOR_WELCOME_HEIGHT,
+                          AF_UI_PANEL, 16, 249011);
+    af_editor_add_text(editor, x + 30, y + 24, version, .7F, AF_EDITOR_WELCOME_WIDTH - 60,
+                       AF_UI_ACCENT, 249020);
+    af_editor_add_text(editor, x + 30, y + 52, "Make something move.", 5.5F,
+                       AF_EDITOR_WELCOME_WIDTH - 60, AF_UI_TEXT, 249020);
+    af_editor_add_text(editor, x + 30, y + 97,
+                       "A space for your ideas. Tools to bring them to life.", 1.1F,
+                       AF_EDITOR_WELCOME_WIDTH - 60, AF_UI_MUTED, 249020);
     for (uint32_t index = 0U; index < 4U; ++index) {
         const float row_y = y + 128.0F + (float)index * 74.0F;
-        const bool hovered = editor->mouse_position.x >= x + 28.0F &&
-                             editor->mouse_position.x < x + AF_EDITOR_WELCOME_WIDTH - 28.0F &&
-                             editor->mouse_position.y >= row_y &&
-                             editor->mouse_position.y < row_y + 60.0F;
-        af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                            (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 28.0F, .ty = row_y},
-                            (AfVec2){AF_EDITOR_WELCOME_WIDTH - 56.0F, 60.0F},
-                            hovered ? (AfColor){0.18F, 0.38F, 0.64F, 1.0F}
-                                    : (AfColor){0.12F, 0.17F, 0.25F, 1.0F},
-                            6.0F, 249020);
-        af_editor_add_text(editor, x + 48.0F, row_y + 11.0F, labels[index], 0.9F, 320.0F,
+        af_editor_add_button_rounded(editor, x + 28, row_y, AF_EDITOR_WELCOME_WIDTH - 56, 60,
+                                     index == 0 ? AF_UI_PRIMARY : AF_UI_SURFACE, 8, 249020);
+        af_editor_add_text(editor, x + AF_EDITOR_WELCOME_WIDTH - 62, row_y + 20, "→", 1.2F, 20,
+                           index == 0 ? AF_UI_TEXT : AF_UI_ACCENT, 249030);
+        af_editor_add_text(editor, x + 48.0F, row_y + 11.0F, labels[index], 1.2F, 520.0F,
                            (AfColor){0.9F, 0.94F, 1.0F, 1.0F}, 249030);
         af_editor_add_text(editor, x + 48.0F, row_y + 36.0F, details[index], 0.63F, 620.0F,
-                           (AfColor){0.58F, 0.67F, 0.8F, 1.0F}, 249030);
+                           index == 0 ? AF_UI_TEXT : AF_UI_MUTED, 249030);
     }
-    af_editor_add_text(editor, x + 30.0F, y + 452.0F, "ESC CLOSES. OPEN AGAIN FROM HELP > WELCOME.",
-                       0.64F, AF_EDITOR_WELCOME_WIDTH - 60.0F, (AfColor){0.45F, 0.52F, 0.64F, 1.0F},
-                       249030);
+    af_editor_add_text(
+        editor, x + 30.0F, y + 452.0F,
+        "Esc  Continue to your workspace          You can return here from Help > Welcome.", 0.64F,
+        AF_EDITOR_WELCOME_WIDTH - 60.0F, (AfColor){0.45F, 0.52F, 0.64F, 1.0F}, 249030);
 }
 
 static void af_editor_render_guided_tour(AfEditorState *editor, int width, int height) {

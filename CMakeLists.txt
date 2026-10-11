@@ -361,7 +361,7 @@ add_executable(arcflow_editor
 target_include_directories(arcflow_editor PRIVATE src)
 target_compile_definitions(arcflow_editor PRIVATE
     ARCFLOW_DOCUMENT_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts"
-    ARCFLOW_EDITOR_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/test/api/fonts/NotoSans-Bold.ttf"
+    ARCFLOW_EDITOR_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/LiberationSans-Regular.ttf"
 )
 target_link_libraries(arcflow_editor PRIVATE arcflow_renderer arcflow_editor_core arcflow_update)
 

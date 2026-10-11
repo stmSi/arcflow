@@ -194,8 +194,8 @@ static void af_editor_render_grid(AfEditorState *editor, int width, int height, 
             const bool major = fabs(remainder(ordinal, 5)) < .01;
             af_editor_add_rect(editor, axis ? canvas_x : pixel, axis ? pixel : canvas_y,
                                axis ? canvas_width : 1, axis ? 1 : canvas_height,
-                               major ? (AfColor){.25F, .28F, .34F, .8F}
-                                     : (AfColor){.24F, .27F, .32F, alpha},
+                               major ? (AfColor){.25F, .28F, .34F, .35F}
+                                     : (AfColor){.24F, .27F, .32F, alpha * .45F},
                                -90000);
         }
     }

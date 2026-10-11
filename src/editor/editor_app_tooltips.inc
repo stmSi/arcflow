@@ -23,9 +23,29 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
         }
         return tooltip;
     }
-    if (editor->top_menu != AF_EDITOR_MENU_NONE || editor->choice_menu) {
+    if (editor->top_menu != AF_EDITOR_MENU_NONE || editor->choice_menu ||
+        editor->command_palette.open) {
         return tooltip;
     }
+    if (mouse.y >= (float)height - editor->status_height + 4) {
+        if (mouse.x >= center_right - 76 && mouse.x < center_right - 10)
+            return (AfEditorTooltip){
+                .id = 0x70101,
+                .title = "Fit canvas",
+                .summary = "Click the zoom level to fit your entire document.",
+                .details = "Use the mouse wheel on the canvas to zoom around the pointer.",
+                .shortcut = "Shift+0"};
+        if (mouse.x >= panel_x && mouse.x < (float)width - 18)
+            return (AfEditorTooltip){
+                .id = 0x70102,
+                .title = "Find a command",
+                .summary = "Search for tools and actions by name.",
+                .details = "Use arrow keys to navigate, Enter to run, and Escape to close.",
+                .shortcut = "Ctrl+Shift+P"};
+        return tooltip;
+    }
+    if (mouse.x >= panel_x && editor->selected_count == 0)
+        return tooltip;
     if (fabsf(mouse.x - editor->left_width) <= 5.0F) {
         return (AfEditorTooltip){.id = 1U,
                                  .title = "Resize Scene Hierarchy",
@@ -595,7 +615,10 @@ static void af_editor_render_tooltip(AfEditorState *editor, int width, int heigh
         af_editor_add_text(editor, x + 14.0F, y + 114.0F, tooltip.shortcut, 0.75F,
                            popup_width - 28.0F, (AfColor){0.42F, 0.76F, 1.0F, 1.0F}, 300030);
     } else {
-        af_editor_add_text(editor, x + 14.0F, y + 58.0F, "HOLD ALT FOR MORE DETAILS", 0.62F,
+        af_editor_add_text(editor, x + 14.0F, y + 58.0F,
+                           tooltip.shortcut != NULL && tooltip.shortcut[0] ? tooltip.shortcut
+                                                                          : "Hold Alt for more details",
+                           0.62F,
                            popup_width - 28.0F, (AfColor){0.48F, 0.66F, 0.9F, 1.0F}, 300030);
     }
 }

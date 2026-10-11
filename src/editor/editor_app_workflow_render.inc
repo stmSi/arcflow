@@ -1,16 +1,21 @@
 static void af_editor_render_search(AfEditorState *editor) {
-    char text[AF_EDITOR_COMMAND_QUERY_CAPACITY + 16U];
-    (void)snprintf(text, sizeof(text), "%s%s", editor->hierarchy_search_active ? "> " : "? ",
-                   editor->hierarchy_search[0] == '\0' ? "SEARCH  CTRL+F"
-                                                       : editor->hierarchy_search);
-    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = 8.0F, .ty = 48.0F},
-                        (AfVec2){editor->left_width - 16.0F, 25.0F},
-                        editor->hierarchy_search_active ? (AfColor){0.14F, 0.24F, 0.38F, 1.0F}
-                                                        : (AfColor){0.11F, 0.12F, 0.15F, 1.0F},
-                        4.0F, 201000);
-    af_editor_add_text(editor, 16.0F, 56.0F, text, 0.72F, editor->left_width - 32.0F,
-                       (AfColor){0.7F, 0.75F, 0.84F, 1.0F}, 201010);
+    af_editor_add_surface(editor, 10, 50, editor->left_width - 20, 24,
+                          editor->hierarchy_search_active ? AF_UI_SELECTION : AF_UI_SURFACE, 5,
+                          201000);
+    af_editor_add_shape(editor, AF_NODE_ELLIPSE,
+                        (AfAffine2){.m00 = 1, .m11 = 1, .tx = 18, .ty = 56}, (AfVec2){9, 9},
+                        AF_UI_MUTED, 0, 201005);
+    af_editor_add_shape(editor, AF_NODE_ELLIPSE,
+                        (AfAffine2){.m00 = 1, .m11 = 1, .tx = 19.5F, .ty = 57.5F}, (AfVec2){6, 6},
+                        editor->hierarchy_search_active ? AF_UI_SELECTION : AF_UI_SURFACE, 0,
+                        201006);
+    af_editor_add_line(editor, (AfVec2){25, 63}, (AfVec2){29, 67}, 1.5F, AF_UI_MUTED, 201006);
+    af_editor_add_text(editor, 36, 57,
+                       editor->hierarchy_search[0] ? editor->hierarchy_search : "Find a layer", .8F,
+                       editor->left_width - 50,
+                       editor->hierarchy_search_active ? AF_UI_TEXT : AF_UI_MUTED, 201010);
+    if (editor->hierarchy_search_active)
+        af_editor_add_rect(editor, 15, 73, editor->left_width - 30, 1, AF_UI_ACCENT, 201010);
 }
 
 static void af_editor_render_profiler(AfEditorState *editor, int width) {
@@ -242,57 +247,65 @@ static void af_editor_render_update(AfEditorState *editor, int width, int height
 }
 
 static void af_editor_render_palette(AfEditorState *editor, int width) {
-    const float box_width = AF_EDITOR_WORKFLOW_OVERLAY_WIDTH;
-    const float x = ((float)width - box_width) * 0.5F;
-    const float y = 86.0F;
-    uint32_t first_result = 0U;
-    if (!editor->command_palette.open) {
+    if (!editor->command_palette.open)
         return;
-    }
-    first_result = (editor->command_palette.selected_index / AF_EDITOR_WORKFLOW_PALETTE_ROWS) *
-                   AF_EDITOR_WORKFLOW_PALETTE_ROWS;
-    af_editor_add_rect(editor, 0.0F, 0.0F, (float)editor->window_width,
-                       (float)editor->window_height, (AfColor){0.0F, 0.0F, 0.0F, 0.42F}, 229900);
-    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = y},
-                        (AfVec2){box_width, 82.0F + AF_EDITOR_WORKFLOW_PALETTE_ROWS * 38.0F},
-                        (AfColor){0.075F, 0.085F, 0.11F, 1.0F}, 8.0F, 230000);
-    af_editor_add_text(editor, x + 20.0F, y + 16.0F, "COMMAND PALETTE", 1.2F, 240.0F,
-                       (AfColor){0.61F, 0.82F, 1.0F, 1.0F}, 230010);
-    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 16.0F, .ty = y + 43.0F},
-                        (AfVec2){box_width - 32.0F, 32.0F}, (AfColor){0.14F, 0.18F, 0.25F, 1.0F},
-                        4.0F, 230010);
-    af_editor_add_text(editor, x + 28.0F, y + 53.0F,
-                       editor->command_palette.query[0] == '\0' ? "TYPE A COMMAND..."
-                                                                : editor->command_palette.query,
-                       0.9F, box_width - 56.0F, (AfColor){0.86F, 0.89F, 0.95F, 1.0F}, 230020);
-    for (uint32_t row = 0U; first_result + row < editor->command_palette.result_count &&
-                            row < AF_EDITOR_WORKFLOW_PALETTE_ROWS;
-         ++row) {
-        const uint32_t result_index = first_result + row;
+    const AfEditorPaletteLayout box = af_editor_palette_layout(width, editor->window_height);
+    const float x = box.x, y = box.y;
+    editor->command_palette.page_size = box.rows;
+    const uint32_t first_result = (editor->command_palette.selected_index / box.rows) * box.rows;
+    af_editor_add_rect(editor, 0, 0, (float)width, (float)editor->window_height,
+                       (AfColor){0.025F, 0.028F, 0.04F, .72F}, 229900);
+    af_editor_add_surface(editor, x - 6, y + 6, box.width + 12, box.height + 8,
+                          (AfColor){0, 0, 0, .22F}, 16, 229990);
+    af_editor_add_surface(editor, x - 1, y - 1, box.width + 2, box.height + 2, AF_UI_BORDER, 13,
+                          230000);
+    af_editor_add_surface(editor, x, y, box.width, box.height, AF_UI_PANEL, 12, 230001);
+    af_editor_add_text(editor, x + 22, y + 20, "Find your flow", 1.8F, box.width - 100, AF_UI_TEXT,
+                       230020);
+    af_editor_add_button_rect(editor, x + box.width - 60, y + 14, 40, 25, AF_UI_SURFACE, 230010);
+    af_editor_add_text(editor, x + box.width - 50, y + 21, "Esc", .65F, 26, AF_UI_MUTED, 230020);
+    af_editor_add_surface(editor, x + 16, y + 52, box.width - 32, 40, AF_UI_ACCENT, 7, 230010);
+    af_editor_add_surface(editor, x + 17, y + 53, box.width - 34, 38, AF_UI_FIELD, 6, 230011);
+    af_editor_add_text(editor, x + 30, y + 66,
+                       editor->command_palette.query[0] ? editor->command_palette.query
+                                                        : "Search tools, actions, anything...",
+                       1.05F, box.width - 60,
+                       editor->command_palette.query[0] ? AF_UI_TEXT : AF_UI_MUTED, 230020);
+    for (uint32_t row = 0;
+         row < box.rows && first_result + row < editor->command_palette.result_count; ++row) {
+        const uint32_t index = first_result + row;
         const AfEditorAction *action = af_editor_action_find(
-            &editor->actions, editor->command_palette.results[result_index].action_id);
-        char shortcut[AF_EDITOR_SHORTCUT_TEXT_CAPACITY];
-        const float row_y = y + 84.0F + (float)row * 38.0F;
-        if (action == NULL) {
+            &editor->actions, editor->command_palette.results[index].action_id);
+        if (action == NULL)
             continue;
-        }
-        af_editor_add_button_rect(editor, x + 12.0F, row_y, box_width - 24.0F, 34.0F,
-                                  result_index == editor->command_palette.selected_index
-                                      ? (AfColor){0.17F, 0.33F, 0.55F, 1.0F}
-                                      : (AfColor){0.1F, 0.12F, 0.16F, 1.0F},
-                                  230010);
+        const float row_y = y + 104 + (float)row * box.row_height;
+        const bool selected = index == editor->command_palette.selected_index;
+        char shortcut[AF_EDITOR_SHORTCUT_TEXT_CAPACITY];
         (void)af_editor_shortcut_format(action->shortcut, shortcut, sizeof(shortcut));
-        af_editor_add_text(editor, x + 24.0F, row_y + 10.0F, action->label, 0.9F, 390.0F,
-                           (AfColor){0.84F, 0.87F, 0.93F, 1.0F}, 230020);
-        af_editor_add_text(editor, x + 470.0F, row_y + 11.0F, shortcut, 0.7F, 120.0F,
-                           (AfColor){0.5F, 0.58F, 0.69F, 1.0F}, 230020);
+        af_editor_add_button_rect(editor, x + 12, row_y, box.width - 24, box.row_height - 4,
+                                  selected ? AF_UI_SELECTION : AF_UI_PANEL, 230010);
+        if (selected)
+            af_editor_add_surface(editor, x + 12, row_y + 10, 3, 22, AF_UI_ACCENT, 1.5F, 230015);
+        const float shortcut_width = shortcut[0] && box.width >= 400 ? 120 : 0;
+        af_editor_add_text(editor, x + 26, row_y + 7, action->label, .95F,
+                           box.width - 52 - shortcut_width, AF_UI_TEXT, 230020);
+        af_editor_add_text(editor, x + 26, row_y + 26, action->tooltip, .65F,
+                           box.width - 52 - shortcut_width, AF_UI_MUTED, 230020);
+        if (shortcut_width > 0)
+            af_editor_add_text(editor, x + box.width - 142, row_y + 15, shortcut, .7F, 116,
+                               selected ? AF_UI_ACCENT : AF_UI_MUTED, 230020);
     }
-    if (editor->command_palette.result_count == 0U) {
-        af_editor_add_text(editor, x + 24.0F, y + 102.0F, "NO MATCHING COMMANDS", 0.9F,
-                           box_width - 48.0F, (AfColor){0.7F, 0.5F, 0.5F, 1.0F}, 230020);
+    if (editor->command_palette.result_count == 0) {
+        af_editor_add_text(editor, x + 26, y + 128, "No commands found", 1.3F, box.width - 52,
+                           AF_UI_TEXT, 230020);
+        af_editor_add_text(editor, x + 26, y + 155,
+                           "Try a tool name, like rectangle, export or align.", .9F, box.width - 52,
+                           AF_UI_MUTED, 230020);
     }
+    const float footer = y + box.height - 34;
+    af_editor_add_rect(editor, x + 16, footer - 8, box.width - 32, 1, AF_UI_BORDER, 230010);
+    af_editor_add_text(editor, x + 24, footer + 5, "↑ ↓  Navigate     Enter  Run     Esc  Close",
+                       .7F, box.width - 48, AF_UI_MUTED, 230020);
 }
 
 static void af_editor_render_shortcuts(AfEditorState *editor, int width, int height) {
@@ -527,6 +540,7 @@ static void af_editor_render_export(AfEditorState *editor, int width, int height
 }
 
 static void af_editor_render_workflow(AfEditorState *editor, int width, int height) {
+    af_editor_render_studio_chrome(editor, width, height);
     af_editor_render_search(editor);
     af_editor_render_profiler(editor, width);
     af_editor_render_validation(editor);

@@ -33,36 +33,70 @@ static bool af_editor_hovered_rect(const AfEditorState *editor, float x, float y
            editor->mouse_position.y >= y && editor->mouse_position.y <= y + height;
 }
 
-static void af_editor_add_button_rect(AfEditorState *editor, float x, float y, float width,
-                                      float height, AfColor color, int32_t layer) {
-    const bool hovered = af_editor_hovered_rect(editor, x, y, width, height);
-    if (hovered) {
-        color.r = af_editor_clamp(color.r + 0.08F, 0.0F, 1.0F);
-        color.g = af_editor_clamp(color.g + 0.08F, 0.0F, 1.0F);
-        color.b = af_editor_clamp(color.b + 0.08F, 0.0F, 1.0F);
+static void af_editor_add_surface(AfEditorState *editor, float x, float y, float width,
+                                  float height, AfColor color, float radius, int32_t layer) {
+    if (width <= 0.0F || height <= 0.0F)
+        return;
+    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
+                        (AfAffine2){.m00 = 1, .m11 = 1, .tx = x, .ty = y}, (AfVec2){width, height},
+                        color, radius, layer);
+}
+
+static float af_editor_button_feedback(AfEditorState *editor, float x, float y, float width,
+                                       float height, int32_t layer) {
+    const float bounds[] = {x, y, width, height, (float)layer};
+    const uint64_t key = af_hash_bytes(bounds, sizeof(bounds));
+    uint32_t slot = (uint32_t)(key % 256U);
+    for (uint32_t probe = 0; probe < 8; ++probe) {
+        const AfEditorHoverFeedback *entry = &editor->hover_feedback[slot];
+        if (entry->key == key || entry->key == 0 || editor->rendered_frames - entry->frame > 1U)
+            break;
+        slot = (slot + 1U) % 256U;
     }
-    af_editor_add_rect(editor, x, y, width, height, color, layer);
-    if (hovered) {
-        af_editor_add_rect(editor, x, y + height - 2.0F, width, 2.0F,
-                           (AfColor){0.4F, 0.78F, 1.0F, 1.0F}, layer + 1);
+    AfEditorHoverFeedback *feedback = &editor->hover_feedback[slot];
+    const bool covered =
+        layer < 210000 &&
+        (editor->command_palette.open || editor->top_menu != AF_EDITOR_MENU_NONE ||
+         editor->context_menu != AF_EDITOR_CONTEXT_NONE || editor->choice_menu ||
+         editor->shortcuts_overlay || editor->welcome_visible || editor->template_panel_visible ||
+         editor->recent_panel_visible || editor->export_panel_visible || editor->offset_panel_open);
+    const float target = !covered && af_editor_hovered_rect(editor, x, y, width, height) ? 1 : 0;
+    if (feedback->key != key || editor->rendered_frames - feedback->frame > 1U) {
+        *feedback = (AfEditorHoverFeedback){.key = key, .amount = 0};
     }
+    const float blend = editor->preferences.accessibility.reduced_motion != AF_REDUCED_MOTION_OFF
+                            ? 1.0F
+                            : 1.0F - expf(-22.0F * editor->ui_delta_seconds);
+    feedback->amount += (target - feedback->amount) * blend;
+    feedback->frame = editor->rendered_frames;
+    return feedback->amount;
 }
 
 static void af_editor_add_button_rounded(AfEditorState *editor, float x, float y, float width,
                                          float height, AfColor color, float radius, int32_t layer) {
-    const bool hovered = af_editor_hovered_rect(editor, x, y, width, height);
-    if (hovered) {
-        color.r = af_editor_clamp(color.r + 0.08F, 0.0F, 1.0F);
-        color.g = af_editor_clamp(color.g + 0.08F, 0.0F, 1.0F);
-        color.b = af_editor_clamp(color.b + 0.08F, 0.0F, 1.0F);
-    }
-    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = y},
-                        (AfVec2){width, height}, color, radius, layer);
-    if (hovered) {
-        af_editor_add_rect(editor, x + radius, y + height - 2.0F, width - radius * 2.0F, 2.0F,
-                           (AfColor){0.4F, 0.78F, 1.0F, 1.0F}, layer + 1);
-    }
+    const float feedback = af_editor_button_feedback(editor, x, y, width, height, layer);
+    const bool pressed = feedback > 0.1F && af_editor_hovered_rect(editor, x, y, width, height) &&
+                         (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON_LMASK) != 0;
+    const float lift = feedback * (pressed ? -0.025F : 0.055F);
+    color.r = af_editor_clamp(color.r + lift, 0, 1);
+    color.g = af_editor_clamp(color.g + lift, 0, 1);
+    color.b = af_editor_clamp(color.b + lift, 0, 1);
+    AfColor border = {color.r + 0.045F + feedback * 0.07F, color.g + 0.045F + feedback * 0.055F,
+                      color.b + 0.06F + feedback * 0.10F, color.a};
+    border.r = af_editor_clamp(border.r, 0, 1);
+    border.g = af_editor_clamp(border.g, 0, 1);
+    border.b = af_editor_clamp(border.b, 0, 1);
+    if (editor->preferences.accessibility.high_contrast)
+        border = AF_UI_MUTED;
+    af_editor_add_surface(editor, x, y, width, height, border, radius, layer);
+    af_editor_add_surface(editor, x + 1, y + 1, width - 2, height - 2, color, fmaxf(0, radius - 1),
+                          layer + 1);
+}
+
+static void af_editor_add_button_rect(AfEditorState *editor, float x, float y, float width,
+                                      float height, AfColor color, int32_t layer) {
+    af_editor_add_button_rounded(editor, x, y, width, height, color, fminf(6.0F, height * 0.25F),
+                                 layer);
 }
 
 static void af_editor_add_line(AfEditorState *editor, AfVec2 start, AfVec2 end, float thickness,
@@ -265,7 +299,7 @@ static void af_editor_add_text(AfEditorState *editor, float x, float y, const ch
                            .lines = editor->text_lines,
                            .line_capacity = AF_EDITOR_TEXT_LINE_CAPACITY};
     const size_t byte_count = text == NULL ? 0U : strlen(text);
-    float font_size = ceilf(8.0F + scale * 4.0F);
+    float font_size = ceilf(9.0F + scale * 4.0F);
     AfTextRequest request = {.utf8 = text,
                              .byte_count = (uint32_t)byte_count,
                              .font_ids = {AF_EDITOR_TEXT_FONT_ID},
@@ -292,7 +326,7 @@ static void af_editor_add_text(AfEditorState *editor, float x, float y, const ch
             af_editor_add_bitmap_text(editor, x, y, text, scale, maximum_width, color, layer);
             return;
         }
-        if (layout.bounds.x <= maximum_width || font_size <= 6.0F) {
+        if (layout.bounds.x <= maximum_width || font_size <= 10.0F) {
             break;
         }
         {
@@ -300,7 +334,7 @@ static void af_editor_add_text(AfEditorState *editor, float x, float y, const ch
             if (fitted_size >= font_size) {
                 fitted_size = font_size - 1.0F;
             }
-            font_size = fmaxf(6.0F, fitted_size);
+            font_size = fmaxf(10.0F, fitted_size);
             request.font_size = font_size;
         }
     }

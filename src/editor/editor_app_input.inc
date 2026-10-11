@@ -1191,6 +1191,10 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
             return;
         }
     }
+    if (event->button == SDL_BUTTON_LEFT &&
+        af_editor_studio_mouse_down(editor, width, height, x, y)) {
+        return;
+    }
     if (af_editor_timeline_mouse_down(editor, width, height, event, modifiers)) {
         return;
     }
@@ -1852,6 +1856,15 @@ static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
                 ++editor->font_scroll;
         } else if (event->y > 0 && editor->font_scroll)
             --editor->font_scroll;
+        return;
+    }
+    if (editor->command_palette.open) {
+        const float amount = event->y * (event->direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1);
+        editor->command_palette.page_size = af_editor_palette_layout(width, height).rows;
+        if (isfinite(amount) && amount != 0)
+            (void)af_editor_command_palette_handle_key(
+                &editor->command_palette,
+                amount > 0 ? AF_EDITOR_COMMAND_PALETTE_UP : AF_EDITOR_COMMAND_PALETTE_DOWN, NULL);
         return;
     }
     if (editor->gradient_drag || af_editor_menu_blocked(editor) ||
@@ -3490,6 +3503,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
             editor->outline_smoke = true;
         } else if (strcmp(arguments[index], "--inspector-smoke") == 0) {
             editor->inspector_smoke = true;
+        } else if (strcmp(arguments[index], "--studio-smoke") == 0) {
+            editor->studio_smoke = true;
+            if (editor->maximum_frames == 0U)
+                editor->maximum_frames = 4U;
         } else if (strcmp(arguments[index], "--template-smoke") == 0) {
             editor->template_smoke = true;
             if (editor->maximum_frames == 0U)
@@ -3595,7 +3612,7 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->boolean_smoke || editor->vector_package_smoke || editor->gradient_drag_smoke ||
         editor->vfx_smoke || editor->particle_view_smoke || editor->vector_animation_smoke ||
         editor->image_smoke || editor->export_smoke || editor->snapping_smoke ||
-        editor->menu_smoke || editor->template_smoke || editor->workflow_smoke ||
+        editor->menu_smoke || editor->studio_smoke || editor->template_smoke || editor->workflow_smoke ||
         editor->platform_smoke || editor->release_smoke || editor->onboarding_smoke;
     af_editor_derive_package_path(editor);
 }

@@ -770,6 +770,12 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     float canvas_height = 0.0F;
     AfAffine2 camera = af_editor_camera(editor, width, height);
     uint32_t index = 0U;
+    const uint64_t ui_now = SDL_GetTicksNS();
+    editor->ui_delta_seconds =
+        editor->ui_previous_ticks == 0
+            ? 1.0F / 60.0F
+            : fminf(0.05F, (float)(ui_now - editor->ui_previous_ticks) / 1000000000.0F);
+    editor->ui_previous_ticks = ui_now;
     editor->render_scene.count = 0U;
     editor->render_scene.styles = &editor->project.style_data;
     editor->render_scene.images = &editor->project.image_data;
@@ -784,24 +790,22 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
         editor->render_path_data.command_count = 0U;
         af_editor_add_rect(editor, 0.0F, 0.0F, (float)width, (float)height,
                            (AfColor){0.055F, 0.06F, 0.075F, 1.0F}, -100000);
-        af_editor_add_rect(editor, 0.0F, 0.0F, editor->left_width, (float)height,
-                           (AfColor){0.085F, 0.092F, 0.115F, 1.0F}, -99990);
+        af_editor_add_rect(editor, 0.0F, 0.0F, editor->left_width, (float)height, AF_UI_PANEL,
+                           -99990);
         af_editor_add_rect(editor, (float)width - editor->right_width, 0.0F, editor->right_width,
-                           (float)height, (AfColor){0.095F, 0.102F, 0.125F, 1.0F}, -99990);
+                           (float)height, AF_UI_PANEL, -99990);
         af_editor_add_rect(editor, editor->left_width, 0.0F,
                            (float)width - editor->left_width - editor->right_width,
-                           editor->toolbar_height, (AfColor){0.11F, 0.12F, 0.145F, 1.0F}, -99980);
-        af_editor_add_rect(editor, canvas_x, canvas_y, canvas_width, canvas_height,
-                           (AfColor){0.145F, 0.155F, 0.18F, 1.0F}, -99990);
+                           editor->toolbar_height, AF_UI_SURFACE, -99980);
+        af_editor_add_rect(editor, canvas_x, canvas_y, canvas_width, canvas_height, AF_UI_CANVAS,
+                           -99990);
         af_editor_add_text(editor, editor->left_width + 18.0F, 18.0F, "ARCFLOW EDITOR", 0.82F,
                            180.0F, (AfColor){0.6F, 0.68F, 0.8F, 1.0F}, -99970);
         af_editor_render_onboarding(editor, width, height);
         return;
     }
-    af_editor_add_rect(editor, canvas_x, canvas_y, canvas_width, canvas_height,
-                       (AfColor){0.145F, 0.155F, 0.18F, 1.0F}, -100000);
-    af_editor_add_text(editor, canvas_x + 12.0F, canvas_y + 12.0F, "CANVAS", 1.0F, 54.0F,
-                       (AfColor){0.46F, 0.5F, 0.58F, 1.0F}, -89990);
+    af_editor_add_rect(editor, canvas_x, canvas_y, canvas_width, canvas_height, AF_UI_CANVAS,
+                       -100000);
     af_editor_render_grid(editor, width, height, camera);
     af_editor_render_canvas_workflow(editor, width, height, camera);
     if (editor->text_panel_open)
@@ -839,30 +843,25 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     }
     af_editor_render_vector_tool_preview(editor, width, height);
     af_editor_render_canvas_box(editor);
-    af_editor_add_rect(editor, 0.0F, 0.0F, editor->left_width, (float)height,
-                       (AfColor){0.085F, 0.092F, 0.115F, 1.0F}, 100000);
+    af_editor_add_rect(editor, 0.0F, 0.0F, editor->left_width, (float)height, AF_UI_PANEL, 100000);
     af_editor_add_rect(editor, (float)width - editor->right_width, 0.0F, editor->right_width,
-                       (float)height, (AfColor){0.095F, 0.102F, 0.125F, 1.0F}, 100000);
+                       (float)height, AF_UI_PANEL, 100000);
     af_editor_add_rect(editor, editor->left_width, 0.0F,
                        (float)width - editor->left_width - editor->right_width,
-                       editor->toolbar_height, (AfColor){0.11F, 0.12F, 0.145F, 1.0F}, 100000);
+                       editor->toolbar_height, AF_UI_SURFACE, 100000);
     af_editor_add_rect(editor, editor->left_width, (float)height - editor->status_height,
                        (float)width - editor->left_width - editor->right_width,
                        editor->status_height, (AfColor){0.08F, 0.087F, 0.105F, 1.0F}, 100000);
-    af_editor_add_rect(editor, editor->left_width - 2.0F, 0.0F, 4.0F, (float)height,
-                       (AfColor){0.23F, 0.25F, 0.3F, 1.0F}, 100100);
-    af_editor_add_rect(editor, (float)width - editor->right_width - 2.0F, 0.0F, 4.0F, (float)height,
-                       (AfColor){0.23F, 0.25F, 0.3F, 1.0F}, 100100);
+    af_editor_add_rect(editor, editor->left_width - 0.5F, 0.0F, 1.0F, (float)height, AF_UI_BORDER,
+                       100100);
+    af_editor_add_rect(editor, (float)width - editor->right_width - 0.5F, 0.0F, 1.0F, (float)height,
+                       AF_UI_BORDER, 100100);
     af_editor_render_hierarchy(editor, height);
     af_editor_render_asset_browser(editor, height);
     af_editor_render_toolbar(editor, width);
     af_editor_render_inspector(editor, width);
     af_editor_render_timeline(editor, width, height);
     af_editor_render_splitters(editor, width, height);
-    af_editor_add_text(editor, editor->left_width + 12.0F,
-                       (float)height - editor->status_height + 9.0F, editor->status, 1.0F,
-                       (float)width - editor->left_width - editor->right_width - 24.0F,
-                       (AfColor){0.62F, 0.67F, 0.76F, 1.0F}, 100140);
     af_editor_render_context_menu(editor, width, height);
     af_editor_render_tooltip(editor, width, height);
     af_editor_render_top_menu(editor, width, height);
@@ -870,42 +869,16 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
 }
 
 static void af_editor_update_title(AfEditorState *editor) {
-    char title[768] = {0};
-    const AfSceneNode *selected = af_scene_find_const(&editor->preview_scene, editor->selected_id);
-    const char *name = af_project_name(&editor->project, editor->selected_id);
-    const AfProjectClip *clip =
-        af_project_find_clip_const(&editor->project, editor->selected_clip_id);
-    static const char *const properties[] = {"position",  "rotation",  "scale", "opacity",
-                                             "fill",      "radius",    "skew",  "anchor",
-                                             "handle in", "handle out"};
-    if (editor->rename_active) {
-        (void)snprintf(title, sizeof(title),
-                       "Arcflow Editor | Rename: %s | Enter commit, Esc cancel",
-                       editor->rename_buffer);
-    } else if (editor->selected_count > 1U) {
-        (void)snprintf(title, sizeof(title),
-                       "Arcflow Editor%s | %u objects selected | drag, arrows, color, style, "
-                       "rotate, scale, layer, duplicate and delete apply to all | %s",
-                       editor->dirty ? " *" : "", editor->selected_count, editor->status);
-    } else if (selected != NULL && name != NULL) {
-        (void)snprintf(
-            title, sizeof(title),
-            "Arcflow Editor%s | %s | pos %.1f,%.1f scale %.2f,%.2f rot %.2f skew %.2f,%.2f "
-            "opacity %.2f "
-            "radius %.1f layer %d | %s %.2fs %s (%u keys) | %s",
-            editor->dirty ? " *" : "", name, selected->local_transform.position.x,
-            selected->local_transform.position.y, selected->local_transform.scale.x,
-            selected->local_transform.scale.y, selected->local_transform.rotation,
-            selected->local_transform.skew.x, selected->local_transform.skew.y, selected->opacity,
-            selected->corner_radius, selected->layer_order, clip != NULL ? clip->name : "No clip",
-            editor->playhead, properties[editor->selected_property],
-            editor->selected_keyframe_count, editor->status);
-    } else {
-        (void)snprintf(
-            title, sizeof(title),
-            "Arcflow Editor%s | 1/2/3/4 create, Ctrl+D duplicate, Del delete, F2 rename, "
-            "Shift-click parent | %s",
-            editor->dirty ? " *" : "", editor->status);
+    char title[768];
+    const char *name = editor->project_path;
+    for (const char *cursor = name; *cursor; ++cursor) {
+        if (*cursor == '/' || *cursor == '\\')
+            name = cursor + 1;
     }
-    (void)SDL_SetWindowTitle(editor->window.window, title);
+    (void)snprintf(title, sizeof(title), "%s%s — Arcflow", editor->dirty ? "● " : "",
+                   name[0] ? name : "Untitled");
+    if (editor->rename_active)
+        (void)snprintf(title, sizeof(title), "Rename: %s — Arcflow", editor->rename_buffer);
+    if (strcmp(SDL_GetWindowTitle(editor->window.window), title) != 0)
+        (void)SDL_SetWindowTitle(editor->window.window, title);
 }
