@@ -270,6 +270,9 @@ static void af_editor_top_menu_hover(AfEditorState *editor, int width,
 }
 
 static bool af_editor_confirm_discard(AfEditorState *editor, const char *title) {
+#ifdef __EMSCRIPTEN__
+    return !editor->dirty || af_web_confirm_discard(title) != 0;
+#else
     static const SDL_MessageBoxButtonData buttons[] = {
         {.flags = SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, .buttonID = 0, .text = "Cancel"},
         {.flags = SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, .buttonID = 1, .text = "Discard"}};
@@ -288,6 +291,7 @@ static bool af_editor_confirm_discard(AfEditorState *editor, const char *title) 
         return false;
     }
     return selected == 1;
+#endif
 }
 
 /* Loading reserves by text line count; authoring needs room to add and duplicate nodes. */
@@ -367,6 +371,9 @@ static AfResult af_editor_adopt_project(AfEditorState *editor, AfProject *projec
     } else {
         (void)snprintf(editor->project_path, sizeof(editor->project_path), "%s", path);
         af_editor_derive_package_path(editor);
+#ifdef __EMSCRIPTEN__
+        af_web_remember_project(editor->project_path);
+#endif
     }
     editor->dirty = dirty;
     af_editor_project_changed(editor);
@@ -398,6 +405,9 @@ static AfResult af_editor_open_project_path(AfEditorState *editor, const char *p
     if (path == NULL || path[0] == '\0' || strlen(path) >= sizeof(editor->project_path)) {
         return result;
     }
+#ifdef __EMSCRIPTEN__
+    af_web_task_begin("Opening project…");
+#endif
     result = af_project_load_file(path, &editor->allocator, &project);
     if (result == AF_RESULT_SUCCESS) {
         result = af_image_build_atlases(&project.image_data);
@@ -419,6 +429,9 @@ static AfResult af_editor_open_project_path(AfEditorState *editor, const char *p
         af_editor_status(editor,
                          result == AF_RESULT_SUCCESS ? "Project opened" : "Project open failed");
     }
+#ifdef __EMSCRIPTEN__
+    af_web_task_end(result == AF_RESULT_SUCCESS);
+#endif
     return result;
 }
 
@@ -909,6 +922,12 @@ static void af_editor_show_project_dialog(AfEditorState *editor, AfEditorDialogA
     if (editor->dialog_active || action == AF_EDITOR_DIALOG_NONE) {
         return;
     }
+#ifdef __EMSCRIPTEN__
+    if (action == AF_EDITOR_DIALOG_EXPORT_GIF || action == AF_EDITOR_DIALOG_EXPORT_MP4) {
+        af_editor_status(editor, "GIF and MP4 export require the desktop app with FFmpeg");
+        return;
+    }
+#endif
     if (action == AF_EDITOR_DIALOG_OPEN_PROJECT &&
         !af_editor_confirm_discard(editor, "Open another project?")) {
         return;

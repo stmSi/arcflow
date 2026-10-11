@@ -11,13 +11,16 @@ static void af_editor_collaboration_release(AfEditorState *editor) {
 }
 
 static void af_editor_collaboration_track_path(AfEditorState *editor) {
+#ifndef __EMSCRIPTEN__
     AfResult lock_result = AF_RESULT_SUCCESS;
+#endif
     af_editor_collaboration_release(editor);
     if (editor->project_path[0] == '\0') {
         return;
     }
     (void)af_project_fingerprint_file(editor->project_path, AF_PROJECT_MAX_FILE_SIZE,
                                       &editor->project_fingerprint);
+#ifndef __EMSCRIPTEN__
     lock_result = af_project_lock_acquire(editor->project_path, "arcflow-editor",
                                           &editor->project_lock, editor->project_lock_owner,
                                           sizeof(editor->project_lock_owner));
@@ -28,6 +31,7 @@ static void af_editor_collaboration_track_path(AfEditorState *editor) {
                        "lock-unavailable");
         editor->project_read_only = true;
     }
+#endif
 }
 
 static void af_editor_collaboration_saved(AfEditorState *editor) {

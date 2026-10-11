@@ -1,7 +1,25 @@
 #ifndef AF_ARCFLOW_RENDERER_ADAPTER_H
 #define AF_ARCFLOW_RENDERER_ADAPTER_H
 
+#ifdef __EMSCRIPTEN__
+#include "af/canvas.h"
+typedef AfCanvasRenderer AfVkRenderer;
+typedef AfCanvasFrameMetrics AfVkFrameMetrics;
+typedef AfCanvasVfxMetrics AfVkVfxMetrics;
+typedef AfCanvasRenderOptions AfVkRenderOptions;
+#define af_vk_renderer_create af_canvas_renderer_create
+#define af_vk_renderer_destroy af_canvas_renderer_destroy
+#define af_vk_renderer_draw af_canvas_renderer_draw
+#define af_vk_renderer_draw_timed af_canvas_renderer_draw_timed
+#define af_vk_renderer_draw_timed_with_options af_canvas_renderer_draw_timed_with_options
+#define af_vk_renderer_capture_next af_canvas_renderer_capture_next
+#define af_vk_renderer_request_resize af_canvas_renderer_request_resize
+#define af_vk_renderer_has_validation_errors af_canvas_renderer_has_errors
+#define af_vk_renderer_frame_metrics af_canvas_renderer_frame_metrics
+#define af_vk_renderer_vfx_metrics af_canvas_renderer_vfx_metrics
+#else
 #include "af/vulkan.h"
+#endif
 #include "arcflow/arcflow_runtime.h"
 
 /* Arcflow-specific adaptation stays in the application, outside the framework. */

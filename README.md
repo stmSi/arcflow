@@ -22,10 +22,13 @@ For an existing checkout, run `git submodule update --init --recursive`.
 Pinned dependencies are in `third_party/`; use `tools/bootstrap-dependencies.sh` if missing.
 To use another framework checkout, set `-DARCFLOW_FRAMEWORK_SOURCE_DIR=/path/to/af-framework`.
 
+Browser build and GitHub Pages deployment: [Web guide](docs/web.md).
+
 ## Editor basics
 
 - `V` toggles Pick/Node; `Shift+V` selects Node. `R` draws rectangles, `A` stars, `T` text.
 - Inspector values support typing, horizontal dragging, and `−`/`+` steps, including RGB/hex.
+- Particle values use the same controls; scroll the Inspector to reach lower rows.
 - `Ctrl+S` saves; `Ctrl+Z`/`Ctrl+Y` undo/redo; `Ctrl+Shift+P` opens commands.
 - File > Export produces `.afp`, SVG, Lottie, GIF, or MP4. GIF/MP4 require FFmpeg.
 

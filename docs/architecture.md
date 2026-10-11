@@ -8,7 +8,7 @@ The framework is a Git submodule in `framework/` and builds independently.
 | Framework foundation | Memory, files, logging, math |
 | Framework engine | Scenes, paths, styles, layout, text, animation, particles |
 | Framework UI | Drawing, inputs, widget feedback, actions, shortcuts |
-| Framework platform/Vulkan | SDL windows, input, GPU resources, rendering |
+| Framework platform/rendering | SDL windows, input, Vulkan, browser Canvas |
 | Arcflow | Projects, packages, editing/undo, templates, exports, plugins, updates |
 
 Framework headers use `af/`; CMake targets use `af::`.

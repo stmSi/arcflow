@@ -221,6 +221,9 @@ static void af_editor_export_panel_key(AfEditorState *editor, const SDL_Keyboard
 }
 static AfResult af_editor_export_with_options(AfEditorState *editor, const char *path,
                                               AfEditorDialogAction action) {
+#ifdef __EMSCRIPTEN__
+    af_web_task_begin("Preparing download…");
+#endif
     AfProject staging = {0};
     const AfEditorExportOptions options =
         editor->export_ready ? editor->export_options
@@ -230,6 +233,9 @@ static AfResult af_editor_export_with_options(AfEditorState *editor, const char 
                                  editor->selected_count, &editor->allocator, &staging);
     if (result != AF_RESULT_SUCCESS) {
         af_editor_status(editor, "Could not prepare the requested export scope or dimensions");
+#ifdef __EMSCRIPTEN__
+        af_web_task_end(0);
+#endif
         return result;
     }
     AfProject original = editor->project;
@@ -254,6 +260,13 @@ static AfResult af_editor_export_with_options(AfEditorState *editor, const char 
     editor->project = original;
     af_editor_update_preview(editor);
     af_project_destroy(&staging);
+#ifdef __EMSCRIPTEN__
+    af_web_task_end(result == AF_RESULT_SUCCESS);
+    if (result == AF_RESULT_SUCCESS) {
+        af_web_download_file(output);
+        af_web_sync_files();
+    }
+#endif
     return result;
 }
 

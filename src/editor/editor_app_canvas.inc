@@ -151,6 +151,16 @@ static AfVec2 af_editor_preview_cubic_point(AfVec2 start, const AfPathCommand *c
             3.0F * inverse * t_squared * command->control2.y + t_squared * t * command->point.y};
 }
 
+static void af_editor_add_path_point(AfEditorState *editor, AfVec2 point, float size, AfColor color,
+                                     int32_t layer) {
+    af_editor_add_rect(editor, point.x - size * 0.5F - 2, point.y - size * 0.5F - 2, size + 4,
+                       size + 4, (AfColor){.035F, .04F, .055F, 1}, layer);
+    af_editor_add_rect(editor, point.x - size * 0.5F - 1, point.y - size * 0.5F - 1, size + 2,
+                       size + 2, (AfColor){1, 1, 1, 1}, layer + 1);
+    af_editor_add_rect(editor, point.x - size * 0.5F, point.y - size * 0.5F, size, size, color,
+                       layer + 2);
+}
+
 static void af_editor_render_preview_segment(AfEditorState *editor, AfAffine2 camera, AfVec2 start,
                                              const AfPathCommand *command, uint32_t samples,
                                              float thickness, AfColor color, int32_t layer) {
@@ -236,12 +246,13 @@ static void af_editor_render_vector_tool_preview(AfEditorState *editor, int widt
                         : af_editor_tool_snap_point(
                               editor, af_editor_screen_to_project(editor, width, height,
                                                                   editor->mouse_position));
-            const AfPathCommand next = closing ? af_editor_pen_closing_segment(editor)
-                : (AfPathCommand){
-                    .type = editor->tool_pen_has_outgoing ? AF_PATH_CUBIC : AF_PATH_LINE,
-                    .point = target,
-                    .control1 = editor->tool_pen_outgoing,
-                    .control2 = target};
+            const AfPathCommand next =
+                closing ? af_editor_pen_closing_segment(editor)
+                        : (AfPathCommand){.type = editor->tool_pen_has_outgoing ? AF_PATH_CUBIC
+                                                                                : AF_PATH_LINE,
+                                          .point = target,
+                                          .control1 = editor->tool_pen_outgoing,
+                                          .control2 = target};
             af_editor_render_preview_segment(editor, camera, anchor, &next, 20U, 2.0F,
                                              closing ? (AfColor){1.0F, 0.74F, 0.2F, 1.0F}
                                                      : (AfColor){0.5F, 0.75F, 0.9F, 0.9F},
@@ -497,10 +508,10 @@ static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera
      * so long paths leave room for their point handles and the docked UI. */
     const uint32_t remaining = editor->render_scene.capacity - editor->render_scene.count;
     const uint32_t reserve = AF_EDITOR_UI_RESERVE + path->command_count * 3U + 32U;
-    const uint32_t samples = remaining > reserve && path->command_count != 0U
-                                ? (uint32_t)af_editor_clamp(
-                                      (float)((remaining - reserve) / path->command_count), 1, 20)
-                                : 0U;
+    const uint32_t samples =
+        remaining > reserve && path->command_count != 0U
+            ? (uint32_t)af_editor_clamp((float)((remaining - reserve) / path->command_count), 1, 20)
+            : 0U;
     for (uint32_t index = 0U; index < path->command_count; ++index) {
         const AfPathCommand *command =
             &editor->render_path_data.commands[path->command_start + index];
@@ -527,7 +538,7 @@ static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera
             if (editor->drag_mode == AF_EDITOR_DRAG_NONE &&
                 hypotf(editor->mouse_position.x - point.x, editor->mouse_position.y - point.y) <=
                     9.0F) {
-                af_editor_add_rect(editor, point.x - 7.0F, point.y - 7.0F, 14.0F, 14.0F,
+                af_editor_add_rect(editor, point.x - 9.0F, point.y - 9.0F, 18.0F, 18.0F,
                                    (AfColor){1.0F, 0.5F, 0.2F, 1.0F}, 90039);
             }
             bool keyed = false;
@@ -542,34 +553,31 @@ static void af_editor_render_path_points(AfEditorState *editor, AfAffine2 camera
                 }
             }
             if (keyed) {
-                af_editor_add_rect(editor, point.x - 6.0F, point.y - 6.0F, 12.0F, 12.0F,
+                af_editor_add_rect(editor, point.x - 9.0F, point.y - 9.0F, 18.0F, 18.0F,
                                    (AfColor){0.2F, 0.84F, 0.76F, 1.0F}, 90038);
             }
-            af_editor_add_rect(editor, point.x - (primary ? 5.0F : (chosen ? 4.5F : 4.0F)),
-                               point.y - (primary ? 5.0F : (chosen ? 4.5F : 4.0F)),
-                               primary ? 10.0F : (chosen ? 9.0F : 8.0F),
-                               primary ? 10.0F : (chosen ? 9.0F : 8.0F), point_color, 90040);
+            af_editor_add_path_point(editor, point, primary ? 10.0F : (chosen ? 9.0F : 8.0F),
+                                     point_color, 90040);
             if (primary && command->type == AF_PATH_CUBIC && have_previous) {
                 const AfVec2 first = af_affine_transform_point(transform, command->control1);
                 const AfVec2 second = af_affine_transform_point(transform, command->control2);
                 const AfVec2 start = af_affine_transform_point(transform, previous);
+                af_editor_add_line(editor, start, first, 3.5F, (AfColor){1, 1, 1, 1}, 90029);
+                af_editor_add_line(editor, second, point, 3.5F, (AfColor){1, 1, 1, 1}, 90029);
                 af_editor_add_line(editor, start, first, 1.5F, (AfColor){0.54F, 0.72F, 1.0F, 1.0F},
                                    90030);
                 af_editor_add_line(editor, second, point, 1.5F, (AfColor){0.54F, 0.72F, 1.0F, 1.0F},
                                    90030);
-                af_editor_add_rect(editor, first.x - 4.0F, first.y - 4.0F, 8.0F, 8.0F,
-                                   (AfColor){0.34F, 0.7F, 1.0F, 1.0F}, 90040);
-                af_editor_add_rect(editor, second.x - 4.0F, second.y - 4.0F, 8.0F, 8.0F,
-                                   (AfColor){0.34F, 0.7F, 1.0F, 1.0F}, 90040);
                 const AfVec2 handles[] = {first, second};
                 for (uint32_t handle = 0U; handle < 2U; ++handle) {
                     const AfVec2 p = handles[handle];
                     if (editor->drag_mode == AF_EDITOR_DRAG_NONE &&
                         hypotf(editor->mouse_position.x - p.x, editor->mouse_position.y - p.y) <=
                             9.0F) {
-                        af_editor_add_rect(editor, p.x - 6, p.y - 6, 12, 12,
-                                           (AfColor){1.0F, 0.55F, 0.2F, 1.0F}, 90042);
+                        af_editor_add_rect(editor, p.x - 7, p.y - 7, 14, 14,
+                                           (AfColor){1.0F, 0.55F, 0.2F, 1.0F}, 90039);
                     }
+                    af_editor_add_path_point(editor, p, 8, (AfColor){0.34F, 0.7F, 1.0F, 1}, 90040);
                 }
                 af_editor_add_text(editor, first.x + 7.0F, first.y - 7.0F, "OUT", 0.62F, 28.0F,
                                    (AfColor){0.42F, 0.76F, 1.0F, 1.0F}, 90045);
@@ -859,7 +867,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     af_editor_render_hierarchy(editor, height);
     af_editor_render_asset_browser(editor, height);
     af_editor_render_toolbar(editor, width);
-    af_editor_render_inspector(editor, width);
+    af_editor_render_inspector(editor, width, height);
     af_editor_render_timeline(editor, width, height);
     af_editor_render_splitters(editor, width, height);
     af_editor_render_context_menu(editor, width, height);

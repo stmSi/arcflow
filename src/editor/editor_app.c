@@ -41,6 +41,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __EMSCRIPTEN__
+#include "web/browser_bridge.h"
+#include <emscripten.h>
+#endif
 
 #define AF_EDITOR_UI_RESERVE 1200U
 #define AF_EDITOR_PROJECT_CAPACITY (AF_MAX_NODES - AF_EDITOR_UI_RESERVE)
@@ -203,7 +207,9 @@ typedef enum AfEditorInspectorField {
     AF_EDITOR_INSPECTOR_OPACITY,
     AF_EDITOR_INSPECTOR_RADIUS,
     AF_EDITOR_INSPECTOR_LAYER,
-    AF_EDITOR_INSPECTOR_OUTLINE_WIDTH
+    AF_EDITOR_INSPECTOR_OUTLINE_WIDTH,
+    AF_EDITOR_INSPECTOR_PARTICLE_FIRST,
+    AF_EDITOR_INSPECTOR_PARTICLE_LAST = AF_EDITOR_INSPECTOR_PARTICLE_FIRST + 7 * 9 - 1
 } AfEditorInspectorField;
 
 typedef struct AfEditorContextMenuInfo {
@@ -399,6 +405,8 @@ typedef struct AfEditorState {
     bool inspector_ratio_locked;
     AfEditorInspectorField inspector_scrub_field;
     float inspector_scrub_start_value;
+    float inspector_scroll;
+    double inspector_particle_scrub_start_value;
     bool inspector_scrub_changed;
     char inspector_buffer[48];
     bool rename_active;
@@ -443,6 +451,7 @@ typedef struct AfEditorState {
     bool text_panel_smoke;
     bool vfx_smoke;
     bool particle_view_smoke;
+    bool particle_inputs_smoke;
     bool vector_animation_smoke;
     bool image_smoke;
     bool menu_smoke;
@@ -607,6 +616,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_splitters.inc"
 #include "editor/editor_app_timeline.inc"
 #include "editor/editor_app_preview.inc"
+#include "editor/editor_app_particle_inputs.inc"
 #include "editor/editor_app_panels.inc"
 #include "editor/editor_app_tooltips.inc"
 #include "editor/editor_app_canvas.inc"
@@ -624,6 +634,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_workflow_render.inc"
 #include "editor/editor_app_workflow_input.inc"
 #include "editor/editor_app_input.inc"
+#include "editor/editor_app_particle_smoke.inc"
 #include "editor/editor_app_menu_smoke.inc"
 #include "editor/editor_app_snap_smoke.inc"
 #include "editor/editor_app_export_smoke.inc"
@@ -805,6 +816,9 @@ int af_editor_run(int argument_count, char **arguments) {
     }
     editor.previous_ticks = SDL_GetTicksNS();
     while (editor.running) {
+#ifdef __EMSCRIPTEN__
+        emscripten_sleep(16);
+#endif
         SDL_Event event;
         int width = editor.window_width;
         int height = editor.window_height;
@@ -922,6 +936,11 @@ int af_editor_run(int argument_count, char **arguments) {
             result = af_editor_studio_smoke(&editor, width, height);
             if (result != AF_RESULT_SUCCESS)
                 break;
+        }
+        if (editor.particle_inputs_smoke && editor.rendered_frames == 0U) {
+            result = af_editor_particle_inputs_smoke(&editor, width);
+            if (result != AF_RESULT_SUCCESS)
+                goto cleanup;
         }
         if (editor.menu_smoke && editor.rendered_frames == 0U) {
             result = af_editor_menu_interaction_smoke(&editor, width, height);
@@ -1587,6 +1606,12 @@ int af_editor_run(int argument_count, char **arguments) {
             editor.pan_max_frame_ms = fmax(editor.pan_max_frame_ms, editor.last_frame_ms);
         }
         ++editor.rendered_frames;
+#ifdef __EMSCRIPTEN__
+        if (editor.rendered_frames % 120U == 0U) {
+            af_editor_save_preferences(&editor);
+            af_web_sync_files();
+        }
+#endif
         if (editor.resize_smoke && editor.rendered_frames == 2U) {
             (void)SDL_SetWindowSize(editor.window.window, 1120, 680);
             af_vk_renderer_request_resize(editor.renderer);

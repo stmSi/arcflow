@@ -1306,7 +1306,7 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         return;
     }
     if (x >= (float)width - editor->right_width) {
-        af_editor_handle_inspector(editor, width, x, y);
+        af_editor_handle_inspector(editor, width, x, y + editor->inspector_scroll);
         return;
     }
     af_editor_layout(editor, width, height, &canvas_x, &canvas_y, &canvas_width, &canvas_height);
@@ -1539,7 +1539,7 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
     if (editor->drag_mode == AF_EDITOR_DRAG_COLOR_SV ||
         editor->drag_mode == AF_EDITOR_DRAG_COLOR_HUE ||
         editor->drag_mode == AF_EDITOR_DRAG_COLOR_ALPHA) {
-        af_editor_update_color_picker(editor, width, event->x, event->y);
+        af_editor_update_color_picker(editor, width, event->x, event->y + editor->inspector_scroll);
         return;
     }
     if (editor->drag_mode == AF_EDITOR_DRAG_INSPECTOR_SCRUB) {
@@ -1874,6 +1874,15 @@ static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
     const float direction = event->direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0F : 1.0F;
     const float scroll_x = event->x * direction;
     const float scroll_y = event->y * direction;
+    if (isfinite(scroll_y) && event->mouse_x >= (float)width - editor->right_width &&
+        event->mouse_x < (float)width && event->mouse_y >= 0 &&
+        event->mouse_y < (float)height - editor->status_height) {
+        const bool particles = af_project_find_node_emitter_const(&editor->project, editor->selected_id) != NULL;
+        const float bottom = particles ? AF_EDITOR_PARTICLE_ROW_Y + AF_EDITOR_PARTICLE_ROW_COUNT * AF_EDITOR_PARTICLE_ROW_STEP + 42 : AF_EDITOR_PARTICLE_LABEL_Y + 42;
+        editor->inspector_scroll = af_editor_clamp(editor->inspector_scroll - scroll_y * 32, 0,
+            fmaxf(bottom - ((float)height - editor->status_height), 0));
+        return;
+    }
     if (!isfinite(scroll_x) || !isfinite(scroll_y) || event->mouse_x < 0.0F ||
         event->mouse_x >= (float)width - editor->right_width ||
         event->mouse_y < AF_EDITOR_MENU_HEIGHT ||
@@ -1994,7 +2003,7 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
             }
         } else if (event->key == SDLK_TAB) {
             const AfEditorInspectorField next =
-                af_editor_next_inspector_field(editor->inspector_field, shift);
+                af_editor_next_inspector_field(editor, editor->inspector_field, shift);
             if (af_editor_finish_inspector_edit(editor, true)) {
                 af_editor_begin_inspector_edit(editor, next);
             }
@@ -3546,6 +3555,10 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
                 editor->maximum_frames = 4U;
         } else if (strcmp(arguments[index], "--vfx-smoke") == 0) {
             editor->vfx_smoke = true;
+        } else if (strcmp(arguments[index], "--particle-inputs-smoke") == 0) {
+            editor->particle_inputs_smoke = true;
+            editor->preferences_read_only = true;
+            if (editor->maximum_frames == 0U) editor->maximum_frames = 4U;
         } else if (strcmp(arguments[index], "--particle-view-smoke") == 0) {
             editor->particle_view_smoke = true;
         } else if (strcmp(arguments[index], "--vector-animation-smoke") == 0) {
@@ -3610,7 +3623,7 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
         editor->selection_smoke || editor->outline_smoke || editor->vector_tools_smoke ||
         editor->vector_preview_smoke || editor->pen_close_smoke || editor->compound_smoke ||
         editor->boolean_smoke || editor->vector_package_smoke || editor->gradient_drag_smoke ||
-        editor->vfx_smoke || editor->particle_view_smoke || editor->vector_animation_smoke ||
+        editor->vfx_smoke || editor->particle_view_smoke || editor->particle_inputs_smoke || editor->vector_animation_smoke ||
         editor->image_smoke || editor->export_smoke || editor->snapping_smoke ||
         editor->menu_smoke || editor->studio_smoke || editor->template_smoke || editor->workflow_smoke ||
         editor->platform_smoke || editor->release_smoke || editor->onboarding_smoke;

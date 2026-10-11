@@ -153,6 +153,26 @@ static AfEditorInspectorField af_editor_inspector_field_at(const AfEditorState *
     const float panel_x = (float)width - editor->right_width + 18.0F;
     const float available = editor->right_width - 36.0F;
     const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
+    if (node != NULL && y >= AF_EDITOR_PARTICLE_ROW_Y &&
+        y < AF_EDITOR_PARTICLE_ROW_Y + AF_EDITOR_PARTICLE_ROW_COUNT * AF_EDITOR_PARTICLE_ROW_STEP &&
+        x >= panel_x && x < panel_x + available) {
+        const uint32_t row =
+            (uint32_t)((y - AF_EDITOR_PARTICLE_ROW_Y) / AF_EDITOR_PARTICLE_ROW_STEP);
+        uint32_t value_row = row;
+        if (((editor->particle_page == 1 && row == 6) ||
+             (editor->particle_page == 3 && row == 7)) &&
+            x >= panel_x + (available - 6) * .5F + 6)
+            value_row = 8;
+        const AfEditorInspectorField field =
+            (AfEditorInspectorField)(AF_EDITOR_INSPECTOR_PARTICLE_FIRST +
+                                     editor->particle_page * 9 + value_row);
+        float field_x, field_width;
+        if (af_editor_particle_field_rect(editor, width, field, &field_x, &field_width) &&
+            x >= field_x && x < field_x + field_width &&
+            y < AF_EDITOR_PARTICLE_ROW_Y + (float)row * AF_EDITOR_PARTICLE_ROW_STEP +
+                    AF_EDITOR_INSPECTOR_FIELD_HEIGHT)
+            return field;
+    }
     if (node == NULL || node->type == AF_NODE_IMAGE || x < panel_x || x >= panel_x + available) {
         return AF_EDITOR_INSPECTOR_NONE;
     }
@@ -167,7 +187,8 @@ static AfEditorInspectorField af_editor_inspector_field_at(const AfEditorState *
         const uint32_t row =
             (uint32_t)((y - AF_EDITOR_COLOR_COMPONENT_Y) / AF_EDITOR_INSPECTOR_FIELD_STEP);
         const float component_x = panel_x + (float)column * (field_width + 6.0F);
-        const float row_y = AF_EDITOR_COLOR_COMPONENT_Y + (float)row * AF_EDITOR_INSPECTOR_FIELD_STEP;
+        const float row_y =
+            AF_EDITOR_COLOR_COMPONENT_Y + (float)row * AF_EDITOR_INSPECTOR_FIELD_STEP;
         if (x >= component_x && x < component_x + field_width &&
             y < row_y + AF_EDITOR_INSPECTOR_FIELD_HEIGHT) {
             return (AfEditorInspectorField)(AF_EDITOR_INSPECTOR_COLOR_R + row * 2U + column);
@@ -204,12 +225,23 @@ static AfEditorInspectorField af_editor_inspector_field_at(const AfEditorState *
 static bool af_editor_inspector_field_rect(const AfEditorState *editor, int width,
                                            AfEditorInspectorField field, float *out_x,
                                            float *out_width) {
+    if (field >= AF_EDITOR_INSPECTOR_PARTICLE_FIRST) {
+        float x, w;
+        if (!af_editor_particle_field_rect(editor, width, field, &x, &w))
+            return false;
+        if (out_x != NULL)
+            *out_x = x;
+        if (out_width != NULL)
+            *out_width = w;
+        return true;
+    }
     const float panel_x = (float)width - editor->right_width + 18.0F;
     const float available = editor->right_width - 36.0F;
     if ((field >= AF_EDITOR_INSPECTOR_POSITION_X && field <= AF_EDITOR_INSPECTOR_LAYER) ||
         (field >= AF_EDITOR_INSPECTOR_COLOR_R && field <= AF_EDITOR_INSPECTOR_COLOR_A)) {
         const AfEditorInspectorField first = field <= AF_EDITOR_INSPECTOR_COLOR_A
-            ? AF_EDITOR_INSPECTOR_COLOR_R : AF_EDITOR_INSPECTOR_POSITION_X;
+                                                 ? AF_EDITOR_INSPECTOR_COLOR_R
+                                                 : AF_EDITOR_INSPECTOR_POSITION_X;
         const uint32_t offset = (uint32_t)(field - first);
         const uint32_t column = offset % 2U;
         const float field_width = (available - 6.0F) * 0.5F;
@@ -257,6 +289,13 @@ static int af_editor_inspector_step_at(const AfEditorState *editor, int width,
 
 static bool af_editor_inspector_numeric_value(const AfEditorState *editor,
                                               AfEditorInspectorField field, float *out_value) {
+    if (field >= AF_EDITOR_INSPECTOR_PARTICLE_FIRST) {
+        AfEditorParticleParameter parameter;
+        if (out_value == NULL || !af_editor_particle_parameter(editor, field, &parameter))
+            return false;
+        *out_value = (float)af_editor_particle_value(&parameter);
+        return true;
+    }
     const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
     if (node == NULL || out_value == NULL) {
         return false;
@@ -342,7 +381,24 @@ static void af_editor_begin_inspector_edit(AfEditorState *editor, AfEditorInspec
     }
     editor->inspector_field = field;
     editor->inspector_replace = true;
-    if (field == AF_EDITOR_INSPECTOR_COLOR_HEX) {
+    if (field >= AF_EDITOR_INSPECTOR_PARTICLE_FIRST) {
+        AfEditorParticleParameter parameter;
+        if (!af_editor_particle_parameter(editor, field, &parameter))
+            return;
+        const uint32_t offset = (uint32_t)(field - AF_EDITOR_INSPECTOR_PARTICLE_FIRST);
+        const uint32_t row = offset % 9U == 8U ? (offset / 9U == 1U ? 6U : 7U) : offset % 9U;
+        const float y = AF_EDITOR_PARTICLE_ROW_Y + (float)row * AF_EDITOR_PARTICLE_ROW_STEP;
+        AfPlatformWindowMetrics metrics;
+        if (af_platform_window_metrics(&editor->window, &metrics) == AF_RESULT_SUCCESS) {
+            const float bottom = (float)metrics.pixel_height - editor->status_height;
+            if (y - editor->inspector_scroll + AF_EDITOR_INSPECTOR_FIELD_HEIGHT > bottom)
+                editor->inspector_scroll = y + AF_EDITOR_INSPECTOR_FIELD_HEIGHT - bottom;
+            else if (y - editor->inspector_scroll < 40)
+                editor->inspector_scroll = fmaxf(y - 40, 0);
+        }
+        (void)snprintf(editor->inspector_buffer, sizeof(editor->inspector_buffer),
+                       parameter.integer ? "%.0f" : "%.6g", af_editor_particle_value(&parameter));
+    } else if (field == AF_EDITOR_INSPECTOR_COLOR_HEX) {
         af_editor_inspector_format_hex_color(color, editor->inspector_buffer,
                                              sizeof(editor->inspector_buffer));
     } else if (field >= AF_EDITOR_INSPECTOR_COLOR_R && field <= AF_EDITOR_INSPECTOR_COLOR_A) {
@@ -429,7 +485,8 @@ static AfEditorMergeKey af_editor_inspector_merge_key(AfEditorInspectorField fie
     return AF_EDITOR_MERGE_TRANSFORM;
 }
 
-static bool af_editor_apply_inspector_color(AfEditorState *editor, AfColor color, bool allow_merge) {
+static bool af_editor_apply_inspector_color(AfEditorState *editor, AfColor color,
+                                            bool allow_merge) {
     const AfStyle *selected_style =
         af_project_find_node_style(&editor->project, editor->selected_id);
     const bool animatable = !editor->color_target_outline &&
@@ -478,6 +535,8 @@ static bool af_editor_update_polygon(AfEditorState *editor, AfVec2 size, uint32_
 
 static bool af_editor_apply_inspector_number(AfEditorState *editor, AfEditorInspectorField field,
                                              float value, int32_t integer, bool allow_merge) {
+    if (field >= AF_EDITOR_INSPECTOR_PARTICLE_FIRST)
+        return af_editor_apply_particle_number(editor, field, (double)value, allow_merge);
     AfPropertyType property = AF_PROPERTY_POSITION;
     const bool animatable =
         af_editor_inspector_animation_property(field, &property) &&
@@ -683,6 +742,16 @@ static bool af_editor_step_inspector_value(AfEditorState *editor, AfEditorInspec
     } else if ((modifiers & SDL_KMOD_CTRL) != 0U) {
         multiplier = 10.0F;
     }
+    if (field >= AF_EDITOR_INSPECTOR_PARTICLE_FIRST) {
+        AfEditorParticleParameter parameter;
+        if (!af_editor_particle_parameter(editor, field, &parameter))
+            return false;
+        double number = af_editor_particle_value(&parameter) +
+                        (double)direction * parameter.step * (double)multiplier;
+        if (parameter.integer)
+            number = round(number);
+        return af_editor_apply_particle_number(editor, field, number, false);
+    }
     value += (float)direction * af_editor_inspector_step_size(field) * multiplier;
     if (field == AF_EDITOR_INSPECTOR_LAYER) {
         const int32_t integer = (int32_t)roundf(af_editor_clamp(value, -10000.0F, 10000.0F));
@@ -696,6 +765,12 @@ static void af_editor_begin_inspector_scrub(AfEditorState *editor, AfEditorInspe
     float value = 0.0F;
     if (!af_editor_inspector_numeric_value(editor, field, &value)) {
         return;
+    }
+    if (field >= AF_EDITOR_INSPECTOR_PARTICLE_FIRST) {
+        AfEditorParticleParameter parameter;
+        if (!af_editor_particle_parameter(editor, field, &parameter))
+            return;
+        editor->inspector_particle_scrub_start_value = af_editor_particle_value(&parameter);
     }
     editor->drag_mode = AF_EDITOR_DRAG_INSPECTOR_SCRUB;
     editor->drag_start_mouse = (AfVec2){x, y};
@@ -719,6 +794,19 @@ static void af_editor_update_inspector_scrub(AfEditorState *editor, float x) {
         multiplier = 0.1F;
     } else if ((modifiers & SDL_KMOD_CTRL) != 0U) {
         multiplier = 10.0F;
+    }
+    if (editor->inspector_scrub_field >= AF_EDITOR_INSPECTOR_PARTICLE_FIRST) {
+        AfEditorParticleParameter parameter;
+        if (!af_editor_particle_parameter(editor, editor->inspector_scrub_field, &parameter))
+            return;
+        double number = editor->inspector_particle_scrub_start_value +
+                        (double)distance * parameter.step * .125 * (double)multiplier;
+        if (parameter.integer)
+            number = round(number);
+        if (af_editor_apply_particle_number(editor, editor->inspector_scrub_field, number,
+                                            allow_merge))
+            editor->inspector_scrub_changed = true;
+        return;
     }
     value = editor->inspector_scrub_start_value +
             distance * af_editor_inspector_scrub_sensitivity(editor->inspector_scrub_field) *
@@ -749,7 +837,12 @@ static bool af_editor_finish_inspector_edit(AfEditorState *editor, bool commit) 
         af_editor_status(editor, "Inspector edit cancelled");
         return true;
     }
-    if (field == AF_EDITOR_INSPECTOR_COLOR_HEX) {
+    if (field >= AF_EDITOR_INSPECTOR_PARTICLE_FIRST) {
+        char *end = NULL;
+        const double number = strtod(editor->inspector_buffer, &end);
+        if (end != editor->inspector_buffer && *end == '\0' && isfinite(number))
+            applied = af_editor_apply_particle_number(editor, field, number, false);
+    } else if (field == AF_EDITOR_INSPECTOR_COLOR_HEX) {
         AfColor color = {0};
         if (af_editor_inspector_parse_hex_color(editor->inspector_buffer, &color)) {
             applied = af_editor_apply_inspector_color(editor, color, false);
@@ -817,8 +910,26 @@ static void af_editor_append_inspector_text(AfEditorState *editor, const char *t
     memcpy(editor->inspector_buffer + current, text, incoming + 1U);
 }
 
-static AfEditorInspectorField af_editor_next_inspector_field(AfEditorInspectorField field,
+static AfEditorInspectorField af_editor_next_inspector_field(const AfEditorState *editor,
+                                                             AfEditorInspectorField field,
                                                              bool backwards) {
+    if (field >= AF_EDITOR_INSPECTOR_PARTICLE_FIRST) {
+        const int page = ((int)field - AF_EDITOR_INSPECTOR_PARTICLE_FIRST) / 9;
+        const int base = AF_EDITOR_INSPECTOR_PARTICLE_FIRST + page * 9;
+        const int order[9] = {0, 1, 2, 3, 4, 5, 6, page == 1 ? 8 : 7, page == 1 ? 7 : 8};
+        int position = 0;
+        while (position < 9 && order[position] != (int)field - base)
+            ++position;
+        for (int i = 0; i < 9; ++i) {
+            position = (position + (backwards ? 8 : 1)) % 9;
+            const int row = order[position];
+            AfEditorParticleParameter parameter;
+            const AfEditorInspectorField next = (AfEditorInspectorField)(base + row);
+            if (af_editor_particle_parameter(editor, next, &parameter))
+                return next;
+        }
+        return AF_EDITOR_INSPECTOR_NONE;
+    }
     const int first = AF_EDITOR_INSPECTOR_COLOR_HEX;
     const int last = AF_EDITOR_INSPECTOR_OUTLINE_WIDTH;
     int next = (int)field + (backwards ? -1 : 1);
@@ -1511,6 +1622,13 @@ static void af_editor_handle_inspector(AfEditorState *editor, int width, float x
         AfProjectNodeSnapshot before = {0};
         const uint32_t row =
             (uint32_t)((y - AF_EDITOR_PARTICLE_ROW_Y) / AF_EDITOR_PARTICLE_ROW_STEP);
+        AfEditorParticleParameter parameter;
+        if (af_editor_particle_parameter(
+                editor,
+                (AfEditorInspectorField)(AF_EDITOR_INSPECTOR_PARTICLE_FIRST +
+                                         editor->particle_page * 9 + row),
+                &parameter))
+            return;
         const bool decrease = x >= panel_x && x <= panel_x + 31.0F;
         const bool increase = x >= panel_x + 34.0F && x <= panel_x + 65.0F;
         if ((decrease || increase) && row < AF_EDITOR_PARTICLE_ROW_COUNT &&

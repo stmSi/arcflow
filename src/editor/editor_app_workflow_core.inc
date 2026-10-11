@@ -308,7 +308,11 @@ static AfResult af_editor_register_actions(AfEditorState *editor) {
 
 static void af_editor_load_preferences(AfEditorState *editor, int width, int height) {
     AfFileData file = {0};
+#ifdef __EMSCRIPTEN__
+    char *directory = SDL_strdup("/documents/");
+#else
     char *directory = SDL_GetPrefPath("Arcflow", "Editor");
+#endif
     af_editor_preferences_default(&editor->preferences);
     af_editor_workspace_default(&editor->workspace);
     if (directory != NULL) {
@@ -489,6 +493,12 @@ static void af_editor_after_project_saved(AfEditorState *editor) {
                                                     SDL_GetTicksNS() / UINT64_C(1000000));
     }
     af_editor_collaboration_saved(editor);
+#ifdef __EMSCRIPTEN__
+    af_editor_save_preferences(editor);
+    af_web_remember_project(editor->project_path);
+    af_web_download_file(editor->project_path);
+    af_web_sync_files();
+#endif
 }
 
 static void af_editor_project_changed(AfEditorState *editor) {

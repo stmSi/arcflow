@@ -1,3 +1,4 @@
 /build/
 *.afp
+/web/node_modules/
 

@@ -16,6 +16,7 @@
     { "name": "beta", "inherits": "release", "cacheVariables": { "ARCFLOW_RELEASE_CHANNEL": "Beta" } },
     { "name": "asan", "inherits": "debug", "cacheVariables": { "CMAKE_C_FLAGS": "-fsanitize=address -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address", "ARCFLOW_BUILD_GPU_TESTS": "OFF" } },
     { "name": "ubsan", "inherits": "debug", "cacheVariables": { "CMAKE_C_FLAGS": "-fsanitize=undefined -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=undefined", "ARCFLOW_BUILD_GPU_TESTS": "OFF" } },
+    { "name": "web", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "ARCFLOW_ENABLE_VALIDATION": "OFF", "ARCFLOW_BUILD_GPU_TESTS": "OFF" } },
     {
       "name": "windows-x64-cross",
       "inherits": "base",
@@ -29,6 +30,7 @@
     }
   ],
   "buildPresets": [
+    { "name": "web", "configurePreset": "web", "targets": ["arcflow_web"] },
     { "name": "debug", "configurePreset": "debug" },
     { "name": "development", "configurePreset": "development" },
     { "name": "release", "configurePreset": "release" },

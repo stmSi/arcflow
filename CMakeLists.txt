@@ -112,6 +112,11 @@ set(AF_FRAMEWORK_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders" CACHE P
 set(AF_FRAMEWORK_ENABLE_VALIDATION "${ARCFLOW_ENABLE_VALIDATION}" CACHE BOOL "" FORCE)
 set(AF_FRAMEWORK_BUILD_TESTS ON CACHE BOOL "" FORCE)
 set(AF_FRAMEWORK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+if(EMSCRIPTEN)
+    set(AF_FRAMEWORK_BUILD_VULKAN OFF CACHE BOOL "" FORCE)
+    set(AF_FRAMEWORK_BUILD_CANVAS ON CACHE BOOL "" FORCE)
+    set(AF_FRAMEWORK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+endif()
 enable_testing()
 set(ARCFLOW_FRAMEWORK_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/framework" CACHE PATH
     "Reusable framework checkout; may point to a separate repository")
@@ -119,77 +124,15 @@ if(NOT EXISTS "${ARCFLOW_FRAMEWORK_SOURCE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "AF Framework is missing. Run git submodule update --init --recursive, or set ARCFLOW_FRAMEWORK_SOURCE_DIR.")
 endif()
 add_subdirectory("${ARCFLOW_FRAMEWORK_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/framework")
+if(EMSCRIPTEN)
+    include(cmake/ArcflowWeb.cmake)
+    return()
+endif()
 add_library(arcflow_volk ALIAS af_volk)
 set(ARCFLOW_SHADER_DIR "${AF_FRAMEWORK_SHADER_OUTPUT_DIR}")
 add_custom_target(arcflow_shaders DEPENDS af_framework_shaders)
 
-# Arcflow's binary package format stays outside the generic engine.
-add_library(arcflow_core STATIC src/assets/package.c)
-set_target_properties(arcflow_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_include_directories(arcflow_core PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated"
-    PRIVATE src)
-target_link_libraries(arcflow_core PUBLIC af::engine)
-
-add_library(arcflow_runtime STATIC
-    src/runtime/public_api.c
-    src/runtime/runtime_bindings.c
-    src/runtime/host_sdk.c
-)
-target_include_directories(arcflow_runtime PUBLIC include third_party/Vulkan-Headers/include PRIVATE src)
-target_link_libraries(arcflow_runtime PUBLIC arcflow_core)
-
-add_library(arcflow_runtime_shared SHARED
-    src/runtime/public_api.c
-    src/runtime/runtime_bindings.c
-    src/runtime/host_sdk.c
-)
-set_target_properties(arcflow_runtime_shared PROPERTIES OUTPUT_NAME arcflow_runtime)
-target_include_directories(arcflow_runtime_shared PUBLIC include third_party/Vulkan-Headers/include
-    PRIVATE src)
-target_link_libraries(arcflow_runtime_shared PUBLIC arcflow_core)
-
-add_library(arcflow_project STATIC
-    src/onboarding/onboarding.c
-    src/project/project.c
-    src/project/project_collaboration.c
-    src/project/project_templates.c
-    src/project/image_decode.c
-    src/project/image_svg.c
-    src/project/project_images.c
-    src/project/interchange.c
-)
-target_include_directories(arcflow_project PUBLIC src PRIVATE include)
-target_link_libraries(arcflow_project PUBLIC arcflow_core PRIVATE SDL3::SDL3-static)
-
-add_library(arcflow_editor_core STATIC
-    src/editor/editor_commands.c
-    src/editor/editor_fonts.c
-    src/editor/editor_text.c
-    src/editor/editor_compound.c
-    src/editor/editor_export.c
-    src/editor/editor_snapping.c
-    src/editor/editor_gizmo.c
-    src/editor/editor_vector_tools.c
-    src/editor/editor_preferences.c
-    src/editor/editor_recovery.c
-    src/editor/editor_workflow.c
-    src/plugin/plugin_host.c
-)
-target_include_directories(arcflow_editor_core PUBLIC src PRIVATE include)
-target_link_libraries(arcflow_editor_core PUBLIC arcflow_project af::ui PRIVATE freetype)
-
-add_library(arcflow_update STATIC src/update/update.c)
-target_include_directories(arcflow_update PUBLIC src PRIVATE include)
-target_link_libraries(arcflow_update PUBLIC arcflow_core)
-
-# This adapter translates the generic Vulkan device context to the Arcflow runtime API.
-add_library(arcflow_renderer STATIC src/renderer/runtime_adapter.c)
-target_include_directories(arcflow_renderer PUBLIC include PRIVATE src)
-target_link_libraries(arcflow_renderer PUBLIC af::vulkan arcflow_runtime)
-
-add_executable(arcflow_compiler src/compiler/compiler_main.c)
-target_include_directories(arcflow_compiler PRIVATE src)
-target_link_libraries(arcflow_compiler PRIVATE arcflow_project)
+include(cmake/ArcflowLibraries.cmake)
 
 set(ARCFLOW_DEMO_PACKAGE "${CMAKE_CURRENT_BINARY_DIR}/assets/arcflow_demo.afp")
 add_custom_command(

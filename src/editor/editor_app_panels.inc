@@ -57,14 +57,15 @@ static void af_editor_render_hierarchy(AfEditorState *editor, int height) {
                                editor->left_width - indent - 32, 1, AF_UI_ACCENT, 100120);
         }
         af_editor_add_text(editor, indent + 23.0F, y + 8.0F,
-                           renaming ? rename_label : editor->project.names[node_index],
-                           1.0F, editor->left_width - indent - 34.0F,
+                           renaming ? rename_label : editor->project.names[node_index], 1.0F,
+                           editor->left_width - indent - 34.0F,
                            (AfColor){0.78F, 0.81F, 0.88F, 1.0F}, 100125);
         if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY && editor->hierarchy_drag_started &&
             af_editor_hovered_rect(editor, 0, y, editor->left_width, AF_EDITOR_ROW_HEIGHT)) {
             const bool inside = af_editor_hierarchy_drop_inside(node, editor->mouse_position.y - y);
             const bool valid = inside ? af_editor_hierarchy_can_drop_inside(editor, node->id)
-                                      : af_editor_can_reorder(&editor->project, editor->hierarchy_drag_id, node->id);
+                                      : af_editor_can_reorder(&editor->project,
+                                                              editor->hierarchy_drag_id, node->id);
             const AfColor highlight =
                 valid ? (AfColor){0.25F, 0.8F, 1, 1} : (AfColor){1, 0.35F, 0.25F, 1};
             if (inside) {
@@ -263,6 +264,26 @@ static void af_editor_render_image_inspector(AfEditorState *editor, int width,
                            0.82F, editor->right_width - 56.0F, (AfColor){0.78F, 0.82F, 0.9F, 1.0F},
                            100130);
     }
+}
+
+static void af_editor_render_inspector_contents(AfEditorState *editor, int width);
+
+static void af_editor_render_inspector(AfEditorState *editor, int width, int height) {
+    const bool particles =
+        af_project_find_node_emitter_const(&editor->project, editor->selected_id) != NULL;
+    const float bottom = particles
+                             ? AF_EDITOR_PARTICLE_ROW_Y +
+                                   AF_EDITOR_PARTICLE_ROW_COUNT * AF_EDITOR_PARTICLE_ROW_STEP + 42
+                             : AF_EDITOR_PARTICLE_LABEL_Y + 42;
+    const float maximum = fmaxf(bottom - ((float)height - editor->status_height), 0);
+    editor->inspector_scroll = af_editor_clamp(editor->inspector_scroll, 0, maximum);
+    const uint32_t start = editor->render_scene.count;
+    const float pointer_y = editor->mouse_position.y;
+    editor->mouse_position.y += editor->inspector_scroll;
+    af_editor_render_inspector_contents(editor, width);
+    editor->mouse_position.y = pointer_y;
+    for (uint32_t i = start; i < editor->render_scene.count; ++i)
+        editor->render_scene.nodes[i].world_transform.ty -= editor->inspector_scroll;
 }
 
 static void af_editor_render_tool_icon(AfEditorState *editor, AfEditorVectorTool tool, float x,
@@ -531,7 +552,8 @@ static void af_editor_render_color_picker(AfEditorState *editor, float x,
         for (uint32_t component = 0U; component < 4U; ++component) {
             af_editor_render_inspector_field(
                 editor, x + (float)(component % 2U) * (field_width + 6.0F),
-                AF_EDITOR_COLOR_COMPONENT_Y + (float)(component / 2U) * AF_EDITOR_INSPECTOR_FIELD_STEP,
+                AF_EDITOR_COLOR_COMPONENT_Y +
+                    (float)(component / 2U) * AF_EDITOR_INSPECTOR_FIELD_STEP,
                 field_width, labels[component], values[component], fields[component]);
         }
     }
@@ -616,7 +638,7 @@ static void af_editor_particle_labels(const AfEditorState *editor, const AfParti
     }
 }
 
-static void af_editor_render_inspector(AfEditorState *editor, int width) {
+static void af_editor_render_inspector_contents(AfEditorState *editor, int width) {
     const float x = (float)width - editor->right_width + 18.0F;
     const AfSceneNode *selected = af_scene_find_const(&editor->preview_scene, editor->selected_id);
     const char *selected_name = af_project_name(&editor->project, editor->selected_id);
@@ -855,6 +877,35 @@ static void af_editor_render_inspector(AfEditorState *editor, int width) {
             for (uint32_t row = 0U; row < AF_EDITOR_PARTICLE_ROW_COUNT; ++row) {
                 const float row_y =
                     AF_EDITOR_PARTICLE_ROW_Y + (float)row * AF_EDITOR_PARTICLE_ROW_STEP;
+                const AfEditorInspectorField field =
+                    (AfEditorInspectorField)(AF_EDITOR_INSPECTOR_PARTICLE_FIRST +
+                                             editor->particle_page * 9 + row);
+                AfEditorParticleParameter parameter;
+                if (af_editor_particle_parameter(editor, field, &parameter)) {
+                    const bool pair = (editor->particle_page == 1 && row == 6) ||
+                                      (editor->particle_page == 3 && row == 7);
+                    for (uint32_t column = 0; column < (pair ? 2U : 1U); ++column) {
+                        const AfEditorInspectorField value_field =
+                            column == 0
+                                ? field
+                                : (AfEditorInspectorField)(AF_EDITOR_INSPECTOR_PARTICLE_FIRST +
+                                                           editor->particle_page * 9 + 8);
+                        (void)af_editor_particle_parameter(editor, value_field, &parameter);
+                        float value_x, value_width;
+                        char value[32];
+                        (void)af_editor_particle_field_rect(editor, width, value_field, &value_x,
+                                                            &value_width);
+                        (void)snprintf(value, sizeof(value), parameter.integer ? "%.0f" : "%.6g",
+                                       af_editor_particle_value(&parameter));
+                        if (!pair)
+                            af_editor_add_text(editor, x, row_y + 8, parameter.label, .65F, 106,
+                                               AF_UI_TEXT, 100135);
+                        af_editor_render_inspector_field(editor, value_x, row_y, value_width,
+                                                         pair ? parameter.label : "", value,
+                                                         value_field);
+                    }
+                    continue;
+                }
                 af_editor_add_button_rect(editor, x, row_y, 31.0F, 26.0F,
                                           (AfColor){0.24F, 0.26F, 0.32F, 1.0F}, 100120);
                 af_editor_add_button_rect(editor, x + 34.0F, row_y, 31.0F, 26.0F,

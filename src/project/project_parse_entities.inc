@@ -59,7 +59,7 @@ static bool af_project_parse_node_field(const char *line, AfProjectNodeSnapshot 
     if ((value = af_project_value(line, "text_guide")) != NULL) {
         float v[7];
         if (snapshot->text.guide_count >= AF_PROJECT_TEXT_GUIDE_COMMANDS ||
-            !af_project_parse_floats(value, v, 7) || v[0] < 0 || v[0] > AF_PATH_CLOSE ||
+            !af_project_parse_floats(value, v, 7) || v[0] < 0 || v[0] > (float)AF_PATH_CLOSE ||
             floorf(v[0]) != v[0])
             return false;
         snapshot->text.guide[snapshot->text.guide_count++] =

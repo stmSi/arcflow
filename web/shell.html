@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arcflow</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #12141b; color: #dce0ed; font: 14px system-ui; }
+    canvas { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; }
+    #status { position: fixed; top: 16px; left: 16px; padding: 12px 16px; background: #242733; border-radius: 6px; }
+    #status[hidden] { display: none; }
+    #status[data-busy="true"]::after { content: ''; display: block; margin-top: 8px; height: 3px; width: 100%; background: linear-gradient(90deg, transparent, #9c85ff, transparent); animation: progress 1s linear infinite; }
+    #status a { color: #c9baff; }
+    #status button { margin-left: 12px; padding: 2px 8px; }
+    @keyframes progress { from { opacity: .3; } to { opacity: 1; } }
+    #player-controls { position: fixed; top: 12px; right: 12px; }
+    #player-controls[hidden] { display: none; }
+    button { background: #242733; color: #dce0ed; border: 1px solid #50556a; border-radius: 4px; padding: 8px 12px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" tabindex="0" aria-label="Arcflow workspace" oncontextmenu="event.preventDefault()"></canvas>
+  <div id="status" role="status">Loading Arcflow…</div>
+  <div id="player-controls" hidden><button id="open-package">Open .afp</button><input id="package-file" type="file" accept=".afp" hidden></div>
+  <script>
+    var statusElement = document.getElementById('status');
+    var query = new URLSearchParams(location.search);
+    var isPlayer = location.pathname.endsWith('player.html');
+    var Module = {
+      canvas: document.getElementById('canvas'),
+      arguments: [isPlayer ? (query.get('package') || '/assets/arcflow_demo.afp') : (query.get('project') || '/documents/untitled.afproj')],
+      print: function(text) { console.log(text); },
+      printErr: function(text) { console.error(text); },
+      setStatus: function(text) { statusElement.textContent = text; statusElement.hidden = !text; },
+      onAbort: function(reason) { Module.setStatus('Arcflow could not start: ' + reason); document.body.dataset.state = 'failed'; },
+      onExit: function(code) { Module.exitCode = code; document.body.dataset.state = code ? 'failed' : 'stopped'; },
+      onRuntimeInitialized: function() { document.body.dataset.state = 'ready'; Module.canvas.focus(); },
+      preRun: [function() {
+        var storage = isPlayer ? '/packages' : '/documents';
+        var storageRoot = '/persist' + location.pathname.replace(/[^/]*$/, '') + storage.slice(1);
+        FS.mkdirTree(storageRoot);
+        FS.mount(IDBFS, {autoPersist: true}, storageRoot);
+        FS.symlink(storageRoot, storage);
+        if (isPlayer) FS.mkdirTree('/documents');
+        addRunDependency('documents');
+        var restore = function() {
+          FS.syncfs(true, function(error) {
+            if (error) console.error('Persistent storage unavailable', error);
+            if (!isPlayer && !query.has('project')) {
+              try {
+                var session = JSON.parse(FS.readFile('/documents/session.json', {encoding: 'utf8'}));
+                if (session.project.startsWith('/documents/')) Module.arguments[0] = session.project;
+              } catch (_) {}
+            }
+            removeRunDependency('documents');
+          });
+        };
+        if (!isPlayer && navigator.locks) {
+          navigator.locks.request('arcflow:' + location.pathname.replace(/[^/]*$/, ''),
+            {ifAvailable: true}, function(lock) {
+              if (!lock) { Module.setStatus('Arcflow is open in another tab. Close it and reload.'); return; }
+              restore();
+              return new Promise(function() {});
+            });
+        } else restore();
+      }]
+    };
+    if (query.has('frames')) Module.arguments.push('--frames', query.get('frames'));
+    if (query.has('capture')) Module.arguments.push('--output', '/documents/capture.png');
+    var smoke = query.get('smoke');
+    if (['studio', 'template', 'inspector', 'vector-tools', 'image', 'gradient', 'particle-inputs', 'particle-view'].includes(smoke))
+      Module.arguments.push('--' + smoke + '-smoke');
+    var syncing = false, syncAgain = false;
+    Module.setBusy = function(busy, text) {
+      statusElement.dataset.busy = String(busy);
+      statusElement.setAttribute('aria-busy', String(busy));
+      Module.setStatus(text);
+    };
+    var downloadUrl = null;
+    Module.showDownload = function(url, filename) {
+      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+      downloadUrl = url;
+      Module.setBusy(false, 'Download ready: ');
+      var link = document.createElement('a');
+      link.href = url; link.download = filename; link.textContent = filename;
+      var dismiss = document.createElement('button');
+      dismiss.textContent = '×'; dismiss.setAttribute('aria-label', 'Dismiss download');
+      dismiss.onclick = function() { Module.setStatus(''); URL.revokeObjectURL(url); if (downloadUrl === url) downloadUrl = null; };
+      statusElement.append(link, dismiss);
+    };
+    Module.syncDocuments = function() {
+      if (syncing) { syncAgain = true; return; }
+      syncing = true;
+      FS.syncfs(false, function(error) {
+        syncing = false;
+        if (error) console.error('Could not persist documents', error);
+        if (syncAgain) { syncAgain = false; Module.syncDocuments(); }
+      });
+    };
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'hidden' && document.body.dataset.state === 'ready') Module.syncDocuments();
+    });
+    if (isPlayer) {
+      document.getElementById('player-controls').hidden = false;
+      var packageInput = document.getElementById('package-file');
+      document.getElementById('open-package').onclick = function() { packageInput.click(); };
+      packageInput.onchange = async function() {
+        var file = packageInput.files[0];
+        if (!file || !Module.afCanvasFrames) return;
+        if (file.size > 128 * 1024 * 1024) { Module.setStatus('Package exceeds 128 MB'); return; }
+        var path = '/packages/' + file.name.replace(/[\\/]/g, '_');
+        FS.writeFile(path, new Uint8Array(await file.arrayBuffer()));
+        FS.syncfs(false, function(error) {
+          if (error) { Module.setStatus('Could not store package'); return; }
+          location.search = '?package=' + encodeURIComponent(path);
+        });
+      };
+    }
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

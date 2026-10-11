@@ -16,6 +16,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #define AF_PLAYER_CAPTURE_PATH_CAPACITY 1024U
 
@@ -107,6 +110,9 @@ int af_player_run(const char *title, int argument_count, char **arguments) {
     }
     previous_ticks = SDL_GetTicksNS();
     while (running) {
+#ifdef __EMSCRIPTEN__
+        emscripten_sleep(16);
+#endif
         SDL_Event event;
         uint64_t current_ticks = 0U;
         float delta_time = 0.0F;
