@@ -1,4 +1,4 @@
-#include "platform/platform_sdl.h"
+#include "af/platform/platform_sdl.h"
 
 #include <math.h>
 #include <stdio.h>

@@ -1,16 +1,16 @@
 #ifndef AF_RUNTIME_INTERNAL_H
 #define AF_RUNTIME_INTERNAL_H
 
+#include "af/binding/binding.h"
+#include "af/component/component.h"
+#include "af/core/allocator.h"
+#include "af/core/handles.h"
+#include "af/interaction/interaction.h"
+#include "af/localization/localization.h"
+#include "af/scene/scene.h"
+#include "af/state_machine/state_machine.h"
 #include "arcflow/arcflow_runtime.h"
 #include "assets/package.h"
-#include "binding/binding.h"
-#include "component/component.h"
-#include "core/allocator.h"
-#include "core/handles.h"
-#include "interaction/interaction.h"
-#include "localization/localization.h"
-#include "scene/scene.h"
-#include "state_machine/state_machine.h"
 
 #define AF_RUNTIME_MAX_PACKAGES 64U
 #define AF_RUNTIME_MAX_INSTANCES 128U

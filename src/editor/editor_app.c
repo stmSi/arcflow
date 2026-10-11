@@ -1,11 +1,16 @@
 #include "editor/editor_app.h"
 
+#include "af/core/allocator.h"
+#include "af/core/file_io.h"
+#include "af/core/hash.h"
+#include "af/core/log.h"
+#include "af/performance/metrics.h"
+#include "af/platform/platform_sdl.h"
+#include "af/scene/scene.h"
+#include "af/text/text.h"
+#include "af/ui/draw.h"
 #include "arcflow/arcflow_build_info.h"
 #include "arcflow/arcflow_version.h"
-#include "core/allocator.h"
-#include "core/file_io.h"
-#include "core/hash.h"
-#include "core/log.h"
 #include "editor/editor_actions.h"
 #include "editor/editor_commands.h"
 #include "editor/editor_export.h"
@@ -20,19 +25,16 @@
 #include "editor/editor_vector_tools.h"
 #include "editor/editor_workflow.h"
 #include "onboarding/onboarding.h"
-#include "performance/metrics.h"
-#include "platform/platform_sdl.h"
 #include "project/image_import.h"
 #include "project/interchange.h"
 #include "project/project.h"
 #include "project/project_templates.h"
 #include "renderer/vk_renderer.h"
-#include "scene/scene.h"
-#include "text/text.h"
 #include "update/update.h"
 
 #include <SDL3/SDL.h>
 #include <ctype.h>
+#include <limits.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -217,12 +219,6 @@ typedef struct AfEditorTooltip {
     const char *details;
     const char *shortcut;
 } AfEditorTooltip;
-
-typedef struct AfEditorHoverFeedback {
-    uint64_t key;
-    uint32_t frame;
-    float amount;
-} AfEditorHoverFeedback;
 
 typedef struct AfEditorState {
     AfAllocator allocator;
@@ -413,9 +409,8 @@ typedef struct AfEditorState {
     char output_path[AF_EDITOR_PATH_CAPACITY];
     char sequence_prefix[AF_EDITOR_PATH_CAPACITY];
     char status[AF_EDITOR_STATUS_CAPACITY];
-    AfEditorHoverFeedback hover_feedback[256];
+    AfUiContext ui;
     uint64_t ui_previous_ticks;
-    float ui_delta_seconds;
     uint32_t dialog_event_type;
     AfEditorDialogAction dialog_action;
     uint32_t maximum_frames;

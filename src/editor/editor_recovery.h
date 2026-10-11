@@ -1,8 +1,8 @@
 #ifndef AF_EDITOR_RECOVERY_H
 #define AF_EDITOR_RECOVERY_H
 
+#include "af/core/allocator.h"
 #include "arcflow/arcflow_result.h"
-#include "core/allocator.h"
 
 #include <stdbool.h>
 #include <stddef.h>

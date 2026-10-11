@@ -1,13 +1,13 @@
 #ifndef AF_PROJECT_H
 #define AF_PROJECT_H
 
+#include "af/binding/binding.h"
+#include "af/core/allocator.h"
+#include "af/layout/layout.h"
+#include "af/scene/scene.h"
 #include "arcflow/arcflow_result.h"
 #include "assets/package.h"
-#include "binding/binding.h"
-#include "core/allocator.h"
-#include "layout/layout.h"
 #include "project/project_collaboration.h"
-#include "scene/scene.h"
 
 #include <stddef.h>
 #include <stdint.h>

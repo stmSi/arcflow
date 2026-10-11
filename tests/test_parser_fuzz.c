@@ -1,6 +1,6 @@
+#include "af/core/allocator.h"
+#include "af/core/hash.h"
 #include "assets/package.h"
-#include "core/allocator.h"
-#include "core/hash.h"
 #include "project/project.h"
 #include "project/project_templates.h"
 

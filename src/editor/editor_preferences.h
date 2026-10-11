@@ -1,9 +1,9 @@
 #ifndef AF_EDITOR_PREFERENCES_H
 #define AF_EDITOR_PREFERENCES_H
 
+#include "af/localization/localization.h"
 #include "arcflow/arcflow_result.h"
 #include "editor/editor_actions.h"
-#include "localization/localization.h"
 
 #include <stdbool.h>
 #include <stddef.h>

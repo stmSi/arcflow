@@ -1,16 +1,16 @@
-#include "animation/animation.h"
+#include "af/animation/animation.h"
+#include "af/core/allocator.h"
+#include "af/core/file_io.h"
+#include "af/core/hash.h"
+#include "af/scene/scene.h"
+#include "af/stability/diagnostics.h"
 #include "arcflow/arcflow_build_info.h"
 #include "assets/package.h"
-#include "core/allocator.h"
-#include "core/file_io.h"
-#include "core/hash.h"
 #include "onboarding/onboarding.h"
 #include "project/image_import.h"
 #include "project/project.h"
 #include "project/project_collaboration.h"
 #include "project/project_templates.h"
-#include "scene/scene.h"
-#include "stability/diagnostics.h"
 
 #include <errno.h>
 #include <stdio.h>

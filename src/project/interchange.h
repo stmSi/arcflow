@@ -1,9 +1,9 @@
 #ifndef AF_INTERCHANGE_H
 #define AF_INTERCHANGE_H
 
+#include "af/core/allocator.h"
+#include "af/scene/scene.h"
 #include "arcflow/arcflow_result.h"
-#include "core/allocator.h"
-#include "scene/scene.h"
 
 #include <stdbool.h>
 #include <stddef.h>

@@ -1,7 +1,7 @@
 #include "project/image_import.h"
 
-#include "core/file_io.h"
-#include "core/safe_math.h"
+#include "af/core/file_io.h"
+#include "af/core/safe_math.h"
 
 #include <SDL3/SDL.h>
 

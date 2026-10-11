@@ -1,9 +1,9 @@
 #ifndef AF_EDITOR_VECTOR_TOOLS_H
 #define AF_EDITOR_VECTOR_TOOLS_H
 
-#include "core/math.h"
-#include "path/path.h"
-#include "scene/scene.h"
+#include "af/core/math.h"
+#include "af/path/path.h"
+#include "af/scene/scene.h"
 
 #include <stdbool.h>
 #include <stdint.h>

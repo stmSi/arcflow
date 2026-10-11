@@ -1,4 +1,4 @@
-#include "stability/diagnostics.h"
+#include "af/stability/diagnostics.h"
 
 #include <stdbool.h>
 #include <stdint.h>

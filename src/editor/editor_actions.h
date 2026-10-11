@@ -1,22 +1,9 @@
 #ifndef AF_EDITOR_ACTIONS_H
 #define AF_EDITOR_ACTIONS_H
 
-#include "arcflow/arcflow_result.h"
+#include "af/ui/actions.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-
-#define AF_EDITOR_MAX_ACTIONS 256U
-#define AF_EDITOR_ACTION_LABEL_CAPACITY 64U
-#define AF_EDITOR_ACTION_TOOLTIP_CAPACITY 192U
-#define AF_EDITOR_ACTION_KEYWORDS_CAPACITY 128U
-#define AF_EDITOR_ACTION_SEARCH_CAPACITY 128U
-#define AF_EDITOR_COMMAND_QUERY_CAPACITY 96U
-#define AF_EDITOR_SHORTCUT_TEXT_CAPACITY 64U
-
-typedef uint32_t AfEditorActionId;
-
+/* Arcflow names the context bits; action dispatch and search belong to the UI framework. */
 typedef enum AfEditorActionContext {
     AF_EDITOR_ACTION_CONTEXT_GLOBAL = 1U << 0U,
     AF_EDITOR_ACTION_CONTEXT_CANVAS = 1U << 1U,
@@ -30,149 +17,85 @@ typedef enum AfEditorActionContext {
 
 #define AF_EDITOR_ACTION_CONTEXT_ALL UINT32_C(0x000000ff)
 
-typedef enum AfEditorShortcutModifier {
-    AF_EDITOR_SHORTCUT_MODIFIER_CTRL = 1U << 0U,
-    AF_EDITOR_SHORTCUT_MODIFIER_SHIFT = 1U << 1U,
-    AF_EDITOR_SHORTCUT_MODIFIER_ALT = 1U << 2U,
-    AF_EDITOR_SHORTCUT_MODIFIER_SUPER = 1U << 3U
-} AfEditorShortcutModifier;
+typedef AfUiAction AfEditorAction;
+typedef AfUiActionDefinition AfEditorActionDefinition;
+typedef AfUiActionExecuteFn AfEditorActionExecuteFn;
+typedef AfUiActionId AfEditorActionId;
+typedef AfUiActionRegistry AfEditorActionRegistry;
+typedef AfUiActionSearchResult AfEditorActionSearchResult;
+typedef AfUiCommandPalette AfEditorCommandPalette;
+typedef AfUiCommandPaletteKey AfEditorCommandPaletteKey;
+typedef AfUiShortcut AfEditorShortcut;
+typedef AfUiShortcutModifier AfEditorShortcutModifier;
+typedef AfUiSpecialKey AfEditorSpecialKey;
 
-#define AF_EDITOR_SHORTCUT_MODIFIER_MASK UINT32_C(0x0000000f)
+#define AF_EDITOR_ACTION_KEYWORDS_CAPACITY AF_UI_ACTION_KEYWORDS_CAPACITY
+#define AF_EDITOR_ACTION_LABEL_CAPACITY AF_UI_ACTION_LABEL_CAPACITY
+#define AF_EDITOR_ACTION_SEARCH_CAPACITY AF_UI_ACTION_SEARCH_CAPACITY
+#define AF_EDITOR_ACTION_TOOLTIP_CAPACITY AF_UI_ACTION_TOOLTIP_CAPACITY
+#define AF_EDITOR_COMMAND_PALETTE_ACTIVATE AF_UI_COMMAND_PALETTE_ACTIVATE
+#define AF_EDITOR_COMMAND_PALETTE_CANCEL AF_UI_COMMAND_PALETTE_CANCEL
+#define AF_EDITOR_COMMAND_PALETTE_DOWN AF_UI_COMMAND_PALETTE_DOWN
+#define AF_EDITOR_COMMAND_PALETTE_END AF_UI_COMMAND_PALETTE_END
+#define AF_EDITOR_COMMAND_PALETTE_HOME AF_UI_COMMAND_PALETTE_HOME
+#define AF_EDITOR_COMMAND_PALETTE_PAGE_DOWN AF_UI_COMMAND_PALETTE_PAGE_DOWN
+#define AF_EDITOR_COMMAND_PALETTE_PAGE_UP AF_UI_COMMAND_PALETTE_PAGE_UP
+#define AF_EDITOR_COMMAND_PALETTE_UP AF_UI_COMMAND_PALETTE_UP
+#define AF_EDITOR_COMMAND_QUERY_CAPACITY AF_UI_COMMAND_QUERY_CAPACITY
+#define AF_EDITOR_KEY_BACKSPACE AF_UI_KEY_BACKSPACE
+#define AF_EDITOR_KEY_DELETE AF_UI_KEY_DELETE
+#define AF_EDITOR_KEY_DOWN AF_UI_KEY_DOWN
+#define AF_EDITOR_KEY_END AF_UI_KEY_END
+#define AF_EDITOR_KEY_ENTER AF_UI_KEY_ENTER
+#define AF_EDITOR_KEY_ESCAPE AF_UI_KEY_ESCAPE
+#define AF_EDITOR_KEY_F1 AF_UI_KEY_F1
+#define AF_EDITOR_KEY_F10 AF_UI_KEY_F10
+#define AF_EDITOR_KEY_F11 AF_UI_KEY_F11
+#define AF_EDITOR_KEY_F12 AF_UI_KEY_F12
+#define AF_EDITOR_KEY_F2 AF_UI_KEY_F2
+#define AF_EDITOR_KEY_F3 AF_UI_KEY_F3
+#define AF_EDITOR_KEY_F4 AF_UI_KEY_F4
+#define AF_EDITOR_KEY_F5 AF_UI_KEY_F5
+#define AF_EDITOR_KEY_F6 AF_UI_KEY_F6
+#define AF_EDITOR_KEY_F7 AF_UI_KEY_F7
+#define AF_EDITOR_KEY_F8 AF_UI_KEY_F8
+#define AF_EDITOR_KEY_F9 AF_UI_KEY_F9
+#define AF_EDITOR_KEY_HOME AF_UI_KEY_HOME
+#define AF_EDITOR_KEY_LEFT AF_UI_KEY_LEFT
+#define AF_EDITOR_KEY_PAGE_DOWN AF_UI_KEY_PAGE_DOWN
+#define AF_EDITOR_KEY_PAGE_UP AF_UI_KEY_PAGE_UP
+#define AF_EDITOR_KEY_RIGHT AF_UI_KEY_RIGHT
+#define AF_EDITOR_KEY_SPACE AF_UI_KEY_SPACE
+#define AF_EDITOR_KEY_TAB AF_UI_KEY_TAB
+#define AF_EDITOR_KEY_UP AF_UI_KEY_UP
+#define AF_EDITOR_MAX_ACTIONS AF_UI_MAX_ACTIONS
+#define AF_EDITOR_SHORTCUT_MODIFIER_ALT AF_UI_SHORTCUT_MODIFIER_ALT
+#define AF_EDITOR_SHORTCUT_MODIFIER_CTRL AF_UI_SHORTCUT_MODIFIER_CTRL
+#define AF_EDITOR_SHORTCUT_MODIFIER_MASK AF_UI_SHORTCUT_MODIFIER_MASK
+#define AF_EDITOR_SHORTCUT_MODIFIER_SHIFT AF_UI_SHORTCUT_MODIFIER_SHIFT
+#define AF_EDITOR_SHORTCUT_MODIFIER_SUPER AF_UI_SHORTCUT_MODIFIER_SUPER
+#define AF_EDITOR_SHORTCUT_TEXT_CAPACITY AF_UI_SHORTCUT_TEXT_CAPACITY
 
-typedef enum AfEditorSpecialKey {
-    AF_EDITOR_KEY_ESCAPE = 0x100U,
-    AF_EDITOR_KEY_ENTER,
-    AF_EDITOR_KEY_TAB,
-    AF_EDITOR_KEY_SPACE,
-    AF_EDITOR_KEY_BACKSPACE,
-    AF_EDITOR_KEY_DELETE,
-    AF_EDITOR_KEY_HOME,
-    AF_EDITOR_KEY_END,
-    AF_EDITOR_KEY_PAGE_UP,
-    AF_EDITOR_KEY_PAGE_DOWN,
-    AF_EDITOR_KEY_LEFT,
-    AF_EDITOR_KEY_RIGHT,
-    AF_EDITOR_KEY_UP,
-    AF_EDITOR_KEY_DOWN,
-    AF_EDITOR_KEY_F1 = 0x120U,
-    AF_EDITOR_KEY_F2,
-    AF_EDITOR_KEY_F3,
-    AF_EDITOR_KEY_F4,
-    AF_EDITOR_KEY_F5,
-    AF_EDITOR_KEY_F6,
-    AF_EDITOR_KEY_F7,
-    AF_EDITOR_KEY_F8,
-    AF_EDITOR_KEY_F9,
-    AF_EDITOR_KEY_F10,
-    AF_EDITOR_KEY_F11,
-    AF_EDITOR_KEY_F12
-} AfEditorSpecialKey;
-
-typedef struct AfEditorShortcut {
-    uint32_t key;
-    uint32_t modifiers;
-} AfEditorShortcut;
-
-typedef AfResult (*AfEditorActionExecuteFn)(void *user, AfEditorActionId action_id);
-
-typedef struct AfEditorActionDefinition {
-    AfEditorActionId id;
-    const char *label;
-    const char *tooltip;
-    const char *keywords;
-    AfEditorShortcut default_shortcut;
-    uint32_t contexts;
-    AfEditorActionExecuteFn execute;
-    void *user;
-} AfEditorActionDefinition;
-
-typedef struct AfEditorAction {
-    AfEditorActionId id;
-    char label[AF_EDITOR_ACTION_LABEL_CAPACITY];
-    char tooltip[AF_EDITOR_ACTION_TOOLTIP_CAPACITY];
-    char keywords[AF_EDITOR_ACTION_KEYWORDS_CAPACITY];
-    AfEditorShortcut default_shortcut;
-    AfEditorShortcut shortcut;
-    uint32_t contexts;
-    AfEditorActionExecuteFn execute;
-    void *user;
-    bool enabled;
-    bool visible;
-} AfEditorAction;
-
-typedef struct AfEditorActionRegistry {
-    AfEditorAction *actions;
-    uint32_t count;
-    uint32_t capacity;
-} AfEditorActionRegistry;
-
-typedef struct AfEditorActionSearchResult {
-    AfEditorActionId action_id;
-    uint32_t score;
-} AfEditorActionSearchResult;
-
-typedef enum AfEditorCommandPaletteKey {
-    AF_EDITOR_COMMAND_PALETTE_UP = 0,
-    AF_EDITOR_COMMAND_PALETTE_DOWN,
-    AF_EDITOR_COMMAND_PALETTE_HOME,
-    AF_EDITOR_COMMAND_PALETTE_END,
-    AF_EDITOR_COMMAND_PALETTE_PAGE_UP,
-    AF_EDITOR_COMMAND_PALETTE_PAGE_DOWN,
-    AF_EDITOR_COMMAND_PALETTE_ACTIVATE,
-    AF_EDITOR_COMMAND_PALETTE_CANCEL
-} AfEditorCommandPaletteKey;
-
-typedef struct AfEditorCommandPalette {
-    const AfEditorActionRegistry *registry;
-    AfEditorActionSearchResult results[AF_EDITOR_ACTION_SEARCH_CAPACITY];
-    char query[AF_EDITOR_COMMAND_QUERY_CAPACITY];
-    uint32_t result_count;
-    uint32_t selected_index;
-    uint32_t page_size;
-    uint32_t contexts;
-    bool open;
-} AfEditorCommandPalette;
-
-AfResult af_editor_action_registry_init(AfEditorActionRegistry *registry, AfEditorAction *actions,
-                                        uint32_t capacity);
-AfResult af_editor_action_register(AfEditorActionRegistry *registry,
-                                   const AfEditorActionDefinition *definition);
-const AfEditorAction *af_editor_action_find(const AfEditorActionRegistry *registry,
-                                            AfEditorActionId action_id);
-AfResult af_editor_action_set_enabled(AfEditorActionRegistry *registry, AfEditorActionId action_id,
-                                      bool enabled);
-AfResult af_editor_action_set_visible(AfEditorActionRegistry *registry, AfEditorActionId action_id,
-                                      bool visible);
-AfResult af_editor_action_set_shortcut(AfEditorActionRegistry *registry, AfEditorActionId action_id,
-                                       AfEditorShortcut shortcut,
-                                       AfEditorActionId *out_conflicting_action_id);
-AfResult af_editor_action_reset_shortcut(AfEditorActionRegistry *registry,
-                                         AfEditorActionId action_id,
-                                         AfEditorActionId *out_conflicting_action_id);
-AfResult af_editor_action_shortcut_conflict(const AfEditorActionRegistry *registry,
-                                            AfEditorActionId action_id, AfEditorShortcut shortcut,
-                                            AfEditorActionId *out_conflicting_action_id);
-AfResult af_editor_action_resolve_shortcut(const AfEditorActionRegistry *registry,
-                                           AfEditorShortcut shortcut, uint32_t contexts,
-                                           AfEditorActionId *out_action_id);
-AfResult af_editor_action_execute(const AfEditorActionRegistry *registry,
-                                  AfEditorActionId action_id);
-AfResult af_editor_action_search(const AfEditorActionRegistry *registry, const char *query,
-                                 uint32_t contexts, AfEditorActionSearchResult *results,
-                                 uint32_t result_capacity, uint32_t *out_result_count);
-AfEditorShortcut af_editor_shortcut_normalize(AfEditorShortcut shortcut);
-bool af_editor_shortcut_equal(AfEditorShortcut left, AfEditorShortcut right);
-bool af_editor_shortcut_is_bound(AfEditorShortcut shortcut);
-AfResult af_editor_shortcut_format(AfEditorShortcut shortcut, char *output, size_t output_capacity);
-
-AfResult af_editor_command_palette_init(AfEditorCommandPalette *palette,
-                                        const AfEditorActionRegistry *registry, uint32_t page_size);
-AfResult af_editor_command_palette_open(AfEditorCommandPalette *palette, uint32_t contexts);
-void af_editor_command_palette_close(AfEditorCommandPalette *palette);
-AfResult af_editor_command_palette_set_query(AfEditorCommandPalette *palette, const char *query);
-AfResult af_editor_command_palette_handle_key(AfEditorCommandPalette *palette,
-                                              AfEditorCommandPaletteKey key,
-                                              AfEditorActionId *out_action_id);
-const AfEditorAction *af_editor_command_palette_selected(const AfEditorCommandPalette *palette);
+#define af_editor_action_execute af_ui_action_execute
+#define af_editor_action_find af_ui_action_find
+#define af_editor_action_register af_ui_action_register
+#define af_editor_action_registry_init af_ui_action_registry_init
+#define af_editor_action_reset_shortcut af_ui_action_reset_shortcut
+#define af_editor_action_resolve_shortcut af_ui_action_resolve_shortcut
+#define af_editor_action_search af_ui_action_search
+#define af_editor_action_set_enabled af_ui_action_set_enabled
+#define af_editor_action_set_shortcut af_ui_action_set_shortcut
+#define af_editor_action_set_visible af_ui_action_set_visible
+#define af_editor_action_shortcut_conflict af_ui_action_shortcut_conflict
+#define af_editor_command_palette_close af_ui_command_palette_close
+#define af_editor_command_palette_handle_key af_ui_command_palette_handle_key
+#define af_editor_command_palette_init af_ui_command_palette_init
+#define af_editor_command_palette_open af_ui_command_palette_open
+#define af_editor_command_palette_selected af_ui_command_palette_selected
+#define af_editor_command_palette_set_query af_ui_command_palette_set_query
+#define af_editor_shortcut_equal af_ui_shortcut_equal
+#define af_editor_shortcut_format af_ui_shortcut_format
+#define af_editor_shortcut_is_bound af_ui_shortcut_is_bound
+#define af_editor_shortcut_normalize af_ui_shortcut_normalize
 
 #endif

@@ -771,7 +771,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     AfAffine2 camera = af_editor_camera(editor, width, height);
     uint32_t index = 0U;
     const uint64_t ui_now = SDL_GetTicksNS();
-    editor->ui_delta_seconds =
+    editor->ui.delta_seconds =
         editor->ui_previous_ticks == 0
             ? 1.0F / 60.0F
             : fminf(0.05F, (float)(ui_now - editor->ui_previous_ticks) / 1000000000.0F);

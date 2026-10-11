@@ -1,12 +1,12 @@
 #include "project/project.h"
 
-#include "animation/animation.h"
-#include "core/file_io.h"
-#include "core/id_index.h"
-#include "core/safe_math.h"
+#include "af/animation/animation.h"
+#include "af/core/file_io.h"
+#include "af/core/id_index.h"
+#include "af/core/safe_math.h"
 #include "project/image_import.h"
 
-#include "text/text.h"
+#include "af/text/text.h"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>

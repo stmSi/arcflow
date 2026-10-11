@@ -1,6 +1,6 @@
 #include "editor/editor_recovery.h"
 
-#include "core/file_io.h"
+#include "af/core/file_io.h"
 
 #include <errno.h>
 #include <stdalign.h>

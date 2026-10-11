@@ -1,7 +1,7 @@
 #include "project/image_import.h"
 
-#include "core/file_io.h"
-#include "core/hash.h"
+#include "af/core/file_io.h"
+#include "af/core/hash.h"
 
 #include <SDL3/SDL.h>
 

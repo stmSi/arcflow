@@ -1,6 +1,6 @@
 #ifndef AF_EDITOR_SNAPPING_H
 #define AF_EDITOR_SNAPPING_H
-#include "scene/scene.h"
+#include "af/scene/scene.h"
 #include <stdbool.h>
 #include <stdint.h>
 

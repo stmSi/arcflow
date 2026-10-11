@@ -105,111 +105,30 @@ set(ARCFLOW_BUILD_ID
 configure_file(cmake/arcflow_build_info.h.in
     "${CMAKE_CURRENT_BINARY_DIR}/generated/arcflow/arcflow_build_info.h" @ONLY)
 
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/CMakeLists.txt")
-    message(FATAL_ERROR "Pinned SDL3 source is missing; run tools/bootstrap-dependencies.sh")
+# The reusable framework owns engine, UI, platform and Vulkan dependencies.
+set(AF_FRAMEWORK_DEPENDENCY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party" CACHE PATH "")
+set(AF_FRAMEWORK_DEPENDENCY_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/third_party" CACHE PATH "")
+set(AF_FRAMEWORK_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders" CACHE PATH "")
+set(AF_FRAMEWORK_ENABLE_VALIDATION "${ARCFLOW_ENABLE_VALIDATION}" CACHE BOOL "" FORCE)
+set(AF_FRAMEWORK_BUILD_TESTS ON CACHE BOOL "" FORCE)
+set(AF_FRAMEWORK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+enable_testing()
+set(ARCFLOW_FRAMEWORK_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/framework" CACHE PATH
+    "Reusable framework checkout; may point to a separate repository")
+if(NOT EXISTS "${ARCFLOW_FRAMEWORK_SOURCE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "AF Framework is missing. Run git submodule update --init --recursive, or set ARCFLOW_FRAMEWORK_SOURCE_DIR.")
 endif()
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/include/vulkan/vulkan.h")
-    message(FATAL_ERROR "Pinned Vulkan-Headers source is missing; run tools/bootstrap-dependencies.sh")
-endif()
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/volk/volk.c")
-    message(FATAL_ERROR "Pinned volk source is missing; run tools/bootstrap-dependencies.sh")
-endif()
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/CMakeLists.txt" OR
-   NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/CMakeLists.txt")
-    message(FATAL_ERROR "Pinned FreeType/HarfBuzz sources are missing; run tools/bootstrap-dependencies.sh")
-endif()
+add_subdirectory("${ARCFLOW_FRAMEWORK_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/framework")
+add_library(arcflow_volk ALIAS af_volk)
+set(ARCFLOW_SHADER_DIR "${AF_FRAMEWORK_SHADER_OUTPUT_DIR}")
+add_custom_target(arcflow_shaders DEPENDS af_framework_shaders)
 
-set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-set(SDL_STATIC ON CACHE BOOL "" FORCE)
-set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
-set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
-set(SDL_AUDIO OFF CACHE BOOL "" FORCE)
-set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
-set(SDL_GPU OFF CACHE BOOL "" FORCE)
-set(SDL_RENDER OFF CACHE BOOL "" FORCE)
-set(SDL_JOYSTICK OFF CACHE BOOL "" FORCE)
-set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
-set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
-set(SDL_POWER OFF CACHE BOOL "" FORCE)
-set(SDL_DIALOG ON CACHE BOOL "" FORCE)
-set(SDL_TRAY OFF CACHE BOOL "" FORCE)
-set(SDL_WAYLAND OFF CACHE BOOL "" FORCE)
-set(ARCFLOW_SAVED_C_EXTENSIONS "${CMAKE_C_EXTENSIONS}")
-set(ARCFLOW_SAVED_REQUIRED_DEFINITIONS "${CMAKE_REQUIRED_DEFINITIONS}")
-set(CMAKE_C_EXTENSIONS ON)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
-endif()
-add_subdirectory(third_party/SDL EXCLUDE_FROM_ALL)
-set(CMAKE_C_EXTENSIONS "${ARCFLOW_SAVED_C_EXTENSIONS}")
-set(CMAKE_REQUIRED_DEFINITIONS "${ARCFLOW_SAVED_REQUIRED_DEFINITIONS}")
-
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(FT_DISABLE_ZLIB ON CACHE BOOL "" FORCE)
-set(FT_DISABLE_BZIP2 ON CACHE BOOL "" FORCE)
-set(FT_DISABLE_PNG ON CACHE BOOL "" FORCE)
-set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
-set(FT_DISABLE_BROTLI ON CACHE BOOL "" FORCE)
-add_subdirectory(third_party/freetype EXCLUDE_FROM_ALL)
-set(HB_BUILD_UTILS OFF CACHE BOOL "" FORCE)
-set(HB_BUILD_SUBSET OFF CACHE BOOL "" FORCE)
-set(HB_HAVE_FREETYPE ON CACHE BOOL "" FORCE)
-add_subdirectory(third_party/harfbuzz EXCLUDE_FROM_ALL)
-
-add_library(arcflow_volk STATIC third_party/volk/volk.c)
-target_include_directories(arcflow_volk PUBLIC
-    third_party/volk
-    third_party/Vulkan-Headers/include
-)
-if(UNIX AND NOT APPLE)
-    target_link_libraries(arcflow_volk PUBLIC dl)
-endif()
-
-set(ARCFLOW_PROJECT_SOURCES
-    src/core/allocator.c
-    src/core/array.c
-    src/core/arena.c
-    src/core/error.c
-    src/core/file_io.c
-    src/core/handles.c
-    src/core/hash.c
-    src/core/log.c
-    src/core/math.c
-    src/core/png.c
-    src/scene/scene.c
-    src/animation/animation.c
-    src/animation/advanced_animation.c
-    src/path/path.c
-    src/path/path_boolean.c
-    src/path/path_offset.c
-    src/style/style.c
-    src/layout/layout.c
-    src/text/text.c
-    src/binding/binding.c
-    src/localization/localization.c
-    src/performance/metrics.c
-    src/stability/diagnostics.c
-    src/component/component.c
-    src/interaction/interaction.c
-    src/state_machine/state_machine.c
-    src/composition/composition.c
-    src/deformation/deformation.c
-    src/rigging/rigging.c
-    src/particle/particle.c
-    src/assets/image.c
-    src/assets/package.c
-)
-
-add_library(arcflow_core STATIC ${ARCFLOW_PROJECT_SOURCES})
+# Arcflow's binary package format stays outside the generic engine.
+add_library(arcflow_core STATIC src/assets/package.c)
 set_target_properties(arcflow_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(arcflow_core PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated"
     PRIVATE src)
-if(UNIX)
-target_link_libraries(arcflow_core PUBLIC m)
-endif()
-target_link_libraries(arcflow_core PUBLIC freetype harfbuzz)
+target_link_libraries(arcflow_core PUBLIC af::engine)
 
 add_library(arcflow_runtime STATIC
     src/runtime/public_api.c
@@ -247,11 +166,9 @@ add_library(arcflow_editor_core STATIC
     src/editor/editor_fonts.c
     src/editor/editor_text.c
     src/editor/editor_compound.c
-    src/editor/editor_actions.c
     src/editor/editor_export.c
     src/editor/editor_snapping.c
     src/editor/editor_gizmo.c
-    src/editor/editor_inspector.c
     src/editor/editor_vector_tools.c
     src/editor/editor_preferences.c
     src/editor/editor_recovery.c
@@ -259,76 +176,16 @@ add_library(arcflow_editor_core STATIC
     src/plugin/plugin_host.c
 )
 target_include_directories(arcflow_editor_core PUBLIC src PRIVATE include)
-target_link_libraries(arcflow_editor_core PUBLIC arcflow_project)
+target_link_libraries(arcflow_editor_core PUBLIC arcflow_project af::ui PRIVATE freetype)
 
 add_library(arcflow_update STATIC src/update/update.c)
 target_include_directories(arcflow_update PUBLIC src PRIVATE include)
 target_link_libraries(arcflow_update PUBLIC arcflow_core)
 
-set(ARCFLOW_SHADER_TOOLCHAIN "${CMAKE_CURRENT_SOURCE_DIR}/third_party/shader-toolchain/usr")
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
-   EXISTS "${ARCFLOW_SHADER_TOOLCHAIN}/bin/glslc" AND
-   EXISTS "${ARCFLOW_SHADER_TOOLCHAIN}/bin/spirv-val")
-    set(ARCFLOW_GLSLC "${ARCFLOW_SHADER_TOOLCHAIN}/bin/glslc")
-    set(ARCFLOW_SPIRV_VAL "${ARCFLOW_SHADER_TOOLCHAIN}/bin/spirv-val")
-    set(ARCFLOW_SHADER_TOOL_ENV "${CMAKE_COMMAND}" -E env
-        "LD_LIBRARY_PATH=${ARCFLOW_SHADER_TOOLCHAIN}/lib")
-else()
-    find_program(ARCFLOW_GLSLC glslc REQUIRED)
-    find_program(ARCFLOW_SPIRV_VAL spirv-val REQUIRED)
-    set(ARCFLOW_SHADER_TOOL_ENV)
-endif()
-set(ARCFLOW_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
-file(MAKE_DIRECTORY "${ARCFLOW_SHADER_DIR}")
-
-function(arcflow_shader SOURCE OUTPUT)
-    add_custom_command(
-        OUTPUT "${ARCFLOW_SHADER_DIR}/${OUTPUT}"
-        COMMAND ${ARCFLOW_SHADER_TOOL_ENV} "${ARCFLOW_GLSLC}" --target-env=vulkan1.3 -O
-                "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SOURCE}"
-                -o "${ARCFLOW_SHADER_DIR}/${OUTPUT}"
-        COMMAND ${ARCFLOW_SHADER_TOOL_ENV} "${ARCFLOW_SPIRV_VAL}" --target-env vulkan1.3
-                "${ARCFLOW_SHADER_DIR}/${OUTPUT}"
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SOURCE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/shaders/paint.glsl"
-        VERBATIM
-    )
-endfunction()
-
-arcflow_shader(analytic.vert analytic.vert.spv)
-arcflow_shader(analytic.frag analytic.frag.spv)
-arcflow_shader(path.vert path.vert.spv)
-arcflow_shader(path.frag path.frag.spv)
-arcflow_shader(image.vert image.vert.spv)
-arcflow_shader(image.frag image.frag.spv)
-arcflow_shader(particle.comp particle.comp.spv)
-arcflow_shader(particle.vert particle.vert.spv)
-arcflow_shader(particle.frag particle.frag.spv)
-add_custom_target(arcflow_shaders ALL DEPENDS
-    "${ARCFLOW_SHADER_DIR}/analytic.vert.spv"
-    "${ARCFLOW_SHADER_DIR}/analytic.frag.spv"
-    "${ARCFLOW_SHADER_DIR}/path.vert.spv"
-    "${ARCFLOW_SHADER_DIR}/path.frag.spv"
-    "${ARCFLOW_SHADER_DIR}/image.vert.spv"
-    "${ARCFLOW_SHADER_DIR}/image.frag.spv"
-    "${ARCFLOW_SHADER_DIR}/particle.comp.spv"
-    "${ARCFLOW_SHADER_DIR}/particle.vert.spv"
-    "${ARCFLOW_SHADER_DIR}/particle.frag.spv"
-)
-
-add_library(arcflow_renderer STATIC
-    src/platform/platform_sdl.c
-    src/renderer/vk_particles.c
-    src/renderer/vk_renderer.c
-)
-target_include_directories(arcflow_renderer PUBLIC include PRIVATE src "${ARCFLOW_SHADER_DIR}")
-target_compile_definitions(arcflow_renderer PRIVATE
-    VK_NO_PROTOTYPES
-    ARCFLOW_SHADER_DIR="${ARCFLOW_SHADER_DIR}"
-    $<$<BOOL:${ARCFLOW_ENABLE_VALIDATION}>:AF_ENABLE_VALIDATION=1>
-)
-target_link_libraries(arcflow_renderer PUBLIC arcflow_runtime arcflow_volk SDL3::SDL3-static)
-add_dependencies(arcflow_renderer arcflow_shaders)
+# This adapter translates the generic Vulkan device context to the Arcflow runtime API.
+add_library(arcflow_renderer STATIC src/renderer/runtime_adapter.c)
+target_include_directories(arcflow_renderer PUBLIC include PRIVATE src)
+target_link_libraries(arcflow_renderer PUBLIC af::vulkan arcflow_runtime)
 
 add_executable(arcflow_compiler src/compiler/compiler_main.c)
 target_include_directories(arcflow_compiler PRIVATE src)
@@ -470,9 +327,9 @@ add_test(NAME arcflow_compiler_cli_tests
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compiler_cli.cmake"
 )
 
-add_executable(arcflow_platform_tests tests/test_platform.c src/platform/platform_sdl.c)
+add_executable(arcflow_platform_tests tests/test_platform.c)
 target_include_directories(arcflow_platform_tests PRIVATE src include)
-target_link_libraries(arcflow_platform_tests PRIVATE arcflow_core SDL3::SDL3-static)
+target_link_libraries(arcflow_platform_tests PRIVATE af::platform)
 add_test(NAME arcflow_platform_tests COMMAND arcflow_platform_tests)
 
 add_executable(arcflow_update_tests tests/test_update.c)
@@ -510,7 +367,7 @@ add_test(NAME arcflow_runtime_sample_tests
 
 add_custom_target(arcflow_ci
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS arcflow_tests arcflow_performance_tests arcflow_localization_tests
+    DEPENDS af_framework_tests arcflow_tests arcflow_performance_tests arcflow_localization_tests
             arcflow_stability_tests arcflow_beta_performance_tests arcflow_parser_fuzz_tests
             arcflow_import_fuzz_tests arcflow_release_tests
             arcflow_interchange_tests arcflow_editor_workflow_tests
@@ -527,6 +384,10 @@ if(ARCFLOW_CLANG_FORMAT)
         "${CMAKE_CURRENT_SOURCE_DIR}/include/arcflow/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+        "${ARCFLOW_FRAMEWORK_SOURCE_DIR}/src/*.c"
+        "${ARCFLOW_FRAMEWORK_SOURCE_DIR}/include/*.h"
+        "${ARCFLOW_FRAMEWORK_SOURCE_DIR}/tests/*.c"
+        "${ARCFLOW_FRAMEWORK_SOURCE_DIR}/examples/*.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.c"
     )
     add_custom_target(arcflow_format_check
@@ -593,6 +454,9 @@ install(TARGETS arcflow_editor arcflow_player arcflow_compiler arcflow_runtime_s
 install(TARGETS arcflow_runtime arcflow_core
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 install(DIRECTORY include/arcflow DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES "${ARCFLOW_FRAMEWORK_SOURCE_DIR}/include/af/result.h"
+    "${ARCFLOW_FRAMEWORK_SOURCE_DIR}/include/af/events.h"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/af")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/arcflow/arcflow_build_info.h"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/arcflow")
 install(FILES

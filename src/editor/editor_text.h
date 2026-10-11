@@ -1,7 +1,7 @@
 #ifndef AF_EDITOR_TEXT_H
 #define AF_EDITOR_TEXT_H
+#include "af/text/text.h"
 #include "editor/editor_commands.h"
-#include "text/text.h"
 
 /* id == 0 creates a root text object at position; otherwise edits existing text.
  * Caller loads the selected family/style as font_id. No project mutation. */

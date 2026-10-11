@@ -1,8 +1,8 @@
 #ifndef AF_EDITOR_GIZMO_H
 #define AF_EDITOR_GIZMO_H
 
-#include "animation/animation.h"
-#include "scene/scene.h"
+#include "af/animation/animation.h"
+#include "af/scene/scene.h"
 
 #include <stdbool.h>
 

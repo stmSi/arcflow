@@ -1,8 +1,8 @@
 #ifndef AF_EDITOR_WORKFLOW_H
 #define AF_EDITOR_WORKFLOW_H
 
+#include "af/scene/scene.h"
 #include "arcflow/arcflow_result.h"
-#include "scene/scene.h"
 
 #include <stdbool.h>
 #include <stddef.h>

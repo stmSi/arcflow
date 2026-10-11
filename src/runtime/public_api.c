@@ -1,14 +1,14 @@
 #include "arcflow/arcflow_runtime.h"
 
-#include "animation/animation.h"
+#include "af/animation/animation.h"
+#include "af/binding/binding.h"
+#include "af/component/component.h"
+#include "af/core/allocator.h"
+#include "af/core/handles.h"
+#include "af/interaction/interaction.h"
+#include "af/state_machine/state_machine.h"
 #include "assets/package.h"
-#include "binding/binding.h"
-#include "component/component.h"
-#include "core/allocator.h"
-#include "core/handles.h"
-#include "interaction/interaction.h"
 #include "runtime/runtime_internal.h"
-#include "state_machine/state_machine.h"
 
 #include <math.h>
 #include <stdalign.h>

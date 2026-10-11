@@ -1,6 +1,6 @@
+#include "af/path/path_offset.h"
 #include "editor/editor_commands.h"
 #include "editor/editor_vector_tools.h"
-#include "path/path_offset.h"
 
 #include <math.h>
 #include <stdio.h>

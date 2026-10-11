@@ -1,6 +1,6 @@
 #include "assets/package.h"
 
-#include "core/safe_math.h"
+#include "af/core/safe_math.h"
 
 #include <math.h>
 #include <stdalign.h>

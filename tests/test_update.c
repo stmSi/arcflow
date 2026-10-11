@@ -1,6 +1,6 @@
+#include "af/core/hash.h"
 #include "arcflow/arcflow_build_info.h"
 #include "arcflow/arcflow_version.h"
-#include "core/hash.h"
 #include "update/update.h"
 
 #include <stdio.h>

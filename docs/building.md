@@ -1,56 +1,25 @@
 # Building
 
-Supported configurations are Debug, Development, Release, AddressSanitizer, and
-UndefinedBehaviorSanitizer. Linux x64 is verified by the project presets; the project code and
-vendored dependencies are structured for Windows x64, where a Vulkan loader and shader tools must
-also be on `PATH`.
+Requires CMake 3.25+, Ninja, and a Vulkan 1.3 driver/loader.
 
 ```sh
-cmake --preset development
-cmake --build --preset development
-ctest --preset development
+git submodule update --init --recursive
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug
 ```
 
-Use `debug`, `release`, `asan`, or `ubsan` in place of `development`. The optional
-`arcflow_format_check` target runs clang-format without modifying files.
-Sanitizer presets omit the GPU smoke case because third-party Vulkan drivers retain process-global
-allocations; the Debug preset runs that GPU check.
+Other presets: `development`, `release`, `asan`, `ubsan`, and `windows-x64-cross`.
+Sanitizer presets omit GPU smoke tests. `arcflow_format_check` checks formatting.
 
-Run the player with the project-local Linux validation runtime using:
+Pinned dependencies and Linux shader tools live in `third_party/`.
+If missing, run `tools/bootstrap-dependencies.sh`; versions and licenses are in
+[DEPENDENCIES.md](../third_party/DEPENDENCIES.md). Windows needs shader tools on `PATH`.
+Shaders compile offline with `glslc` and are checked with `spirv-val`.
 
-```sh
-tools/run-player-validation.sh --resize-smoke --frames 12
-```
+[AF Framework](https://github.com/stmSi/af-framework#readme) builds independently.
+Use `-DARCFLOW_FRAMEWORK_SOURCE_DIR=/path/to/af-framework` to select another checkout.
 
-The same local validation environment can run the editor:
-
-```sh
-tools/run-editor-validation.sh assets/editor_demo.afproj --resize-smoke --frames 12
-```
-
-Pinned dependencies live under `third_party/`: SDL 3.4.12, Vulkan-Headers 1.3.296, volk from Vulkan
-SDK 1.3.296, FreeType 2.13.3, HarfBuzz 10.2.0, and Linux x64 shader/validation tools. If a checkout omits them, run
-`tools/bootstrap-dependencies.sh`. Dependencies are never downloaded at application startup or
-normal CMake configuration. Exact versions and licenses are recorded in
-`third_party/DEPENDENCIES.md`.
-
-Shaders are compiled offline for Vulkan 1.3 with `glslc` and validated by `spirv-val` on every shader
-rebuild. Release playback never compiles shaders.
-
-The stable preset stamps Arcflow 1.0.0 and the Stable channel. Its production acceptance target
-builds the portable package and debug symbols, runs the complete test/install suite, repeats package
-generation to prove reproducibility on Linux, checks versioned documentation and notices, and emits
-`build/release/arcflow-production-readiness.json`:
-
-```sh
-cmake --preset release
-cmake --build --preset release --target arcflow_production_acceptance
-```
-
-This local gate is necessary but does not replace successful Linux and Windows CI jobs or the
-supported Vulkan hardware/validation matrix described in the
-[production release guide](production-release.md).
-
-Runtime requirements are a Vulkan loader and a driver supporting Vulkan 1.3, dynamic rendering,
-synchronization 2, timeline semaphores, swapchains, and presentation. Debug validation is enabled
-when `VK_LAYER_KHRONOS_validation` is installed and falls back safely when it is absent.
+Validation smoke: `tools/run-editor-validation.sh assets/editor_demo.afproj --frames 12`.
+Release checks: configure `release`, then build `arcflow_production_acceptance`.
+See the [release guide](production-release.md) for CI and hardware requirements.

@@ -1,7 +1,7 @@
 #include "update/update.h"
 
-#include "core/file_io.h"
-#include "core/hash.h"
+#include "af/core/file_io.h"
+#include "af/core/hash.h"
 
 #include <errno.h>
 #include <stdio.h>

@@ -1,7 +1,7 @@
-#include "animation/animation.h"
-#include "layout/layout.h"
+#include "af/animation/animation.h"
+#include "af/layout/layout.h"
+#include "af/renderer/render_items.h"
 #include "project/project.h"
-#include "renderer/render_items.h"
 
 #include <SDL3/SDL_timer.h>
 

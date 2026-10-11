@@ -1,7 +1,7 @@
 #ifndef AF_IMAGE_IMPORT_H
 #define AF_IMAGE_IMPORT_H
 
-#include "assets/image.h"
+#include "af/assets/image.h"
 #include "project/project.h"
 
 typedef struct AfDecodedImage {

@@ -1,15 +1,15 @@
 #ifndef AF_PACKAGE_H
 #define AF_PACKAGE_H
 
-#include "animation/animation.h"
+#include "af/animation/animation.h"
+#include "af/binding/binding.h"
+#include "af/component/component.h"
+#include "af/core/allocator.h"
+#include "af/layout/layout.h"
+#include "af/scene/scene.h"
+#include "af/state_machine/state_machine.h"
 #include "arcflow/arcflow_result.h"
 #include "arcflow/arcflow_version.h"
-#include "binding/binding.h"
-#include "component/component.h"
-#include "core/allocator.h"
-#include "layout/layout.h"
-#include "scene/scene.h"
-#include "state_machine/state_machine.h"
 
 #include <stddef.h>
 #include <stdint.h>

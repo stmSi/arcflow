@@ -1,15 +1,11 @@
 #ifndef AF_EDITOR_INSPECTOR_H
 #define AF_EDITOR_INSPECTOR_H
 
-#include "core/math.h"
+#include "af/ui/input.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-
-bool af_editor_inspector_parse_number(const char *text, float *out_value);
-bool af_editor_inspector_parse_integer(const char *text, int32_t *out_value);
-bool af_editor_inspector_parse_hex_color(const char *text, AfColor *out_color);
-void af_editor_inspector_format_hex_color(AfColor color, char *output, size_t capacity);
+#define af_editor_inspector_parse_number af_ui_parse_number
+#define af_editor_inspector_parse_integer af_ui_parse_integer
+#define af_editor_inspector_parse_hex_color af_ui_parse_hex_color
+#define af_editor_inspector_format_hex_color af_ui_format_hex_color
 
 #endif

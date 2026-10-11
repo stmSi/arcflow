@@ -1,7 +1,7 @@
 #include "editor/editor_commands.h"
 #include "editor/editor_vector_tools.h"
 
-#include "scene/scene.h"
+#include "af/scene/scene.h"
 
 #include <math.h>
 #include <stdalign.h>

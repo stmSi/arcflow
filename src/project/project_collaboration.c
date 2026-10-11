@@ -4,7 +4,7 @@
 
 #include "project/project_collaboration.h"
 
-#include "core/hash.h"
+#include "af/core/hash.h"
 
 #include <errno.h>
 #include <stdatomic.h>

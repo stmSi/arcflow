@@ -1,8 +1,8 @@
 #ifndef AF_PLUGIN_HOST_H
 #define AF_PLUGIN_HOST_H
 
+#include "af/core/allocator.h"
 #include "arcflow/arcflow_editor_plugin.h"
-#include "core/allocator.h"
 
 #include <stdbool.h>
 #include <stddef.h>

@@ -1,9 +1,9 @@
-#include "core/allocator.h"
-#include "core/file_io.h"
-#include "core/hash.h"
+#include "af/core/allocator.h"
+#include "af/core/file_io.h"
+#include "af/core/hash.h"
+#include "af/text/text.h"
 #include "project/image_import.h"
 #include "project/interchange.h"
-#include "text/text.h"
 
 #include <math.h>
 #include <stdbool.h>
