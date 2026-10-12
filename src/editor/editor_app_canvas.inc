@@ -840,7 +840,8 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
         af_editor_render_selection_outlines(editor, camera);
     if (!editor->text_panel_open && editor->active_tool == AF_EDITOR_TOOL_SELECT) {
         af_editor_render_gizmo(editor, camera);
-    } else if (editor->active_tool == AF_EDITOR_TOOL_NODE) {
+    } else if (editor->active_tool == AF_EDITOR_TOOL_NODE ||
+               editor->active_tool == AF_EDITOR_TOOL_GRADIENT) {
         af_editor_render_outline(editor,
                                  af_scene_find_const(&editor->preview_scene, editor->selected_id),
                                  camera, (AfColor){0.98F, 0.8F, 0.22F, 1.0F}, 90000);

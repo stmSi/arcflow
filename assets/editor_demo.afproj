@@ -2,21 +2,6 @@ arcflow_project 3
 canvas 1280 720
 next_id 6
 next_animation_id 20
-node
-id 1
-parent none
-type group
-name Scene
-position 0 0
-rotation 0
-scale 1 1
-bounds 0 0
-fill 0 0 0 0
-opacity 1
-corner_radius 0
-layer 0
-visible 1
-end
 clip
 id 1
 name Main Clip
@@ -158,7 +143,7 @@ easing 0 0 0 0
 end_keyframe
 node
 id 2
-parent 1
+parent none
 type rectangle
 name Blue Rectangle
 position 150 140
@@ -173,7 +158,7 @@ visible 1
 end
 node
 id 3
-parent 1
+parent none
 type rounded_rectangle
 name Coral Rounded Rectangle
 position 500 270
@@ -188,7 +173,7 @@ visible 1
 end
 node
 id 4
-parent 1
+parent none
 type ellipse
 name Green Ellipse
 position 850 390
@@ -203,7 +188,7 @@ visible 1
 end
 node
 id 5
-parent 1
+parent none
 type path
 name Purple Compound Path
 position 760 90

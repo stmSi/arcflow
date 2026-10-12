@@ -261,12 +261,6 @@ static AfLayoutNode af_editor_centered_pivot_layout(const AfSceneNode *node) {
 }
 
 static AfResult af_editor_default_project(AfEditorState *editor) {
-    AfSceneNode root = {.id = 1U,
-                        .parent_id = AF_INVALID_NODE_ID,
-                        .type = AF_NODE_GROUP,
-                        .local_transform = {.scale = {1.0F, 1.0F}},
-                        .opacity = 1.0F,
-                        .visible = true};
     AfSceneNode rectangle = af_editor_default_node(AF_NODE_RECTANGLE, 2U, (AfVec2){160.0F, 150.0F});
     AfSceneNode rounded =
         af_editor_default_node(AF_NODE_ROUNDED_RECTANGLE, 3U, (AfVec2){480.0F, 270.0F});
@@ -278,18 +272,12 @@ static AfResult af_editor_default_project(AfEditorState *editor) {
                           .loop_start = 0.0F,
                           .loop_end = 4.0F,
                           .loop = true};
-    rectangle.parent_id = root.id;
     rectangle.fill = (AfColor){0.18F, 0.56F, 0.96F, 1.0F};
-    rounded.parent_id = root.id;
     rounded.fill = (AfColor){0.94F, 0.35F, 0.27F, 1.0F};
     rounded.layer_order = 1;
-    ellipse.parent_id = root.id;
     ellipse.fill = (AfColor){0.32F, 0.86F, 0.54F, 1.0F};
     ellipse.layer_order = 2;
-    result = af_project_add_node(&editor->project, &root, "Scene");
-    if (result == AF_RESULT_SUCCESS) {
-        result = af_project_add_node(&editor->project, &rectangle, "Rectangle");
-    }
+    result = af_project_add_node(&editor->project, &rectangle, "Rectangle");
     if (result == AF_RESULT_SUCCESS) {
         result = af_project_add_node(&editor->project, &rounded, "Rounded Rectangle");
     }

@@ -172,7 +172,8 @@ typedef enum AfEditorGradientDrag {
     AF_EDITOR_GRADIENT_DRAG_START,
     AF_EDITOR_GRADIENT_DRAG_END,
     AF_EDITOR_GRADIENT_DRAG_CANVAS_STOP,
-    AF_EDITOR_GRADIENT_DRAG_TOOLBAR_STOP
+    AF_EDITOR_GRADIENT_DRAG_TOOLBAR_STOP,
+    AF_EDITOR_GRADIENT_DRAG_DRAW
 } AfEditorGradientDrag;
 
 typedef enum AfEditorDialogAction {
@@ -374,6 +375,8 @@ typedef struct AfEditorState {
     bool gradient_outline;
     uint32_t gradient_stop;
     AfEditorGradientDrag gradient_drag;
+    AfPaintType gradient_tool_type;
+    AfAffine2 gradient_drag_frame;
     AfVec2 gradient_drag_origin;
     AfVec2 gradient_drag_pointer;
     float gradient_drag_stop_offset;
@@ -644,6 +647,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_snap_smoke.inc"
 #include "editor/editor_app_export_smoke.inc"
 #include "editor/editor_app_gradient_smoke.inc"
+#include "editor/editor_app_gradient_tool_smoke.inc"
 #include "editor/editor_app_editing_smoke.inc"
 #include "editor/editor_app_studio_smoke.inc"
 #include "editor/editor_app_template_smoke.inc"

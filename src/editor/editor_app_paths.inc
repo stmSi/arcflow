@@ -201,19 +201,29 @@ static void af_editor_set_vector_tool(AfEditorState *editor, AfEditorVectorTool 
         af_editor_cancel_vector_tool(editor, NULL);
     }
     editor->active_tool = tool;
+    if (tool == AF_EDITOR_TOOL_GRADIENT) {
+        const AfStyle *style = af_project_find_node_style(&editor->project, editor->selected_id);
+        const AfPaint *paint = af_editor_target_paint(editor, style);
+        if (paint && paint->type != AF_PAINT_SOLID)
+            editor->gradient_tool_type = paint->type;
+        else if (editor->gradient_tool_type == AF_PAINT_SOLID)
+            editor->gradient_tool_type = AF_PAINT_LINEAR_GRADIENT;
+    }
     editor->drag_mode = AF_EDITOR_DRAG_NONE;
     (void)snprintf(status, sizeof(status), "%s tool · %s", af_editor_vector_tool_name(tool),
                    af_editor_vector_tool_is_construction(tool)
                        ? "draw directly on the canvas"
-                       : (tool == AF_EDITOR_TOOL_NODE
-                              ? "edit animated path nodes"
-                              : (tool == AF_EDITOR_TOOL_SCISSORS
-                                     ? "click a selected path segment to cut it"
-                                     : (tool == AF_EDITOR_TOOL_SEGMENT_DELETE
-                                            ? "click a selected path segment to remove it"
-                                            : (tool == AF_EDITOR_TOOL_KNIFE
-                                                   ? "drag across selected path segments"
-                                                   : "select and transform objects")))));
+                       : (tool == AF_EDITOR_TOOL_GRADIENT
+                              ? "choose Fill or Outline, then drag a gradient line"
+                              : (tool == AF_EDITOR_TOOL_NODE
+                                     ? "edit animated path nodes"
+                                     : (tool == AF_EDITOR_TOOL_SCISSORS
+                                            ? "click a selected path segment to cut it"
+                                            : (tool == AF_EDITOR_TOOL_SEGMENT_DELETE
+                                                   ? "click a selected path segment to remove it"
+                                                   : (tool == AF_EDITOR_TOOL_KNIFE
+                                                          ? "drag across selected path segments"
+                                                          : "select and transform objects"))))));
     af_editor_status(editor, status);
 }
 

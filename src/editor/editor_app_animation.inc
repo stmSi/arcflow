@@ -312,6 +312,15 @@ static AfResult af_editor_commit_transform_key_drag(AfEditorState *editor, bool 
     }
     result = af_editor_command_animation(AF_EDITOR_MERGE_KEYFRAME_VALUE,
                                          editor->transform_drag_key_ids[0], &command);
+    if (result == AF_RESULT_SUCCESS && editor->gradient_drag && editor->selection_drag_count == 1) {
+        /* Static paint changes and existing animation keys belong to the same gesture. */
+        command.type = AF_EDITOR_COMMAND_MODIFY;
+        command.merge_key = AF_EDITOR_MERGE_STYLE;
+        command.target_id = editor->selected_id;
+        command.before_count = command.after_count = 1;
+        command.before[0] = editor->selection_drag_before[0];
+        result = af_project_snapshot(&editor->project, editor->selected_id, &command.after[0]);
+    }
     for (uint32_t index = 0U;
          result == AF_RESULT_SUCCESS && index < editor->transform_drag_key_count; ++index) {
         if (!editor->transform_drag_key_created[index]) {

@@ -51,13 +51,40 @@ try {
   await page.mouse.down();
   await page.mouse.move(650, 360, {steps: 8});
   await page.mouse.up();
+  await page.keyboard.press('Shift+g');
+  await page.mouse.move(520, 270);
+  await page.mouse.down();
+  await page.mouse.move(630, 330, {steps: 8});
+  await page.mouse.up();
   const download = page.waitForEvent('download');
   await page.keyboard.press('Control+s');
   const saved = await download;
   assert.equal(saved.suggestedFilename(), 'browser-project.afproj');
   const projectPath = '/documents/' + saved.suggestedFilename();
-  const project = await page.evaluate(path => Module.FS.readFile(path, {encoding: 'utf8'}), projectPath);
-  assert.equal((project.match(/^node$/gm) || []).length, 5, 'New document gains the drawn rectangle');
+  let project = await page.evaluate(path => Module.FS.readFile(path, {encoding: 'utf8'}), projectPath);
+  assert.equal((project.match(/^node$/gm) || []).length, 4, 'New document gains the drawn rectangle');
+  assert.doesNotMatch(project, /^type group$/m, 'Starting objects are directly in Layers');
+  const fillType = source => {
+    const fields = source.split('\n').filter(line => line.startsWith('style ')).at(-1).split(/\s+/);
+    return Number(fields[17 + Number(fields[13])]); // Fill follows the style header and dash list.
+  };
+  assert.equal(fillType(project), 1, 'Gradient tool applies a linear fill');
+  // Undo and redo use actual browser key events and preserve the drawn gradient on disk.
+  await page.keyboard.press('Control+z');
+  let gradientSave = page.waitForEvent('download');
+  await page.keyboard.press('Control+s');
+  await gradientSave;
+  const undone = await page.evaluate(path => Module.FS.readFile(path, {encoding: 'utf8'}), projectPath);
+  assert.equal(fillType(undone), 0, 'Undo restores the solid fill');
+  await page.keyboard.press('Control+y');
+  gradientSave = page.waitForEvent('download');
+  await page.keyboard.press('Control+s');
+  await gradientSave;
+  const redone = await page.evaluate(path => Module.FS.readFile(path, {encoding: 'utf8'}), projectPath);
+  const geometry = source => source.replace(/^metadata .*\n|^change .*\n/gm, '');
+  assert.equal(geometry(redone), geometry(project), 'Redo restores the same objects and paint');
+  project = redone;
+  console.log('PASS gradient tool drawing, undo, redo and project persistence');
   await page.evaluate(() => new Promise((done, fail) => Module.FS.syncfs(false, e => e ? fail(e) : done())));
   await page.reload();
   await page.waitForFunction(() => Module.afCanvasFrames > 3);

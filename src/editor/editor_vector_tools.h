@@ -27,6 +27,7 @@ typedef enum AfEditorVectorTool {
     AF_EDITOR_TOOL_ARC,
     AF_EDITOR_TOOL_SPIRAL,
     AF_EDITOR_TOOL_TEXT,
+    AF_EDITOR_TOOL_GRADIENT,
     AF_EDITOR_TOOL_COUNT
 } AfEditorVectorTool;
 

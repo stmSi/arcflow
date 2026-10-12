@@ -94,21 +94,23 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                 "Drag a five-point editable star.",
                 "Drag an open three-quarter Bézier arc.",
                 "Drag a bounded three-turn editable spiral.",
-                "Click for artistic text, drag a paragraph frame, or click existing text to edit."};
+                "Click for artistic text, drag a paragraph frame, or click existing text to edit.",
+                "Choose Linear, Radial or Conic and drag a gradient line on a shape or path."};
             static const char *const shortcuts[AF_EDITOR_TOOL_COUNT] = {
-                "V (toggle)", "V / Shift+V", "X", "D", "J", "R", "Shift+R", "O",
-                "L", "P",       "B", "Y", "A", "C", "I",       "T"};
+                "V (toggle)", "V / Shift+V", "X", "D", "J", "R", "Shift+R", "O",      "L",
+                "P",          "B",           "Y", "A", "C", "I", "T",       "Shift+G"};
             if (tool < AF_EDITOR_TOOL_COUNT && local_x < button_x + 38.0F) {
                 return (AfEditorTooltip){
                     .id = 10U + tool,
                     .title = af_editor_vector_tool_name((AfEditorVectorTool)tool),
                     .summary = summaries[tool],
-                    .details = tool <= AF_EDITOR_TOOL_NODE
-                                   ? "Press V to toggle between Pick and Node; Shift+V selects Node."
-                               : af_editor_vector_tool_is_construction((AfEditorVectorTool)tool)
-                                   ? "The result is undoable and uses Arcflow's animatable vector "
-                                     "properties."
-                                   : "Tool state stays active until another tool is selected.",
+                    .details =
+                        tool <= AF_EDITOR_TOOL_NODE
+                            ? "Press V to toggle between Pick and Node; Shift+V selects Node."
+                        : af_editor_vector_tool_is_construction((AfEditorVectorTool)tool)
+                            ? "The result is undoable and uses Arcflow's animatable vector "
+                              "properties."
+                            : "Tool state stays active until another tool is selected.",
                     .shortcut = shortcuts[tool]};
             }
         }
@@ -402,8 +404,8 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
             .shortcut = "Changes are stored in bounded undo history"};
     }
     if (mouse.y >= timeline_top) {
-        const float local_x = (mouse.x - editor->left_width) /
-                              af_editor_timeline_controls_scale(editor, width);
+        const float local_x =
+            (mouse.x - editor->left_width) / af_editor_timeline_controls_scale(editor, width);
         if (mouse.y < timeline_top + 42.0F) {
             if (local_x >= 10.0F && local_x < 56.0F) {
                 return (AfEditorTooltip){
@@ -520,7 +522,8 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
                 .id = UINT64_C(0x4000000000000000) | node->id,
                 .title = editor->project.names[node_index],
                 .summary = "Select or drag this object in the scene hierarchy.",
-                .details = "Drop on a group to move inside; insertion lines choose the parent and order.",
+                .details =
+                    "Drop on a group to move inside; insertion lines choose the parent and order.",
                 .shortcut = "Shift range / Ctrl toggle / Right click actions"};
         }
         return tooltip;
@@ -616,9 +619,9 @@ static void af_editor_render_tooltip(AfEditorState *editor, int width, int heigh
                            popup_width - 28.0F, (AfColor){0.42F, 0.76F, 1.0F, 1.0F}, 300030);
     } else {
         af_editor_add_text(editor, x + 14.0F, y + 58.0F,
-                           tooltip.shortcut != NULL && tooltip.shortcut[0] ? tooltip.shortcut
-                                                                          : "Hold Alt for more details",
-                           0.62F,
-                           popup_width - 28.0F, (AfColor){0.48F, 0.66F, 0.9F, 1.0F}, 300030);
+                           tooltip.shortcut != NULL && tooltip.shortcut[0]
+                               ? tooltip.shortcut
+                               : "Hold Alt for more details",
+                           0.62F, popup_width - 28.0F, (AfColor){0.48F, 0.66F, 0.9F, 1.0F}, 300030);
     }
 }

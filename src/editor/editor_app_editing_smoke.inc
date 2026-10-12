@@ -169,5 +169,5 @@ static AfResult af_editor_editing_smoke(AfEditorState *editor, int width, int he
         editor,
         "Editing verified: outline gradients, animation, smooth handles, combine and Delete");
 #undef EDIT_CHECK
-    return AF_RESULT_SUCCESS;
+    return af_editor_gradient_tool_smoke(editor, width, height);
 }

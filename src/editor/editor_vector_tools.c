@@ -94,14 +94,15 @@ const char *af_editor_vector_tool_name(AfEditorVectorTool tool) {
                                                             "Star",
                                                             "Arc",
                                                             "Spiral",
-                                                            "Text"};
+                                                            "Text",
+                                                            "Gradient"};
     return tool < AF_EDITOR_TOOL_COUNT ? names[tool] : "Unknown";
 }
 
 const char *af_editor_vector_tool_label(AfEditorVectorTool tool) {
     static const char *const labels[AF_EDITOR_TOOL_COUNT] = {
-        "PICK", "NODE", "CUT",    "VDEL", "KNIFE", "RECT", "ROUND",  "OVAL",
-        "LINE", "PEN",  "PENCIL", "POLY", "STAR",  "ARC",  "SPIRAL", "TEXT"};
+        "PICK", "NODE",   "CUT",  "VDEL", "KNIFE", "RECT",   "ROUND", "OVAL", "LINE",
+        "PEN",  "PENCIL", "POLY", "STAR", "ARC",   "SPIRAL", "TEXT",  "GRAD"};
     return tool < AF_EDITOR_TOOL_COUNT ? labels[tool] : "?";
 }
 

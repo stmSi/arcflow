@@ -415,9 +415,19 @@ static AfResult af_editor_command_apply_side(AfProject *project, const AfEditorC
             }
             return result;
         }
-    case AF_EDITOR_COMMAND_MODIFY:
-        return forward ? af_editor_modify(project, command->after, command->after_count)
-                       : af_editor_modify(project, command->before, command->before_count);
+    case AF_EDITOR_COMMAND_MODIFY: {
+        AfResult result = forward
+                              ? af_editor_modify(project, command->after, command->after_count)
+                              : af_editor_modify(project, command->before, command->before_count);
+        if (result == AF_RESULT_SUCCESS &&
+            (command->keyframe_before_count || command->keyframe_after_count)) {
+            result = af_editor_animation_apply(project, command, forward);
+            if (result != AF_RESULT_SUCCESS)
+                (void)af_editor_modify(project, forward ? command->before : command->after,
+                                       forward ? command->before_count : command->after_count);
+        }
+        return result;
+    }
     case AF_EDITOR_COMMAND_ANIMATION:
         return af_editor_animation_apply(project, command, forward);
     case AF_EDITOR_COMMAND_PATH:

@@ -320,6 +320,8 @@ static uint32_t af_editor_choice_count(const AfEditorState *editor) {
 }
 static bool af_editor_choice_enabled(const AfEditorState *editor, uint32_t row) {
     return editor->selected_id == editor->choice_target &&
+           !(editor->choice_menu == 1 && editor->active_tool == AF_EDITOR_TOOL_GRADIENT &&
+             row == AF_PAINT_SOLID) &&
            (editor->choice_menu == 3
                 ? editor->selected_path_command_count == 2U
                 : editor->choice_menu == 1 ||
@@ -332,7 +334,9 @@ static void af_editor_choice_open(AfEditorState *editor, uint32_t menu, int widt
     editor->context_menu = AF_EDITOR_CONTEXT_NONE;
     editor->choice_target = editor->selected_id;
     const AfStyle *style = af_project_find_node_style(&editor->project, editor->selected_id);
-    editor->choice_index = menu == 3            ? 0U
+    editor->choice_index = menu == 1 && editor->active_tool == AF_EDITOR_TOOL_GRADIENT
+                               ? (uint32_t)editor->gradient_tool_type
+                           : menu == 3          ? 0U
                            : menu == 1 && style ? (uint32_t)AF_EDITOR_PAINT(style).type
                                                 : (uint32_t)editor->selected_property;
     const float h = (float)af_editor_choice_count(editor) * 28;
@@ -348,9 +352,13 @@ static void af_editor_choice_apply(AfEditorState *editor, uint32_t row) {
         return;
     if (editor->choice_menu == 3)
         af_editor_combine_points(editor, row == 1U);
-    else if (editor->choice_menu == 1)
-        af_editor_gradient_set_type(editor, (AfPaintType)row);
-    else {
+    else if (editor->choice_menu == 1) {
+        if (editor->active_tool == AF_EDITOR_TOOL_GRADIENT) {
+            editor->gradient_tool_type = (AfPaintType)row;
+            af_editor_status(editor, "Gradient type selected · drag on a shape to apply");
+        } else
+            af_editor_gradient_set_type(editor, (AfPaintType)row);
+    } else {
         editor->selected_property = (AfPropertyType)row;
         editor->selected_keyframe_count = 0;
         editor->timeline_focus = true;
@@ -417,7 +425,8 @@ static void af_editor_render_choices(AfEditorState *editor) {
 static bool af_editor_gradient_geometry(AfEditorState *editor, int width, int height,
                                         AfAffine2 *frame, AfVec2 *start, AfVec2 *end) {
     if (editor->text_panel_open || editor->selected_count != 1 ||
-        editor->active_tool != AF_EDITOR_TOOL_SELECT)
+        (editor->active_tool != AF_EDITOR_TOOL_SELECT &&
+         editor->active_tool != AF_EDITOR_TOOL_GRADIENT))
         return false;
     const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, editor->selected_id);
     const AfStyle *style =
@@ -434,6 +443,82 @@ static bool af_editor_gradient_geometry(AfEditorState *editor, int width, int he
                ? paint->end
                : (AfVec2){start->x + cosf(paint->angle) * fmaxf(1, paint->end_radius),
                           start->y + sinf(paint->angle) * fmaxf(1, paint->end_radius)};
+    return true;
+}
+static bool af_editor_gradient_begin_draw(AfEditorState *editor, int width, int height, float x,
+                                          float y) {
+    const uint64_t hit = af_editor_hit_test(
+        editor, af_editor_screen_to_project(editor, width, height, (AfVec2){x, y}));
+    const uint64_t id = hit ? hit : editor->selected_count == 1 ? editor->selected_id : 0;
+    const AfSceneNode *node = af_scene_find_const(&editor->preview_scene, id);
+    AfStyle *style = af_project_find_node_style(&editor->project, id);
+    if (!node || !style || node->type < AF_NODE_RECTANGLE || node->type > AF_NODE_PATH) {
+        af_editor_status(editor, "Drag on a shape or path to draw a gradient");
+        return false;
+    }
+    if (editor->selected_id != id || editor->selected_count != 1)
+        af_editor_select_only(editor, id);
+    AfPaint *paint = &AF_EDITOR_PAINT(style);
+    const AfPaintType type = editor->gradient_tool_type == AF_PAINT_SOLID
+                                 ? AF_PAINT_LINEAR_GRADIENT
+                                 : editor->gradient_tool_type;
+    if (paint->type != type && af_editor_gradient_has_tracks(editor, false)) {
+        af_editor_status(editor, "Remove gradient animation tracks before changing its type");
+        return false;
+    }
+    const AfStyle *preview = af_style_find_node_const(&editor->preview_style_data, id);
+    const AfPaint *visible = preview && af_editor_gradient_has_tracks(editor, false)
+                                 ? af_editor_target_paint(editor, preview)
+                                 : paint;
+    const AfAffine2 frame =
+        af_affine_multiply(af_editor_camera(editor, width, height),
+                           af_affine_multiply(node->world_transform, visible->transform));
+    AfAffine2 inverse;
+    if (!af_affine_inverse(frame, &inverse))
+        return false;
+    af_editor_begin_selection_modify(editor, false);
+    if (!editor->selection_drag_count)
+        return false;
+    editor->preview_playing = false;
+    editor->gradient_drag_was_dirty = editor->dirty;
+    editor->gradient_drag_stop_before = af_editor_gradient_stop(editor, paint);
+    editor->gradient_drag_frame = frame;
+    editor->gradient_drag_origin = af_affine_transform_point(inverse, (AfVec2){x, y});
+    editor->gradient_drag_pointer = (AfVec2){x, y};
+    editor->gradient_drag_changed = false;
+    editor->gradient_drag = AF_EDITOR_GRADIENT_DRAG_DRAW;
+    af_editor_begin_transform_key_drag(editor, AF_PROPERTY_GRADIENT_START);
+    af_editor_append_transform_key_drag(editor, type == AF_PAINT_LINEAR_GRADIENT
+                                                    ? AF_PROPERTY_GRADIENT_END
+                                                    : AF_PROPERTY_GRADIENT_RADII);
+    if (type != AF_PAINT_LINEAR_GRADIENT)
+        af_editor_append_transform_key_drag(editor, AF_PROPERTY_GRADIENT_ANGLE);
+    if (paint->type == AF_PAINT_SOLID) {
+        const AfColor color = editor->color_target_outline ? paint->solid : node->fill;
+        paint->stop_count = 2;
+        paint->stops[0] = (AfGradientStop){0, color};
+        paint->stops[1] = (AfGradientStop){1, {1 - color.r, 1 - color.g, 1 - color.b, color.a}};
+    }
+    paint->type = type;
+    paint->start = editor->gradient_drag_origin;
+    paint->end = paint->start;
+    paint->start_radius = 0;
+    paint->end_radius = 1;
+    paint->angle = 0;
+    if (editor->color_target_outline && !style->stroke.enabled) {
+        style->stroke.enabled = true;
+        style->stroke.width = fmaxf(1, style->stroke.width);
+        style->stroke.end_width = fmaxf(1, style->stroke.end_width);
+        style->inherit_flags &= ~(uint32_t)AF_STYLE_INHERIT_STROKE_GEOMETRY;
+        (void)af_style_mark_stroke_geometry_changed(style);
+    }
+    editor->gradient_target = id;
+    editor->gradient_outline = editor->color_target_outline;
+    editor->gradient_stop = 0;
+    editor->gradient_stop_focus = false;
+    (void)af_style_mark_paint_changed(style);
+    af_editor_update_preview(editor);
+    af_editor_status(editor, "Drag gradient line · Shift snaps direction · Escape cancels");
     return true;
 }
 static bool af_editor_gradient_begin_drag(AfEditorState *editor, int width, int height,
@@ -513,7 +598,31 @@ static void af_editor_gradient_motion(AfEditorState *editor, int width, int heig
     if (!style || AF_EDITOR_PAINT(style).type == AF_PAINT_SOLID)
         return;
     const AfPaint previous = AF_EDITOR_PAINT(style);
-    if (editor->gradient_drag == AF_EDITOR_GRADIENT_DRAG_TOOLBAR_STOP) {
+    if (editor->gradient_drag == AF_EDITOR_GRADIENT_DRAG_DRAW) {
+        AfAffine2 inverse;
+        if ((!editor->gradient_drag_changed && hypotf(x - editor->gradient_drag_pointer.x,
+                                                      y - editor->gradient_drag_pointer.y) < 2) ||
+            !af_affine_inverse(editor->gradient_drag_frame, &inverse))
+            return;
+        AfVec2 point = af_affine_transform_point(inverse, (AfVec2){x, y});
+        const AfVec2 start = editor->gradient_drag_origin;
+        if ((SDL_GetModState() & SDL_KMOD_SHIFT) != 0) {
+            const float distance = hypotf(point.x - start.x, point.y - start.y);
+            const float angle =
+                roundf(atan2f(point.y - start.y, point.x - start.x) / .785398163F) * .785398163F;
+            point = (AfVec2){start.x + cosf(angle) * distance, start.y + sinf(angle) * distance};
+        }
+        if (!isfinite(point.x) || !isfinite(point.y))
+            return;
+        AF_EDITOR_PAINT(style).start = start;
+        if (AF_EDITOR_PAINT(style).type == AF_PAINT_LINEAR_GRADIENT)
+            AF_EDITOR_PAINT(style).end = point;
+        else {
+            AF_EDITOR_PAINT(style).end_radius =
+                af_editor_clamp(hypotf(point.x - start.x, point.y - start.y), 1, 100000);
+            AF_EDITOR_PAINT(style).angle = atan2f(point.y - start.y, point.x - start.x);
+        }
+    } else if (editor->gradient_drag == AF_EDITOR_GRADIENT_DRAG_TOOLBAR_STOP) {
         const float ramp_width =
             fmaxf(1, (float)width - editor->left_width - editor->right_width - 32);
         af_editor_gradient_move_stop(editor, &AF_EDITOR_PAINT(style),
@@ -605,7 +714,14 @@ static void af_editor_gradient_finish_drag(AfEditorState *editor, bool cancel) {
         const AfStyle before = editor->selection_drag_before[0].style;
         const AfPaint *original = af_editor_target_paint(editor, &before);
         bool all_keyed = af_editor_transform_key_drag_covers_selection(editor);
-        if (editor->gradient_drag == AF_EDITOR_GRADIENT_DRAG_END &&
+        if (editor->gradient_drag == AF_EDITOR_GRADIENT_DRAG_DRAW)
+            all_keyed = all_keyed && af_editor_transform_drag_key_property_index(
+                                         editor, editor->selected_id,
+                                         AF_EDITOR_PAINT(style).type == AF_PAINT_LINEAR_GRADIENT
+                                             ? AF_PROPERTY_GRADIENT_END
+                                             : AF_PROPERTY_GRADIENT_RADII) >= 0;
+        if ((editor->gradient_drag == AF_EDITOR_GRADIENT_DRAG_END ||
+             editor->gradient_drag == AF_EDITOR_GRADIENT_DRAG_DRAW) &&
             AF_EDITOR_PAINT(style).type != AF_PAINT_LINEAR_GRADIENT)
             all_keyed =
                 all_keyed && af_editor_transform_drag_key_property_index(
@@ -621,11 +737,19 @@ static void af_editor_gradient_finish_drag(AfEditorState *editor, bool cancel) {
             (void)af_animation_apply_value(&editor->project.scene, track->node_id, track->property,
                                            track->element_index, value);
         }
+        const AfStroke stroke = style->stroke;
         if (all_keyed)
             *style = before;
-        else
-            (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_STYLE, false);
-        (void)af_editor_commit_transform_key_drag(editor, false);
+        if (editor->gradient_drag == AF_EDITOR_GRADIENT_DRAG_DRAW && editor->color_target_outline &&
+            !before.stroke.enabled && stroke.enabled) {
+            style->stroke = stroke;
+            style->inherit_flags &= ~(uint32_t)AF_STYLE_INHERIT_STROKE_GEOMETRY;
+            (void)af_style_mark_stroke_geometry_changed(style);
+        }
+        if (af_editor_commit_transform_key_drag(editor, false) != AF_RESULT_SUCCESS) {
+            af_editor_gradient_finish_drag(editor, true);
+            return;
+        }
     } else {
         (void)af_editor_commit_selection_modify(editor, AF_EDITOR_MERGE_STYLE, false);
     }
@@ -641,6 +765,7 @@ static void af_editor_render_gradient_handles(AfEditorState *editor, int width, 
         return;
     start = af_affine_transform_point(frame, start);
     end = af_affine_transform_point(frame, end);
+    af_editor_add_line(editor, start, end, 4, (AfColor){.03F, .04F, .06F, 1}, 90079);
     af_editor_add_line(editor, start, end, 1.5F, (AfColor){.4F, .8F, 1, 1}, 90080);
     const AfPaint *paint = af_editor_target_paint(
         editor, af_project_find_node_style(&editor->project, editor->selected_id));
@@ -662,9 +787,11 @@ static void af_editor_render_gradient_handles(AfEditorState *editor, int width, 
 }
 static bool af_editor_gradient_mouse(AfEditorState *editor, int width, int height, float x, float y,
                                      bool double_click) {
-    if (editor->text_panel_open || editor->selected_count != 1 ||
-        (editor->active_tool != AF_EDITOR_TOOL_SELECT &&
-         editor->active_tool != AF_EDITOR_TOOL_TEXT))
+    const bool gradient_tool = editor->active_tool == AF_EDITOR_TOOL_GRADIENT;
+    if (editor->text_panel_open ||
+        (!gradient_tool &&
+         (editor->selected_count != 1 || (editor->active_tool != AF_EDITOR_TOOL_SELECT &&
+                                          editor->active_tool != AF_EDITOR_TOOL_TEXT))))
         return false;
     const float left = editor->left_width + 6,
                 available = (float)width - editor->left_width - editor->right_width - 12;
@@ -676,17 +803,30 @@ static bool af_editor_gradient_mouse(AfEditorState *editor, int width, int heigh
         }
         top += 36;
     }
-    const AfStyle *style = af_project_find_node_style(&editor->project, editor->selected_id);
-    if (!style)
+    const AfStyle empty = {.fill = {.type = AF_PAINT_SOLID},
+                           .stroke_paint = {.type = AF_PAINT_SOLID}};
+    const AfStyle *style = editor->selected_count == 1
+                               ? af_project_find_node_style(&editor->project, editor->selected_id)
+                               : NULL;
+    if (!style && !gradient_tool)
         return false;
+    if (!style)
+        style = &empty;
     if (x < left || x >= left + available || y < top ||
         y >= top + (AF_EDITOR_PAINT(style).type == AF_PAINT_SOLID ? 36 : 116)) {
         AfAffine2 frame;
         AfVec2 start, end;
-        if (x < left || x >= left + available || y < top + 116 ||
-            y >= af_editor_timeline_top(editor, height) ||
-            !af_editor_gradient_geometry(editor, width, height, &frame, &start, &end))
+        if (x < left || x >= left + available ||
+            y < top + (AF_EDITOR_PAINT(style).type == AF_PAINT_SOLID ? 36 : 116) ||
+            y >= af_editor_timeline_top(editor, height))
             return false;
+        if (!af_editor_gradient_geometry(editor, width, height, &frame, &start, &end)) {
+            if (gradient_tool) {
+                (void)af_editor_gradient_begin_draw(editor, width, height, x, y);
+                return true;
+            }
+            return false;
+        }
         start = af_affine_transform_point(frame, start);
         end = af_affine_transform_point(frame, end);
         /* Hit endpoints before stops: the first/last stops commonly occupy the same pixels. */
@@ -733,6 +873,10 @@ static bool af_editor_gradient_mouse(AfEditorState *editor, int width, int heigh
                 return true;
             }
         }
+        if (gradient_tool) {
+            (void)af_editor_gradient_begin_draw(editor, width, height, x, y);
+            return true;
+        }
         return false;
     }
     if (AF_EDITOR_PAINT(style).type != AF_PAINT_SOLID && y >= top + 72) {
@@ -758,7 +902,14 @@ static bool af_editor_gradient_mouse(AfEditorState *editor, int width, int heigh
         return true;
     }
     const uint32_t col = (uint32_t)((x - left) / (available / 6)), row = (uint32_t)((y - top) / 36);
-    if (row == 0 && col == 0)
+    if (gradient_tool && col == 1 &&
+        row == (AF_EDITOR_PAINT(style).type == AF_PAINT_SOLID ? 0U : 1U)) {
+        editor->color_target_outline = !editor->color_target_outline;
+        editor->gradient_stop_focus = false;
+        editor->gradient_stop = 0;
+        af_editor_status(editor, editor->color_target_outline ? "Draw an Outline gradient"
+                                                              : "Draw a Fill gradient");
+    } else if (row == 0 && col == 0)
         af_editor_choice_open(editor, 1, width, height, left, top + 36);
     else if (row == 0)
         af_editor_gradient_action(editor, col);
@@ -767,16 +918,22 @@ static bool af_editor_gradient_mouse(AfEditorState *editor, int width, int heigh
     return true;
 }
 static void af_editor_render_gradient(AfEditorState *editor, int width) {
-    if (editor->text_panel_open || editor->selected_count != 1 ||
-        (editor->active_tool != AF_EDITOR_TOOL_SELECT &&
-         editor->active_tool != AF_EDITOR_TOOL_TEXT))
+    const bool gradient_tool = editor->active_tool == AF_EDITOR_TOOL_GRADIENT;
+    if (editor->text_panel_open ||
+        (!gradient_tool &&
+         (editor->selected_count != 1 || (editor->active_tool != AF_EDITOR_TOOL_SELECT &&
+                                          editor->active_tool != AF_EDITOR_TOOL_TEXT))))
         return;
     const AfStyle *style =
         af_editor_gradient_has_tracks(editor, false)
             ? af_style_find_node_const(&editor->preview_style_data, editor->selected_id)
             : af_project_find_node_style(&editor->project, editor->selected_id);
-    if (!style)
+    const AfStyle empty = {.fill = {.type = AF_PAINT_SOLID},
+                           .stroke_paint = {.type = AF_PAINT_SOLID}};
+    if (!style && !gradient_tool)
         return;
+    if (!style || editor->selected_count != 1)
+        style = &empty;
     const AfPaint *paint = &AF_EDITOR_PAINT(style);
     const float x = editor->left_width + 6,
                 y = editor->toolbar_height +
@@ -785,8 +942,12 @@ static void af_editor_render_gradient(AfEditorState *editor, int width) {
                 cell = available / 6;
     const AfColor white = {.9F, .94F, 1, 1}, idle = {.13F, .17F, .23F, 1};
     const char *types[] = {"Solid v", "Linear v", "Radial v", "Conic v"};
-    const char *labels[] = {types[paint->type], "< Stop",      "Stop >",
-                            "Add stop",         "Delete stop", "Reverse"};
+    const char *labels[] = {types[gradient_tool ? editor->gradient_tool_type : paint->type],
+                            "< Stop",
+                            "Stop >",
+                            "Add stop",
+                            "Delete stop",
+                            "Reverse"};
     const uint32_t count = paint->type == AF_PAINT_SOLID ? 1 : 6;
     af_editor_add_rect(editor, x - 6, y, available + 12, count == 1 ? 36 : 116,
                        (AfColor){.08F, .1F, .14F, 1}, 100150);
@@ -799,12 +960,20 @@ static void af_editor_render_gradient(AfEditorState *editor, int width) {
         af_editor_add_button_rect(editor, x, y + 39, cell - 4, 30, idle, 100151);
         af_editor_add_text(editor, x + 6, y + 49, "Key gradient", .8F, cell - 16, white, 100153);
     }
+    if (gradient_tool) {
+        const float by = y + (count == 1 ? 3 : 39);
+        af_editor_add_button_rect(editor, x + cell, by, cell - 4, 30, idle, 100151);
+        af_editor_add_text(editor, x + cell + 6, by + 10,
+                           editor->color_target_outline ? "Outline" : "Fill", .8F, cell - 16, white,
+                           100153);
+    }
     if (count == 1) {
-        af_editor_add_text(editor, x + cell + 6, y + 13,
-                           editor->color_target_outline
+        af_editor_add_text(editor, x + cell * (gradient_tool ? 2 : 1) + 6, y + 13,
+                           gradient_tool ? "Drag on a shape · Shift snaps direction"
+                           : editor->color_target_outline
                                ? "Outline type · Solid, Linear, Radial or Conic"
                                : "Fill type · Solid, Linear, Radial or Conic",
-                           .85F, available - cell - 12, white, 100153);
+                           .85F, available - cell * (gradient_tool ? 2 : 1) - 12, white, 100153);
     } else {
         const float ramp_x = x + 10, ramp_width = fmaxf(1, available - 20);
         for (uint32_t i = 0; i < 64; ++i) {

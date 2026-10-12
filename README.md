@@ -29,6 +29,7 @@ Browser build and GitHub Pages deployment: [Web guide](docs/web.md).
 - `V` toggles Pick/Node; `Shift+V` selects Node. `R` draws rectangles, `A` stars, `T` text.
 - Inspector values support typing, horizontal dragging, and `−`/`+` steps, including RGB/hex.
 - Particle values use the same controls; scroll the Inspector to reach lower rows.
+- `Shift+G` selects Gradient: choose Fill/Outline and Linear/Radial/Conic, then drag on a shape.
 - `Ctrl+S` saves; `Ctrl+Z`/`Ctrl+Y` undo/redo; `Ctrl+Shift+P` opens commands.
 - File > Export produces `.afp`, SVG, Lottie, GIF, or MP4. GIF/MP4 require FFmpeg.
 

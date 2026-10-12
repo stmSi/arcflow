@@ -3,6 +3,7 @@
 #include "project/project.h"
 #include "project/project_templates.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -51,6 +52,10 @@ int main(void) {
         CHECK(project.scene.particles == &project.particle_data);
         CHECK(project.scene.images == &project.image_data);
         CHECK(af_project_validate(&project) == AF_RESULT_SUCCESS);
+        for (uint32_t node = 0; node < project.scene.count; ++node) {
+            CHECK(project.scene.nodes[node].type != AF_NODE_GROUP);
+            CHECK(project.scene.nodes[node].parent_id == AF_INVALID_NODE_ID);
+        }
         CHECK(strcmp(project.metadata.project_id, "arcflow-project") != 0);
         CHECK(af_project_serialize(&project, &allocator, &text) == AF_RESULT_SUCCESS);
         CHECK(af_project_deserialize(text.data, text.size, &allocator, &loaded) ==
@@ -66,6 +71,49 @@ int main(void) {
         }
         if ((info->features & AF_PROJECT_TEMPLATE_FEATURE_PARTICLES) != 0U) {
             CHECK(project.particle_data.count != 0U);
+        }
+        if (info->id == AF_PROJECT_TEMPLATE_INTERACTIVE_BUTTON ||
+            info->id == AF_PROJECT_TEMPLATE_RESPONSIVE_UI) {
+            AfSceneNode nodes[3];
+            AfStyle paints[3];
+            AfStyleData styles = project.style_data;
+            AfLayoutData layouts = project.layout_data;
+            AfScene preview = project.scene;
+            CHECK(project.scene.count == 3 && project.style_data.count == 3);
+            memcpy(nodes, project.scene.nodes, sizeof(nodes));
+            memcpy(paints, project.style_data.styles, sizeof(paints));
+            preview.nodes = nodes;
+            styles.styles = paints;
+            preview.styles = &styles;
+            preview.layouts = &layouts;
+            if (info->id == AF_PROJECT_TEMPLATE_INTERACTIVE_BUTTON) {
+                CHECK(af_project_animation_apply(&project, 100U, .18F, &preview) ==
+                      AF_RESULT_SUCCESS);
+                CHECK(af_scene_evaluate_world(&preview) == AF_RESULT_SUCCESS);
+                const AfSceneNode *focus = af_scene_find_const(&preview, 2U);
+                const AfSceneNode *button = af_scene_find_const(&preview, 3U);
+                const AfSceneNode *icon = af_scene_find_const(&preview, 4U);
+                CHECK(fabsf(button->world_transform.m00 - .94F) < .001F);
+                CHECK(fabsf(focus->world_transform.tx - 382.48F) < .001F);
+                CHECK(fabsf(icon->world_transform.tx - 429.48F) < .001F &&
+                      fabsf(icon->world_transform.ty - 285.72F) < .001F);
+                CHECK(fabsf(icon->world_transform.m00 - button->world_transform.m00) < .001F);
+            } else {
+                CHECK(af_scene_evaluate_world(&preview) == AF_RESULT_SUCCESS);
+                const AfSceneNode *header = af_scene_find_const(&preview, 2U);
+                const AfSceneNode *content = af_scene_find_const(&preview, 3U);
+                const AfSceneNode *action = af_scene_find_const(&preview, 4U);
+                CHECK(fabsf(header->world_transform.tx - 64) < .001F &&
+                      fabsf(header->world_transform.ty - 48) < .001F);
+                CHECK(content->world_transform.ty >=
+                      header->world_transform.ty + header->resolved_bounds.y);
+                CHECK(action->world_transform.tx >
+                      content->world_transform.tx + content->resolved_bounds.x);
+                const float width = header->resolved_bounds.x;
+                layouts.target_size = (AfVec2){1000, 720};
+                CHECK(af_scene_evaluate_world(&preview) == AF_RESULT_SUCCESS);
+                CHECK(fabsf(header->resolved_bounds.x - width) > 1);
+            }
         }
         af_package_blob_destroy(&allocator, &second);
         af_package_blob_destroy(&allocator, &first);

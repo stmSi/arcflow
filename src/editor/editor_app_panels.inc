@@ -316,6 +316,17 @@ static void af_editor_render_tool_icon(AfEditorState *editor, AfEditorVectorTool
             memcpy(points, rounded, sizeof(rounded));
             count = 8U;
         }
+    } else if (tool == AF_EDITOR_TOOL_GRADIENT) {
+        for (uint32_t i = 0; i < 8; ++i) {
+            const float shade = .2F + (float)i * .1F;
+            af_editor_add_rect(editor, x + (float)i * 2.5F, y + 3, 2.5F, 14,
+                               (AfColor){shade, shade, shade, 1}, 100125);
+        }
+        af_editor_add_line(editor, (AfVec2){x + 2, y + 10}, (AfVec2){x + 18, y + 10}, 1.6F, color,
+                           100130);
+        af_editor_add_rect(editor, x, y + 8, 4, 4, color, 100131);
+        af_editor_add_rect(editor, x + 16, y + 8, 4, 4, color, 100131);
+        return;
     } else if (tool == AF_EDITOR_TOOL_TEXT) {
         af_editor_add_line(editor, (AfVec2){x + 2, y + 1}, (AfVec2){x + 18, y + 1}, 2, color,
                            100125);

@@ -2159,6 +2159,8 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
             shortcut_tool = AF_EDITOR_TOOL_SEGMENT_DELETE;
         } else if (event->key == SDLK_J) {
             shortcut_tool = AF_EDITOR_TOOL_KNIFE;
+        } else if (event->key == SDLK_G && shift) {
+            shortcut_tool = AF_EDITOR_TOOL_GRADIENT;
         } else if (event->key == SDLK_R && editor->active_tool != AF_EDITOR_TOOL_NODE) {
             shortcut_tool = shift ? AF_EDITOR_TOOL_ROUNDED_RECTANGLE : AF_EDITOR_TOOL_RECTANGLE;
         } else if (event->key == SDLK_O && editor->active_tool != AF_EDITOR_TOOL_NODE) {

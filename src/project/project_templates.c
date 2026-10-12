@@ -25,7 +25,7 @@ static const AfProjectTemplateInfo af_project_templates[AF_PROJECT_TEMPLATE_COUN
     {.id = AF_PROJECT_TEMPLATE_INTERACTIVE_BUTTON,
      .slug = "interactive-button",
      .name = "Interactive Button",
-     .description = "Button hierarchy with press feedback animation",
+     .description = "Button shapes with press feedback animation",
      .feature_label = "INPUT + EVENTS",
      .features = AF_PROJECT_TEMPLATE_FEATURE_ANIMATION | AF_PROJECT_TEMPLATE_FEATURE_INTERACTION},
     {.id = AF_PROJECT_TEMPLATE_RESPONSIVE_UI,
@@ -102,21 +102,15 @@ static AfResult af_project_template_blank(AfProject *project) {
 }
 
 static AfResult af_project_template_guided(AfProject *project) {
-    const AfSceneNode root =
-        af_project_template_node(1U, AF_INVALID_NODE_ID, AF_NODE_GROUP, (AfVec2){0.0F, 0.0F},
-                                 (AfVec2){1280.0F, 720.0F}, (AfColor){0.0F, 0.0F, 0.0F, 0.0F}, 0);
-    const AfSceneNode card =
-        af_project_template_node(2U, 1U, AF_NODE_ROUNDED_RECTANGLE, (AfVec2){220.0F, 230.0F},
-                                 (AfVec2){300.0F, 180.0F}, (AfColor){0.16F, 0.48F, 0.92F, 1.0F}, 1);
+    const AfSceneNode card = af_project_template_node(
+        2U, AF_INVALID_NODE_ID, AF_NODE_ROUNDED_RECTANGLE, (AfVec2){220.0F, 230.0F},
+        (AfVec2){300.0F, 180.0F}, (AfColor){0.16F, 0.48F, 0.92F, 1.0F}, 1);
     const AfSceneNode accent =
-        af_project_template_node(3U, 1U, AF_NODE_ELLIPSE, (AfVec2){650.0F, 270.0F},
+        af_project_template_node(3U, AF_INVALID_NODE_ID, AF_NODE_ELLIPSE, (AfVec2){650.0F, 270.0F},
                                  (AfVec2){120.0F, 120.0F}, (AfColor){0.34F, 0.9F, 0.62F, 1.0F}, 2);
     const float start[4] = {220.0F, 230.0F, 0.0F, 0.0F};
     const float end[4] = {520.0F, 230.0F, 0.0F, 0.0F};
-    AfResult result = af_project_add_node(project, &root, "Scene");
-    if (result == AF_RESULT_SUCCESS) {
-        result = af_project_add_node(project, &card, "Animated Card");
-    }
+    AfResult result = af_project_add_node(project, &card, "Animated Card");
     if (result == AF_RESULT_SUCCESS) {
         result = af_project_add_node(project, &accent, "Accent");
     }
@@ -142,11 +136,8 @@ static AfResult af_project_template_vector(AfProject *project) {
                                               .control2 = {430.0F, 20.0F}},
                                              {.type = AF_PATH_LINE, .point = {240.0F, 360.0F}},
                                              {.type = AF_PATH_CLOSE}};
-    const AfSceneNode root =
-        af_project_template_node(1U, AF_INVALID_NODE_ID, AF_NODE_GROUP, (AfVec2){0.0F, 0.0F},
-                                 (AfVec2){1280.0F, 720.0F}, (AfColor){0.0F, 0.0F, 0.0F, 0.0F}, 0);
     const AfSceneNode node =
-        af_project_template_node(2U, 1U, AF_NODE_PATH, (AfVec2){360.0F, 160.0F},
+        af_project_template_node(2U, AF_INVALID_NODE_ID, AF_NODE_PATH, (AfVec2){360.0F, 160.0F},
                                  (AfVec2){480.0F, 360.0F}, (AfColor){0.69F, 0.35F, 0.96F, 1.0F}, 1);
     const AfPath path = {.id = 500U,
                          .node_id = 2U,
@@ -159,10 +150,7 @@ static AfResult af_project_template_vector(AfProject *project) {
     const float in_end[4] = {120.0F, 260.0F, 0.0F, 0.0F};
     const float out_start[4] = {45.0F, 20.0F, 0.0F, 0.0F};
     const float out_end[4] = {80.0F, -70.0F, 0.0F, 0.0F};
-    AfResult result = af_project_add_node(project, &root, "Scene");
-    if (result == AF_RESULT_SUCCESS) {
-        result = af_project_add_node(project, &node, "Animated Vector");
-    }
+    AfResult result = af_project_add_node(project, &node, "Animated Vector");
     if (result == AF_RESULT_SUCCESS) {
         result = af_project_add_path(project, &path, commands);
     }
@@ -185,17 +173,14 @@ static AfResult af_project_template_vector(AfProject *project) {
 }
 
 static AfResult af_project_template_button(AfProject *project) {
-    const AfSceneNode root =
-        af_project_template_node(1U, AF_INVALID_NODE_ID, AF_NODE_GROUP, (AfVec2){390.0F, 250.0F},
-                                 (AfVec2){500.0F, 220.0F}, (AfColor){0.0F, 0.0F, 0.0F, 0.0F}, 0);
-    AfSceneNode focus =
-        af_project_template_node(2U, 1U, AF_NODE_ROUNDED_RECTANGLE, (AfVec2){-8.0F, -8.0F},
-                                 (AfVec2){436.0F, 156.0F}, (AfColor){0.34F, 0.78F, 1.0F, 0.45F}, 1);
-    AfSceneNode button =
-        af_project_template_node(3U, 1U, AF_NODE_ROUNDED_RECTANGLE, (AfVec2){0.0F, 0.0F},
-                                 (AfVec2){420.0F, 140.0F}, (AfColor){0.12F, 0.42F, 0.82F, 1.0F}, 2);
+    AfSceneNode focus = af_project_template_node(2U, AF_INVALID_NODE_ID, AF_NODE_ROUNDED_RECTANGLE,
+                                                 (AfVec2){382.0F, 242.0F}, (AfVec2){436.0F, 156.0F},
+                                                 (AfColor){0.34F, 0.78F, 1.0F, 0.45F}, 1);
+    AfSceneNode button = af_project_template_node(
+        3U, AF_INVALID_NODE_ID, AF_NODE_ROUNDED_RECTANGLE, (AfVec2){390.0F, 250.0F},
+        (AfVec2){420.0F, 140.0F}, (AfColor){0.12F, 0.42F, 0.82F, 1.0F}, 2);
     const AfSceneNode icon =
-        af_project_template_node(4U, 1U, AF_NODE_ELLIPSE, (AfVec2){42.0F, 38.0F},
+        af_project_template_node(4U, AF_INVALID_NODE_ID, AF_NODE_ELLIPSE, (AfVec2){432.0F, 288.0F},
                                  (AfVec2){64.0F, 64.0F}, (AfColor){0.78F, 0.94F, 1.0F, 1.0F}, 3);
     const float scale_start[4] = {1.0F, 1.0F, 0.0F, 0.0F};
     const float scale_end[4] = {0.94F, 0.94F, 0.0F, 0.0F};
@@ -204,10 +189,7 @@ static AfResult af_project_template_button(AfProject *project) {
     AfResult result = AF_RESULT_SUCCESS;
     focus.corner_radius = 34.0F;
     button.corner_radius = 28.0F;
-    result = af_project_add_node(project, &root, "Button Group");
-    if (result == AF_RESULT_SUCCESS) {
-        result = af_project_add_node(project, &focus, "Focus Ring");
-    }
+    result = af_project_add_node(project, &focus, "Focus Ring");
     if (result == AF_RESULT_SUCCESS) {
         result = af_project_add_node(project, &button, "Button Background");
     }
@@ -218,30 +200,41 @@ static AfResult af_project_template_button(AfProject *project) {
         result = af_project_template_clip(project, 100U, "Press Feedback", 0.18F);
     }
     if (result == AF_RESULT_SUCCESS) {
-        result = af_project_template_track(project, 101U, 100U, 1U, AF_PROPERTY_SCALE, 0U, 102U,
+        result = af_project_template_track(project, 101U, 100U, 2U, AF_PROPERTY_SCALE, 0U, 102U,
                                            103U, 0.18F, scale_start, scale_end);
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_project_template_track(project, 104U, 100U, 3U, AF_PROPERTY_FILL_COLOR, 0U,
                                            105U, 106U, 0.18F, color_start, color_end);
     }
+    if (result == AF_RESULT_SUCCESS)
+        result = af_project_template_track(project, 107U, 100U, 3U, AF_PROPERTY_SCALE, 0U, 108U,
+                                           109U, .18F, scale_start, scale_end);
+    if (result == AF_RESULT_SUCCESS)
+        result = af_project_template_track(project, 110U, 100U, 4U, AF_PROPERTY_SCALE, 0U, 111U,
+                                           112U, .18F, scale_start, scale_end);
+    /* Keep the original shared press origin after removing the wrapper group. */
+    const float focus_start[4] = {382, 242, 0, 0}, focus_end[4] = {382.48F, 242.48F, 0, 0};
+    const float icon_start[4] = {432, 288, 0, 0}, icon_end[4] = {429.48F, 285.72F, 0, 0};
+    if (result == AF_RESULT_SUCCESS)
+        result = af_project_template_track(project, 113U, 100U, 2U, AF_PROPERTY_POSITION, 0U, 114U,
+                                           115U, .18F, focus_start, focus_end);
+    if (result == AF_RESULT_SUCCESS)
+        result = af_project_template_track(project, 116U, 100U, 4U, AF_PROPERTY_POSITION, 0U, 117U,
+                                           118U, .18F, icon_start, icon_end);
     return result;
 }
 
 static AfResult af_project_template_responsive(AfProject *project) {
-    const AfSceneNode root =
-        af_project_template_node(1U, AF_INVALID_NODE_ID, AF_NODE_GROUP, (AfVec2){0.0F, 0.0F},
-                                 (AfVec2){1280.0F, 720.0F}, (AfColor){0.0F, 0.0F, 0.0F, 0.0F}, 0);
-    const AfSceneNode header =
-        af_project_template_node(2U, 1U, AF_NODE_ROUNDED_RECTANGLE, (AfVec2){0.0F, 0.0F},
-                                 (AfVec2){1184.0F, 112.0F}, (AfColor){0.12F, 0.2F, 0.34F, 1.0F}, 1);
-    const AfSceneNode content =
-        af_project_template_node(3U, 1U, AF_NODE_ROUNDED_RECTANGLE, (AfVec2){0.0F, 132.0F},
-                                 (AfVec2){760.0F, 460.0F}, (AfColor){0.18F, 0.48F, 0.78F, 1.0F}, 2);
-    const AfSceneNode action =
-        af_project_template_node(4U, 1U, AF_NODE_ROUNDED_RECTANGLE, (AfVec2){800.0F, 132.0F},
-                                 (AfVec2){384.0F, 200.0F}, (AfColor){0.3F, 0.75F, 0.58F, 1.0F}, 3);
-    AfLayoutNode root_layout = af_layout_node_default(1U);
+    const AfSceneNode header = af_project_template_node(
+        2U, AF_INVALID_NODE_ID, AF_NODE_ROUNDED_RECTANGLE, (AfVec2){0.0F, 0.0F},
+        (AfVec2){1184.0F, 112.0F}, (AfColor){0.12F, 0.2F, 0.34F, 1.0F}, 1);
+    const AfSceneNode content = af_project_template_node(
+        3U, AF_INVALID_NODE_ID, AF_NODE_ROUNDED_RECTANGLE, (AfVec2){0.0F, 0.0F},
+        (AfVec2){760.0F, 460.0F}, (AfColor){0.18F, 0.48F, 0.78F, 1.0F}, 2);
+    const AfSceneNode action = af_project_template_node(
+        4U, AF_INVALID_NODE_ID, AF_NODE_ROUNDED_RECTANGLE, (AfVec2){0.0F, 0.0F},
+        (AfVec2){384.0F, 200.0F}, (AfColor){0.3F, 0.75F, 0.58F, 1.0F}, 3);
     AfLayoutNode header_layout = af_layout_node_default(2U);
     AfLayoutNode content_layout = af_layout_node_default(3U);
     AfLayoutNode action_layout = af_layout_node_default(4U);
@@ -250,17 +243,13 @@ static AfResult af_project_template_responsive(AfProject *project) {
     project->layout_data.reference_size = project->canvas_size;
     project->layout_data.target_size = project->canvas_size;
     project->layout_data.safe_area =
-        (AfInsets){.left = 48.0F, .top = 36.0F, .right = 48.0F, .bottom = 36.0F};
+        (AfInsets){.left = 64.0F, .top = 48.0F, .right = 64.0F, .bottom = 48.0F};
     project->layout_data.scale_mode = AF_CANVAS_SCALE_FIT;
-    root_layout.width = (AfLayoutValue){.mode = AF_LAYOUT_VALUE_PERCENT, .value = 1.0F};
-    root_layout.height = (AfLayoutValue){.mode = AF_LAYOUT_VALUE_PERCENT, .value = 1.0F};
-    root_layout.direction = AF_LAYOUT_DIRECTION_VERTICAL;
-    root_layout.spacing = 20.0F;
-    root_layout.padding = (AfInsets){.left = 16.0F, .top = 12.0F, .right = 16.0F, .bottom = 12.0F};
     header_layout.width = (AfLayoutValue){.mode = AF_LAYOUT_VALUE_PERCENT, .value = 1.0F};
     header_layout.height = (AfLayoutValue){.mode = AF_LAYOUT_VALUE_FIXED, .value = 112.0F};
     content_layout.anchor_min = (AfVec2){0.0F, 0.0F};
     content_layout.anchor_max = (AfVec2){0.0F, 0.0F};
+    content_layout.offset = (AfVec2){0, 132};
     content_layout.width = (AfLayoutValue){.mode = AF_LAYOUT_VALUE_PERCENT, .value = 0.64F};
     content_layout.height = (AfLayoutValue){.mode = AF_LAYOUT_VALUE_PERCENT, .value = 0.68F};
     content_layout.minimum_size = (AfVec2){320.0F, 240.0F};
@@ -271,18 +260,12 @@ static AfResult af_project_template_responsive(AfProject *project) {
     action_layout.width = (AfLayoutValue){.mode = AF_LAYOUT_VALUE_PERCENT, .value = 0.28F};
     action_layout.height = (AfLayoutValue){.mode = AF_LAYOUT_VALUE_FIXED, .value = 200.0F};
     action_layout.minimum_size = (AfVec2){220.0F, 120.0F};
-    result = af_project_add_node(project, &root, "Safe Area Root");
-    if (result == AF_RESULT_SUCCESS) {
-        result = af_project_add_node(project, &header, "Responsive Header");
-    }
+    result = af_project_add_node(project, &header, "Responsive Header");
     if (result == AF_RESULT_SUCCESS) {
         result = af_project_add_node(project, &content, "Percent Content");
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_project_add_node(project, &action, "Anchored Action");
-    }
-    if (result == AF_RESULT_SUCCESS) {
-        result = af_project_set_layout(project, &root_layout);
     }
     if (result == AF_RESULT_SUCCESS) {
         result = af_project_set_layout(project, &header_layout);

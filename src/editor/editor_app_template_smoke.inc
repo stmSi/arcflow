@@ -54,6 +54,10 @@ static AfResult af_editor_template_smoke(AfEditorState *editor, int width, int h
         }
         TEMPLATE_CHECK(!editor->template_panel_visible && editor->project_path[0] == '\0');
         af_editor_update_preview(editor);
+        for (uint32_t node = 0; node < editor->project.scene.count; ++node) {
+            TEMPLATE_CHECK(editor->project.scene.nodes[node].type != AF_NODE_GROUP &&
+                           editor->project.scene.nodes[node].parent_id == AF_INVALID_NODE_ID);
+        }
         const SDL_Keycode shortcuts[] = {SDLK_R, SDLK_R, SDLK_O, SDLK_L, SDLK_A, SDLK_Y};
         const AfNodeType types[] = {AF_NODE_RECTANGLE, AF_NODE_ROUNDED_RECTANGLE,
                                     AF_NODE_ELLIPSE,   AF_NODE_PATH,
