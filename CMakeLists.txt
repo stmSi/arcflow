@@ -98,7 +98,8 @@ if(ARCFLOW_REQUIRE_SIGNING AND (ARCFLOW_SIGN_TOOL STREQUAL "" OR
     message(FATAL_ERROR "Signing is required but ARCFLOW_SIGN_TOOL is unavailable")
 endif()
 if(MINGW)
-    add_link_options(-static-libgcc -static-libstdc++)
+    # Portable binaries include the MinGW threading and compiler runtimes.
+    add_link_options(-static -static-libgcc -static-libstdc++)
 endif()
 set(ARCFLOW_BUILD_ID
     "${PROJECT_VERSION}-${ARCFLOW_RELEASE_CHANNEL}-${ARCFLOW_SOURCE_REVISION}-${ARCFLOW_BUILD_EPOCH}")

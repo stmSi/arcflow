@@ -2,7 +2,13 @@ name: Arcflow CI
 
 on:
   push:
+    branches: ['**']
   pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
 
 jobs:
   linux:
@@ -11,6 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          ref: ${{ inputs.ref || github.ref }}
       - name: Install build tools
         run: >-
           sudo apt-get update && sudo apt-get install -y
@@ -38,6 +45,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          ref: ${{ inputs.ref || github.ref }}
       - name: Install installer tools
         run: choco install nsis --yes --no-progress
       - uses: msys2/setup-msys2@v2
@@ -57,6 +65,17 @@ jobs:
       - name: Build and test
         shell: msys2 {0}
         run: cmake --build --preset release --target arcflow_production_acceptance
+      - name: Test portable Windows package
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem build/release/Arcflow-*.zip | Select-Object -First 1
+          Expand-Archive $archive.FullName "$env:RUNNER_TEMP/arcflow-portable"
+          $compiler = Get-ChildItem "$env:RUNNER_TEMP/arcflow-portable" -Recurse -Filter arcflow_compiler.exe | Select-Object -First 1
+          $env:PATH = "$env:WINDIR/System32;$env:WINDIR"
+          & $compiler.FullName --validate "$($compiler.DirectoryName)/examples/guided-basics.afp"
+          if ($LASTEXITCODE -ne 0) { throw 'Portable compiler failed without MSYS2 on PATH' }
+          & "$($compiler.DirectoryName)/arcflow_runtime_sample.exe" "$($compiler.DirectoryName)/examples/guided-basics.afp"
+          if ($LASTEXITCODE -ne 0) { throw 'Portable runtime sample failed' }
       - uses: actions/upload-artifact@v4
         with:
           name: arcflow-windows-release

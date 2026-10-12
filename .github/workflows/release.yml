@@ -1,0 +1,73 @@
+name: GitHub Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    outputs:
+      ref: ${{ steps.tag.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - id: tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python3 tools/prepare-release.py --tag "$RELEASE_TAG" --check-tag
+          echo "ref=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+  native:
+    needs: tag
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.tag.outputs.ref }}
+  web:
+    needs: tag
+    uses: ./.github/workflows/pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      ref: ${{ needs.tag.outputs.ref }}
+  publish:
+    needs: [tag, native, web]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.tag.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Prepare downloads and verify checksums
+        run: python3 tools/prepare-release.py --tag "$RELEASE_TAG" --artifacts artifacts --output release
+      - name: Publish release
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Arcflow ${RELEASE_TAG#v}" --notes-file release/notes.md
+          fi
+          gh release upload "$RELEASE_TAG" release/Arcflow-* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false

@@ -5,6 +5,7 @@ Reusable UI, engine, platform, and rendering code lives in
 [AF Framework](https://github.com/stmSi/af-framework), pinned as the `framework/` submodule.
 
 Downloads: [Releases](https://github.com/stmSi/arcflow/releases).
+Pushing a version tag (e.g. `v1.0.0`) automatically builds and publishes release files.
 
 ## Build and run
 
