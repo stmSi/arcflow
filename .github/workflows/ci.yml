@@ -15,7 +15,7 @@ jobs:
         run: >-
           sudo apt-get update && sudo apt-get install -y
           ninja-build glslc spirv-tools libx11-dev libxext-dev
-          libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev
+          libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev
       - name: Configure
         run: cmake --preset development -DARCFLOW_BUILD_GPU_TESTS=OFF
       - name: Validate and compile
