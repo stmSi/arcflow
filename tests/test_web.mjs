@@ -39,6 +39,8 @@ try {
   }
   const context = await browser.newContext({viewport: {width: 1440, height: 900}, acceptDownloads: true});
   const page = await context.newPage();
+  const settleEditor = async () => page.waitForFunction(n => Module.afCanvasFrames > n + 2,
+    await page.evaluate(() => Module.afCanvasFrames));
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('dialog', d => d.type() === 'prompt' ? d.accept('browser-project.afproj') : d.accept());
@@ -51,11 +53,14 @@ try {
   await page.mouse.down();
   await page.mouse.move(650, 360, {steps: 8});
   await page.mouse.up();
+  await settleEditor();
   await page.keyboard.press('Shift+g');
+  await settleEditor();
   await page.mouse.move(520, 270);
   await page.mouse.down();
   await page.mouse.move(630, 330, {steps: 8});
   await page.mouse.up();
+  await settleEditor();
   const download = page.waitForEvent('download');
   await page.keyboard.press('Control+s');
   const saved = await download;

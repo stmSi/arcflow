@@ -4,6 +4,8 @@ Arcflow 1.0 is a C17/Vulkan 1.3 editor, player, compiler, and runtime for 2D ani
 Reusable UI, engine, platform, and rendering code lives in
 [AF Framework](https://github.com/stmSi/af-framework), pinned as the `framework/` submodule.
 
+Downloads: [Releases](https://github.com/stmSi/arcflow/releases).
+
 ## Build and run
 
 Requires CMake 3.25+, Ninja, and a Vulkan 1.3 driver/loader.
