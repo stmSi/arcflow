@@ -13,6 +13,9 @@
 #include <string.h>
 
 #if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -276,7 +279,21 @@ AfResult af_project_lock_acquire(const char *project_path, const char *owner,
     token = atomic_fetch_add_explicit(&af_project_lock_sequence, 1U, memory_order_relaxed) ^
             ((uint64_t)process_id << 32U);
     errno = 0;
+#if defined(_WIN32)
+    const int descriptor =
+        _open(lock_path, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
+    if (descriptor >= 0) {
+        file = _fdopen(descriptor, "wb");
+        if (file == NULL) {
+            const int stream_error = errno;
+            (void)_close(descriptor);
+            (void)DeleteFileA(lock_path);
+            errno = stream_error;
+        }
+    }
+#else
     file = fopen(lock_path, "wbx");
+#endif
     if (file == NULL) {
         if (errno == EEXIST && existing_owner != NULL && existing_owner_capacity != 0U) {
             (void)af_project_lock_query(project_path, existing_owner, existing_owner_capacity);
