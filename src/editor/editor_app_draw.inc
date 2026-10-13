@@ -54,10 +54,31 @@ static void af_editor_add_surface(AfEditorState *editor, float x, float y, float
 static void af_editor_add_panel(AfEditorState *editor, float x, float y, float width, float height,
                                 AfColor color, float radius, int32_t layer) {
     const float depth = (float)editor->preferences.theme_depth_percent / 100;
+    if (depth == 0) {
+        af_editor_add_surface(editor, x, y, width, height, color, radius, layer);
+        return;
+    }
     const AfColor top = af_editor_theme_mix(color, (AfColor){1, 1, 1, color.a}, depth * .025F);
     const AfColor bottom = af_editor_theme_mix(color, (AfColor){0, 0, 0, color.a}, depth * .13F);
     af_ui_add_gradient_surface(af_editor_ui(editor), x, y, width, height, top, bottom, radius,
                                layer);
+}
+
+/* Popup elevation remains visible even when the workspace uses flat surfaces. */
+static void af_editor_add_popup(AfEditorState *editor, float x, float y, float width, float height,
+                                int32_t layer) {
+    for (uint32_t i = 0; i < 12; ++i) {
+        const float spread = 12 - (float)i;
+        const float fade = (float)(i + 1) / 12;
+        af_editor_add_surface(editor, x - spread, y + 5 - spread, width + spread * 2,
+                              height + spread * 2, (AfColor){0, 0, 0, .006F + .026F * fade * fade},
+                              8 + spread, layer - 13 + (int32_t)i);
+    }
+    af_editor_add_surface(editor, x, y + 3, width, height, (AfColor){0, 0, 0, .12F}, 8, layer - 1);
+    af_editor_add_surface(editor, x, y, width, height, AF_UI_BORDER, 8, layer);
+    af_editor_add_panel(editor, x + 1, y + 1, width - 2, height - 2, AF_UI_PANEL, 7, layer + 1);
+    af_editor_add_rect(editor, x + 8, y + 1, width - 16, 1,
+                       (AfColor){1, 1, 1, editor->palette.light ? .35F : .07F}, layer + 2);
 }
 
 static AfColor af_editor_button_color(AfEditorState *editor, AfColor color) {
@@ -71,7 +92,10 @@ static AfColor af_editor_button_color(AfEditorState *editor, AfColor color) {
 }
 
 static void af_editor_add_card(AfEditorState *editor, float x, float y, float width, float height) {
-    af_editor_add_surface(editor, x, y + 2, width, height, (AfColor){0, 0, 0, .18F}, 8, 100106);
+    const float depth = (float)editor->preferences.theme_depth_percent / 100;
+    if (depth > 0)
+        af_editor_add_surface(editor, x, y + 2, width, height, (AfColor){0, 0, 0, .18F * depth}, 8,
+                              100106);
     af_editor_add_surface(editor, x, y, width, height, AF_UI_BORDER, 8, 100107);
     af_editor_add_panel(editor, x + 1, y + 1, width - 2, height - 2, AF_UI_SURFACE, 7, 100108);
 }
@@ -79,6 +103,11 @@ static void af_editor_add_card(AfEditorState *editor, float x, float y, float wi
 static void af_editor_add_inset_field(AfEditorState *editor, float x, float y, float width,
                                       float height, AfColor color, int32_t layer) {
     const float depth = (float)editor->preferences.theme_depth_percent / 100;
+    if (depth == 0) {
+        af_editor_add_surface(editor, x, y, width, height, AF_UI_BORDER, 5, layer);
+        af_editor_add_surface(editor, x + 1, y + 1, width - 2, height - 2, color, 4, layer + 1);
+        return;
+    }
     const AfColor top = af_editor_theme_mix(color, (AfColor){0, 0, 0, 1}, depth * .35F);
     af_ui_add_gradient_surface(af_editor_ui(editor), x, y, width, height,
                                af_editor_theme_mix(AF_UI_BORDER, (AfColor){0, 0, 0, 1}, .5F),

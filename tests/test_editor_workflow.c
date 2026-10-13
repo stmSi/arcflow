@@ -245,11 +245,11 @@ static bool af_test_preferences_round_trip(void) {
     static const char legacy[] = "ARCFLOW_EDITOR_PREFERENCES 1\ntheme 1\nautosave 45\nend\n";
     CHECK(af_editor_preferences_parse(legacy, sizeof(legacy) - 1, &parsed) == AF_RESULT_SUCCESS);
     CHECK(parsed.theme == AF_EDITOR_THEME_DARK && parsed.autosave_interval_seconds == 45);
-    CHECK(parsed.theme_depth_percent == 80 && parsed.theme_panel_rgb == 0x1D2430U);
+    CHECK(parsed.theme_depth_percent == 0 && parsed.theme_panel_rgb == 0x1D2430U);
     static const char invalid[] = "ARCFLOW_EDITOR_PREFERENCES 2\ntheme_depth 101\nend\n";
     CHECK(af_editor_preferences_parse(invalid, sizeof(invalid) - 1, &parsed) ==
           AF_RESULT_INVALID_ARGUMENT);
-    CHECK(parsed.theme_depth_percent == 80);
+    CHECK(parsed.theme_depth_percent == 0);
     static const char invalid_color[] = "ARCFLOW_EDITOR_PREFERENCES 2\ntheme_panel 16777216\nend\n";
     CHECK(af_editor_preferences_parse(invalid_color, sizeof(invalid_color) - 1, &parsed) ==
           AF_RESULT_INVALID_ARGUMENT);

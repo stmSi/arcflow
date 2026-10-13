@@ -237,7 +237,7 @@ try {
   await appearance.mouse.click(482, 713);
   await settleTheme();
   assert.equal(await themePreference('theme'), 1);
-  assert.equal(await themePreference('theme_depth'), 80);
+  assert.equal(await themePreference('theme_depth'), 0);
   assert.deepEqual(themeErrors, []);
   console.log('PASS eight themes, color typing/stepping/dragging, reset and persisted preferences');
   await appearance.close();

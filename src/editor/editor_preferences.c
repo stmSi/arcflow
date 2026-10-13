@@ -43,7 +43,7 @@ void af_editor_preferences_default(AfEditorPreferences *preferences) {
                                          .theme_accent_rgb = 0xA38DFFU,
                                          .theme_panel_rgb = 0x1D2430U,
                                          .theme_canvas_rgb = 0x111720U,
-                                         .theme_depth_percent = 80U,
+                                         .theme_depth_percent = 0U,
                                          .show_tooltips = true,
                                          .show_extended_tooltips = true,
                                          .reopen_last_project = true,

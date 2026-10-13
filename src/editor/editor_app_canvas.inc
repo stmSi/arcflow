@@ -875,7 +875,8 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
                        (float)width - editor->left_width - editor->right_width, 1, AF_UI_BORDER,
                        100101);
     for (uint32_t i = 0; i < 4; ++i) {
-        const AfColor shadow = {0, 0, 0, .055F * (float)(4 - i)};
+        const AfColor shadow = {
+            0, 0, 0, .055F * (float)(4 - i) * (float)editor->preferences.theme_depth_percent / 100};
         af_editor_add_rect(editor, editor->left_width + (float)i, editor->toolbar_height, 1,
                            (float)height - editor->toolbar_height, shadow, 99999);
         af_editor_add_rect(editor, (float)width - editor->right_width - (float)i - 1,

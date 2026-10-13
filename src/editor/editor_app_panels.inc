@@ -1089,17 +1089,9 @@ static void af_editor_render_context_menu(AfEditorState *editor, int width, int 
     }
     const float menu_height = AF_EDITOR_CONTEXT_HEADER_HEIGHT +
                               (float)info->item_count * AF_EDITOR_CONTEXT_ITEM_HEIGHT + 8.0F;
-    af_editor_add_shape(
-        editor, AF_NODE_ROUNDED_RECTANGLE,
-        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = origin.x + 5.0F, .ty = origin.y + 6.0F},
-        (AfVec2){AF_EDITOR_CONTEXT_WIDTH, menu_height}, (AfColor){0.0F, 0.0F, 0.0F, 0.45F}, 7.0F,
-        200000);
-    af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = origin.x, .ty = origin.y},
-                        (AfVec2){AF_EDITOR_CONTEXT_WIDTH, menu_height},
-                        (AfColor){0.105F, 0.115F, 0.14F, 1.0F}, 7.0F, 200010);
+    af_editor_add_popup(editor, origin.x, origin.y, AF_EDITOR_CONTEXT_WIDTH, menu_height, 200010);
     af_editor_add_rect(editor, origin.x, origin.y + AF_EDITOR_CONTEXT_HEADER_HEIGHT - 1.0F,
-                       AF_EDITOR_CONTEXT_WIDTH, 1.0F, (AfColor){0.28F, 0.3F, 0.36F, 1.0F}, 200020);
+                       AF_EDITOR_CONTEXT_WIDTH, 1.0F, AF_UI_BORDER, 200020);
     af_editor_add_text(editor, origin.x + 13.0F, origin.y + 10.0F, info->title, 1.2F,
                        AF_EDITOR_CONTEXT_WIDTH - 26.0F, (AfColor){0.57F, 0.72F, 0.94F, 1.0F},
                        200030);
@@ -1111,14 +1103,12 @@ static void af_editor_render_context_menu(AfEditorState *editor, int width, int 
                              editor->mouse_position.y >= item_y &&
                              editor->mouse_position.y < item_y + AF_EDITOR_CONTEXT_ITEM_HEIGHT;
         if (hovered) {
-            af_editor_add_rect(editor, origin.x + 4.0F, item_y, AF_EDITOR_CONTEXT_WIDTH - 8.0F,
-                               AF_EDITOR_CONTEXT_ITEM_HEIGHT - 1.0F,
-                               (AfColor){0.18F, 0.34F, 0.56F, 1.0F}, 200020);
+            af_editor_add_surface(editor, origin.x + 4.0F, item_y, AF_EDITOR_CONTEXT_WIDTH - 8.0F,
+                                  AF_EDITOR_CONTEXT_ITEM_HEIGHT - 1.0F, AF_UI_SELECTION, 4, 200020);
         }
         af_editor_render_context_icon(editor, info->items[index], origin.x + 11.0F, item_y + 7.0F);
         af_editor_add_text(editor, origin.x + 34.0F, item_y + 9.0F, info->items[index], 1.05F,
-                           AF_EDITOR_CONTEXT_WIDTH - 45.0F, (AfColor){0.85F, 0.87F, 0.92F, 1.0F},
-                           200035);
+                           AF_EDITOR_CONTEXT_WIDTH - 45.0F, AF_UI_TEXT, 200035);
     }
 }
 

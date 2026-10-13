@@ -405,21 +405,19 @@ static void af_editor_render_choices(AfEditorState *editor) {
     }
     const char *fills[] = {"Solid", "Linear gradient", "Radial gradient", "Conic gradient"};
     const AfVec2 p = editor->choice_origin;
-    af_editor_add_rect(editor, p.x - 2, p.y - 2, 224,
-                       (float)af_editor_choice_count(editor) * 28 + 4,
-                       (AfColor){.08F, .1F, .14F, 1}, 205000);
+    af_editor_add_popup(editor, p.x - 2, p.y - 2, 224,
+                        (float)af_editor_choice_count(editor) * 28 + 4, 205000);
     for (uint32_t i = 0; i < af_editor_choice_count(editor); ++i) {
         const bool enabled = af_editor_choice_enabled(editor, i);
         const bool hover = af_editor_hovered_rect(editor, p.x, p.y + (float)i * 28, 220, 28);
         if (hover || i == editor->choice_index)
-            af_editor_add_rect(editor, p.x, p.y + (float)i * 28, 220, 28,
-                               (AfColor){.18F, .35F, .52F, 1}, 205001);
-        af_editor_add_text(
-            editor, p.x + 10, p.y + (float)i * 28 + 9,
-            editor->choice_menu == 3   ? (i == 0 ? "Add line" : "Merge points")
-            : editor->choice_menu == 1 ? fills[i]
-                                       : af_editor_property_name((AfPropertyType)i),
-            .9F, 200, enabled ? (AfColor){.92F, .95F, 1, 1} : (AfColor){.4F, .43F, .5F, 1}, 205002);
+            af_editor_add_surface(editor, p.x, p.y + (float)i * 28, 220, 28, AF_UI_SELECTION, 4,
+                                  205010);
+        af_editor_add_text(editor, p.x + 10, p.y + (float)i * 28 + 9,
+                           editor->choice_menu == 3   ? (i == 0 ? "Add line" : "Merge points")
+                           : editor->choice_menu == 1 ? fills[i]
+                                                      : af_editor_property_name((AfPropertyType)i),
+                           .9F, 200, enabled ? AF_UI_TEXT : AF_UI_MUTED, 205020);
     }
 }
 static bool af_editor_gradient_geometry(AfEditorState *editor, int width, int height,
@@ -949,8 +947,8 @@ static void af_editor_render_gradient(AfEditorState *editor, int width) {
                             "Delete stop",
                             "Reverse"};
     const uint32_t count = paint->type == AF_PAINT_SOLID ? 1 : 6;
-    af_editor_add_panel(editor, x - 6, y, available + 12, count == 1 ? 36 : 116,
-                       AF_UI_PANEL, 0, 100150);
+    af_editor_add_panel(editor, x - 6, y, available + 12, count == 1 ? 36 : 116, AF_UI_PANEL, 0,
+                        100150);
     for (uint32_t i = 0; i < count; ++i) {
         const float bx = x + (float)(i % 6) * cell, by = y + (float)(i / 6) * 36 + 3;
         af_editor_add_button_rect(editor, bx, by, cell - 4, 30, AF_UI_SURFACE, 100151);

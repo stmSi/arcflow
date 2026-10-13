@@ -1484,21 +1484,17 @@ static void af_editor_render_top_menu(AfEditorState *editor, int width, int heig
         const float x = af_editor_top_popup_x(editor, width);
         const float popup_width = 340.0F;
         const float popup_height = 8.0F + (float)info->item_count * 30.0F;
-        af_editor_add_shape(
-            editor, AF_NODE_ROUNDED_RECTANGLE,
-            (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = AF_EDITOR_MENU_HEIGHT},
-            (AfVec2){popup_width, popup_height}, (AfColor){0.105F, 0.115F, 0.145F, 1.0F}, 5.0F,
-            210030);
+        af_editor_add_popup(editor, x, AF_EDITOR_MENU_HEIGHT, popup_width, popup_height, 210030);
         for (uint32_t index = 0U; index < info->item_count; ++index) {
             const float item_y = AF_EDITOR_MENU_HEIGHT + 4.0F + (float)index * 30.0F;
             if (index == editor->top_menu_item) {
-                af_editor_add_rect(editor, x + 4.0F, item_y, popup_width - 8.0F, 29.0F,
-                                   AF_UI_SELECTION, 210040);
+                af_editor_add_surface(editor, x + 4.0F, item_y, popup_width - 8.0F, 29.0F,
+                                      AF_UI_SELECTION, 4, 210040);
             }
             af_editor_add_text(editor, x + 14.0F, item_y + 9.0F, info->items[index].label, 1.0F,
                                205.0F, text_color, 210050);
             af_editor_add_text(editor, x + 224.0F, item_y + 10.0F, info->items[index].shortcut,
-                               0.75F, 104.0F, (AfColor){0.48F, 0.54F, 0.64F, 1.0F}, 210050);
+                               0.75F, 104.0F, AF_UI_MUTED, 210050);
         }
     }
     af_editor_render_help_overlay(editor, width, height);
