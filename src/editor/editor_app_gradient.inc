@@ -949,11 +949,11 @@ static void af_editor_render_gradient(AfEditorState *editor, int width) {
                             "Delete stop",
                             "Reverse"};
     const uint32_t count = paint->type == AF_PAINT_SOLID ? 1 : 6;
-    af_editor_add_rect(editor, x - 6, y, available + 12, count == 1 ? 36 : 116,
-                       (AfColor){.08F, .1F, .14F, 1}, 100150);
+    af_editor_add_panel(editor, x - 6, y, available + 12, count == 1 ? 36 : 116,
+                       AF_UI_PANEL, 0, 100150);
     for (uint32_t i = 0; i < count; ++i) {
         const float bx = x + (float)(i % 6) * cell, by = y + (float)(i / 6) * 36 + 3;
-        af_editor_add_rect(editor, bx, by, cell - 4, 30, idle, 100151);
+        af_editor_add_button_rect(editor, bx, by, cell - 4, 30, AF_UI_SURFACE, 100151);
         af_editor_add_text(editor, bx + 6, by + 10, labels[i], .8F, cell - 16, white, 100153);
     }
     if (count != 1) {

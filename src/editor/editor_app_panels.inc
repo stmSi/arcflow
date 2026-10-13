@@ -102,10 +102,9 @@ static void af_editor_render_asset_browser(AfEditorState *editor, int height) {
         return;
     }
     const uint32_t visible_rows = af_editor_asset_visible_rows(editor);
-    af_editor_add_rect(editor, 0.0F, top, editor->left_width, editor->asset_height,
-                       (AfColor){0.07F, 0.078F, 0.098F, 1.0F}, 100105);
-    af_editor_add_rect(editor, 0.0F, top, editor->left_width, 2.0F,
-                       (AfColor){0.24F, 0.28F, 0.36F, 1.0F}, 100115);
+    af_editor_add_panel(editor, 0, top, editor->left_width, editor->asset_height, AF_UI_FIELD, 0,
+                        100105);
+    af_editor_add_rect(editor, 0, top, editor->left_width, 2, AF_UI_BORDER, 100115);
     af_editor_add_text(editor, 12.0F, top + 12.0F, "Assets", 1.1F, editor->left_width - 24.0F,
                        (AfColor){0.68F, 0.78F, 0.94F, 1.0F}, 100125);
     af_editor_add_text(editor, 12.0F, top + 29.0F, "Images for your scene", 0.58F,
@@ -434,10 +433,9 @@ static void af_editor_render_inspector_field(AfEditorState *editor, float x, flo
     char display[64];
     (void)snprintf(display, sizeof(display), "%s  %s", label,
                    editing ? editor->inspector_buffer : value);
-    af_editor_add_button_rect(
-        editor, x, y, width, AF_EDITOR_INSPECTOR_FIELD_HEIGHT,
-        active ? AF_UI_SELECTION : (hovered ? (AfColor){0.2F, 0.23F, 0.29F, 1.0F} : AF_UI_FIELD),
-        100120);
+    af_editor_add_inset_field(editor, x, y, width, AF_EDITOR_INSPECTOR_FIELD_HEIGHT,
+                              active ? AF_UI_SELECTION : (hovered ? AF_UI_SURFACE : AF_UI_FIELD),
+                              100120);
     af_editor_add_text(
         editor, x + 7.0F, y + 8.0F, display, 0.68F, width - (steppers ? 52.0F : 12.0F),
         active ? (AfColor){0.96F, 0.98F, 1.0F, 1.0F} : (AfColor){0.74F, 0.78F, 0.87F, 1.0F},
@@ -710,9 +708,12 @@ static void af_editor_render_inspector_contents(AfEditorState *editor, int width
         af_editor_render_image_inspector(editor, width, selected);
         return;
     }
+    af_editor_add_card(editor, x - 8, 48, editor->right_width - 20, 218);
+    af_editor_add_card(editor, x - 8, 272, editor->right_width - 20, 197);
+    af_editor_add_card(editor, x - 8, 505, editor->right_width - 20, 106);
     af_editor_render_color_picker(editor, x, selected);
-    af_editor_add_text(editor, x, AF_EDITOR_INSPECTOR_LABEL_Y, "Transform", 0.62F,
-                       editor->right_width - 36.0F, (AfColor){0.48F, 0.55F, 0.68F, 1.0F}, 100125);
+    af_editor_add_text(editor, x, AF_EDITOR_INSPECTOR_LABEL_Y, "Transform", 0.75F,
+                       editor->right_width - 36.0F, AF_UI_MUTED, 100125);
     {
         const float ratio_width = 76.0F;
         const float ratio_x = x + editor->right_width - 36.0F - ratio_width;
@@ -842,10 +843,10 @@ static void af_editor_render_inspector_contents(AfEditorState *editor, int width
             static const char *const style_labels[] = {"OUT", "-", "+", "FILL", "CAP", "JOIN"};
             static const char *const layout_labels[] = {"ANCH", "WIDTH", "HEIGHT",
                                                         "FLOW", "ALIGN", "ASPECT"};
-            AfColor button = {0.24F, 0.26F, 0.32F, 1.0F};
+            AfColor button = AF_UI_SURFACE;
             if (style != NULL && ((index == 0U && style->stroke.enabled) ||
                                   (index == 3U && style->fill.type != AF_PAINT_SOLID))) {
-                button = (AfColor){0.22F, 0.58F, 0.96F, 1.0F};
+                button = AF_UI_PRIMARY;
             }
             af_editor_add_button_rect(editor, x + (float)index * 38.0F, AF_EDITOR_STYLE_ROW_Y,
                                       34.0F, 28.0F, button, 100120);

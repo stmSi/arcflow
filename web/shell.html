@@ -6,17 +6,20 @@
   <title>Arcflow</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <style>
+    :root { --ui-panel: #1d2430; --ui-accent: #a38dff; --ui-text: #edf1fa; }
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #12141b; color: #dce0ed; font: 14px system-ui; }
     canvas { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; }
-    #status { position: fixed; top: 16px; left: 16px; padding: 12px 16px; background: #242733; border-radius: 6px; }
+    #status { position: fixed; top: 16px; left: 16px; padding: 12px 16px; background: linear-gradient(145deg, #343c4e, #202735); border: 1px solid #5b6480; border-radius: 10px; box-shadow: 0 10px 28px #0007, inset 0 1px #ffffff12; }
     #status[hidden] { display: none; }
+    #status { background: linear-gradient(145deg, color-mix(in srgb, var(--ui-panel) 88%, white), var(--ui-panel)); color: var(--ui-text); border-color: color-mix(in srgb, var(--ui-panel) 72%, var(--ui-text)); }
     #status[data-busy="true"]::after { content: ''; display: block; margin-top: 8px; height: 3px; width: 100%; background: linear-gradient(90deg, transparent, #9c85ff, transparent); animation: progress 1s linear infinite; }
-    #status a { color: #c9baff; }
+    #status a { color: var(--ui-accent); }
     #status button { margin-left: 12px; padding: 2px 8px; }
     @keyframes progress { from { opacity: .3; } to { opacity: 1; } }
     #player-controls { position: fixed; top: 12px; right: 12px; }
     #player-controls[hidden] { display: none; }
-    button { background: #242733; color: #dce0ed; border: 1px solid #50556a; border-radius: 4px; padding: 8px 12px; cursor: pointer; }
+    button { background: linear-gradient(#394255, #252c3a); color: #edf1fa; border: 1px solid #59647b; border-radius: 6px; padding: 8px 12px; box-shadow: 0 2px 5px #0005, inset 0 1px #ffffff14; cursor: pointer; }
+    button:hover { border-color: #a38dff; background: linear-gradient(#46506a, #30384c); }
   </style>
 </head>
 <body>

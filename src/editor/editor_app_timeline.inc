@@ -355,8 +355,10 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
     float tick_time = 0.0F;
     uint32_t index = 0U;
     uint32_t row = 0U;
-    af_editor_add_rect(editor, center_left, top, center_right - center_left,
-                       editor->timeline_height, AF_UI_PANEL, 100000);
+    af_editor_add_panel(editor, center_left, top, center_right - center_left,
+                        editor->timeline_height, AF_UI_PANEL, 0, 100000);
+    af_editor_add_panel(editor, center_left, top, center_right - center_left, 43, AF_UI_SURFACE, 0,
+                        100105);
     af_editor_add_rect(editor, center_left, top - .5F, center_right - center_left, 1.0F,
                        AF_UI_BORDER, 100110);
     const uint32_t controls_start = editor->render_scene.count;
@@ -522,8 +524,8 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                 track->node_id == editor->selected_id &&
                         track->property == editor->selected_property &&
                         track->element_index == af_editor_property_element(editor, track->property)
-                    ? (AfColor){0.16F, 0.27F, 0.42F, 1.0F}
-                    : (AfColor){0.11F, 0.12F, 0.15F, 1.0F},
+                    ? AF_UI_SELECTION
+                    : AF_UI_FIELD,
                 100115);
             af_editor_add_rect(editor, center_left + 10.0F, y + 7.0F, 5.0F, 20.0F,
                                af_editor_property_color(track->property), 100125);
@@ -544,9 +546,7 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
             }
             af_editor_add_rect(editor, ruler_x, y, center_right - ruler_x,
                                AF_EDITOR_TIMELINE_TRACK_HEIGHT - 1.0F,
-                               (row & 1U) != 0U ? (AfColor){0.095F, 0.105F, 0.13F, 1.0F}
-                                                : (AfColor){0.105F, 0.115F, 0.14F, 1.0F},
-                               100110);
+                               (row & 1U) != 0U ? AF_UI_FIELD : AF_UI_PANEL, 100110);
             for (key_index = 0U; key_index < editor->project.keyframe_count; ++key_index) {
                 const AfProjectKeyframe *key = &editor->project.keyframes[key_index];
                 const float key_x = af_editor_time_to_x(editor, key->keyframe.time);

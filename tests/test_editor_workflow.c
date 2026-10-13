@@ -189,6 +189,10 @@ static bool af_test_preferences_round_trip(void) {
     (void)snprintf(preferences.workspace.name, sizeof(preferences.workspace.name), "%s",
                    "Animation & VFX");
     preferences.theme = AF_EDITOR_THEME_LIGHT;
+    preferences.theme_accent_rgb = 0x59D7C3U;
+    preferences.theme_panel_rgb = 0x192933U;
+    preferences.theme_canvas_rgb = 0x101A20U;
+    preferences.theme_depth_percent = 100;
     preferences.autosave_interval_seconds = 45U;
     preferences.accessibility.text_scale = 1.5F;
     preferences.accessibility.reduced_motion = AF_REDUCED_MOTION_SIMPLIFY;
@@ -221,6 +225,8 @@ static bool af_test_preferences_round_trip(void) {
     CHECK(parsed.onboarding_complete);
     CHECK(strcmp(parsed.workspace.name, "Animation & VFX") == 0);
     CHECK(parsed.theme == AF_EDITOR_THEME_LIGHT && parsed.autosave_interval_seconds == 45U);
+    CHECK(parsed.theme_accent_rgb == 0x59D7C3U && parsed.theme_panel_rgb == 0x192933U &&
+          parsed.theme_canvas_rgb == 0x101A20U && parsed.theme_depth_percent == 100);
     CHECK(parsed.accessibility.text_scale == 1.5F && parsed.accessibility.high_contrast);
     CHECK(parsed.workspace.docks[AF_EDITOR_DOCK_PROFILER].visible &&
           parsed.workspace.docks[AF_EDITOR_DOCK_PROFILER].extent_pixels == 480U);
@@ -236,6 +242,17 @@ static bool af_test_preferences_round_trip(void) {
     CHECK(parsed.recent_project_count == 1U);
     CHECK(af_editor_preferences_remove_shortcut(&parsed, 2U) == AF_RESULT_SUCCESS);
     CHECK(parsed.shortcut_override_count == 1U);
+    static const char legacy[] = "ARCFLOW_EDITOR_PREFERENCES 1\ntheme 1\nautosave 45\nend\n";
+    CHECK(af_editor_preferences_parse(legacy, sizeof(legacy) - 1, &parsed) == AF_RESULT_SUCCESS);
+    CHECK(parsed.theme == AF_EDITOR_THEME_DARK && parsed.autosave_interval_seconds == 45);
+    CHECK(parsed.theme_depth_percent == 80 && parsed.theme_panel_rgb == 0x1D2430U);
+    static const char invalid[] = "ARCFLOW_EDITOR_PREFERENCES 2\ntheme_depth 101\nend\n";
+    CHECK(af_editor_preferences_parse(invalid, sizeof(invalid) - 1, &parsed) ==
+          AF_RESULT_INVALID_ARGUMENT);
+    CHECK(parsed.theme_depth_percent == 80);
+    static const char invalid_color[] = "ARCFLOW_EDITOR_PREFERENCES 2\ntheme_panel 16777216\nend\n";
+    CHECK(af_editor_preferences_parse(invalid_color, sizeof(invalid_color) - 1, &parsed) ==
+          AF_RESULT_INVALID_ARGUMENT);
     return true;
 }
 

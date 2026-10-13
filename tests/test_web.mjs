@@ -146,11 +146,107 @@ try {
   assert.equal((await page.request.get(base + 'favicon.svg')).status(), 200);
   console.log('PASS PNG/WebP imports into a new project and favicon');
   await context.close();
+  const appearance = await browser.newPage({viewport: {width: 1440, height: 900}, acceptDownloads: true});
+  const themeErrors = [];
+  appearance.on('pageerror', e => themeErrors.push(e.message));
+  appearance.on('dialog', d => d.accept('theme-project.afproj'));
+  const settleTheme = async () => appearance.waitForFunction(n => Module.afCanvasFrames > n + 2,
+    await appearance.evaluate(() => Module.afCanvasFrames));
+  const themePreference = async key => appearance.evaluate(key => {
+    const source = Module.FS.readFile('/documents/editor_preferences.afprefs', {encoding: 'utf8'});
+    return Number(source.split('\n').find(line => line.startsWith(key + ' ')).split(' ')[1]);
+  }, key);
+  const saveThemeProject = async () => {
+    const downloaded = appearance.waitForEvent('download');
+    await appearance.keyboard.press('Control+s');
+    const path = '/documents/' + (await downloaded).suggestedFilename();
+    return appearance.evaluate(path => Module.FS.readFile(path, {encoding: 'utf8'}), path);
+  };
+  await appearance.goto(base);
+  await appearance.waitForFunction(() => Module.afCanvasFrames > 3);
+  await appearance.keyboard.press('Escape');
+  await appearance.keyboard.press('Control+n');
+  await settleTheme();
+  const beforeTheme = await saveThemeProject();
+  await appearance.keyboard.press('Control+,');
+  await settleTheme();
+  // Every preview card selects and saves its distinct preset, including both light themes.
+  for (const [i, theme] of [1, 3, 4, 2, 6, 7, 8, 9].entries()) {
+    await appearance.mouse.click(480 + (i % 4) * 160, 278 + Math.floor(i / 4) * 84);
+    await settleTheme();
+    assert.equal(await themePreference('theme'), theme);
+  }
+  await appearance.mouse.move(680, 462);
+  await appearance.mouse.down();
+  await appearance.mouse.move(700, 462, {steps: 5});
+  await appearance.keyboard.press('Escape');
+  await appearance.mouse.up();
+  await settleTheme();
+  assert.equal(await themePreference('theme'), 9, 'Cancel restores the selected preset');
+  assert.equal(await themePreference('theme_accent'), 0xA38DFF, 'Cancel preserves stored custom colors');
+  await appearance.mouse.click(640, 462);
+  await settleTheme();
+  await appearance.keyboard.press('Control+a');
+  await appearance.keyboard.type('59D7C3');
+  await appearance.keyboard.press('Enter');
+  await settleTheme();
+  assert.equal(await themePreference('theme'), 5);
+  assert.equal(await themePreference('theme_accent'), 0x59D7C3);
+  await appearance.mouse.click(1008, 462);
+  await settleTheme();
+  assert.equal(await themePreference('theme_accent'), 0x59D7C4);
+  await appearance.mouse.click(960, 462);
+  await settleTheme();
+  await appearance.mouse.move(680, 462);
+  await appearance.mouse.down();
+  await appearance.mouse.move(700, 462, {steps: 5});
+  await appearance.mouse.up();
+  await settleTheme();
+  assert.equal(await themePreference('theme_accent'), 0x59D7C3 + 20);
+  // An invalid edit stays pending; Escape discards it without changing preferences.
+  await appearance.mouse.click(680, 462);
+  await settleTheme();
+  await appearance.keyboard.type('12');
+  await appearance.keyboard.press('Enter');
+  await settleTheme();
+  assert.equal(await themePreference('theme_accent'), 0x59D7C3 + 20);
+  await appearance.keyboard.press('Escape');
+  await appearance.mouse.click(480, 278);
+  await settleTheme();
+  assert.equal(await themePreference('theme'), 1);
+  await appearance.mouse.click(976, 428);
+  await appearance.mouse.click(973, 629);
+  await settleTheme();
+  assert.equal(await themePreference('theme'), 5);
+  assert.equal(await themePreference('theme_accent'), 0x59D7C3 + 20);
+  assert.equal(await themePreference('theme_depth'), 100);
+  await appearance.keyboard.press('Escape');
+  await settleTheme();
+  const afterTheme = await saveThemeProject();
+  assert.equal(afterTheme.replace(/^metadata .*\n|^change .*\n/gm, ''),
+    beforeTheme.replace(/^metadata .*\n|^change .*\n/gm, ''), 'Theme changes preserve artwork');
+  await appearance.evaluate(() => new Promise((done, fail) => Module.FS.syncfs(false, e => e ? fail(e) : done())));
+  await appearance.reload();
+  await appearance.waitForFunction(() => Module.afCanvasFrames > 3);
+  assert.equal(await themePreference('theme'), 5);
+  assert.equal(await themePreference('theme_accent'), 0x59D7C3 + 20);
+  assert.equal(await themePreference('theme_depth'), 100);
+  assert.equal(await appearance.evaluate(() => document.documentElement.style.getPropertyValue('--ui-accent')), '#59d7d7');
+  await appearance.keyboard.press('Control+,');
+  await settleTheme();
+  await appearance.mouse.click(482, 713);
+  await settleTheme();
+  assert.equal(await themePreference('theme'), 1);
+  assert.equal(await themePreference('theme_depth'), 80);
+  assert.deepEqual(themeErrors, []);
+  console.log('PASS eight themes, color typing/stepping/dragging, reset and persisted preferences');
+  await appearance.close();
   const particles = await browser.newPage({viewport: {width: 1440, height: 900}, acceptDownloads: true});
   particles.on('dialog', d => d.accept('particles.afproj'));
   await particles.goto(`${base}?smoke=particle-inputs&frames=100000`);
   await particles.waitForFunction(() => Module.afCanvasFrames > 3);
   await particles.mouse.move(1320, 500);
+  await particles.waitForFunction(n => Module.afCanvasFrames > n + 2, await particles.evaluate(() => Module.afCanvasFrames));
   await particles.mouse.wheel(0, 1000);
   await particles.waitForFunction(n => Module.afCanvasFrames > n + 2, await particles.evaluate(() => Module.afCanvasFrames));
   // Content ends at 942; scrolling to its limit puts the spawn row at y=639.
@@ -159,7 +255,9 @@ try {
   await particles.keyboard.press('Control+a');
   await particles.keyboard.type('80', {delay: 20});
   await particles.keyboard.press('Enter');
+  await particles.waitForFunction(n => Module.afCanvasFrames > n + 2, await particles.evaluate(() => Module.afCanvasFrames));
   await particles.mouse.click(1410, 640);
+  await particles.waitForFunction(n => Module.afCanvasFrames > n + 2, await particles.evaluate(() => Module.afCanvasFrames));
   const particleSave = particles.waitForEvent('download');
   await particles.keyboard.press('Control+s');
   const particleFile = '/documents/' + (await particleSave).suggestedFilename();

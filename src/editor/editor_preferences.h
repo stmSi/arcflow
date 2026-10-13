@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AF_EDITOR_PREFERENCES_VERSION 1U
+#define AF_EDITOR_PREFERENCES_VERSION 2U
 #define AF_EDITOR_PREFERENCES_MAX_FILE_SIZE (64U * 1024U)
 #define AF_EDITOR_PREFERENCES_MAX_LINE_SIZE 2048U
 #define AF_EDITOR_WORKSPACE_NAME_CAPACITY 48U
@@ -24,6 +24,13 @@ typedef enum AfEditorTheme {
     AF_EDITOR_THEME_SYSTEM = 0,
     AF_EDITOR_THEME_DARK,
     AF_EDITOR_THEME_LIGHT,
+    AF_EDITOR_THEME_MIDNIGHT,
+    AF_EDITOR_THEME_GRAPHITE,
+    AF_EDITOR_THEME_CUSTOM,
+    AF_EDITOR_THEME_FOREST,
+    AF_EDITOR_THEME_EMBER,
+    AF_EDITOR_THEME_ROSE,
+    AF_EDITOR_THEME_PAPER,
     AF_EDITOR_THEME_COUNT
 } AfEditorTheme;
 
@@ -77,6 +84,10 @@ typedef struct AfEditorPreferences {
     uint32_t recent_project_count;
     uint32_t autosave_interval_seconds;
     AfEditorTheme theme;
+    uint32_t theme_accent_rgb;
+    uint32_t theme_panel_rgb;
+    uint32_t theme_canvas_rgb;
+    uint32_t theme_depth_percent;
     bool show_tooltips;
     bool show_extended_tooltips;
     bool reopen_last_project;

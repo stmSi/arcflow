@@ -40,6 +40,10 @@ void af_editor_preferences_default(AfEditorPreferences *preferences) {
     *preferences = (AfEditorPreferences){.workspace = {.name = "Default"},
                                          .autosave_interval_seconds = 300U,
                                          .theme = AF_EDITOR_THEME_DARK,
+                                         .theme_accent_rgb = 0xA38DFFU,
+                                         .theme_panel_rgb = 0x1D2430U,
+                                         .theme_canvas_rgb = 0x111720U,
+                                         .theme_depth_percent = 80U,
                                          .show_tooltips = true,
                                          .show_extended_tooltips = true,
                                          .reopen_last_project = true,
@@ -65,6 +69,8 @@ void af_editor_preferences_default(AfEditorPreferences *preferences) {
 
 AfResult af_editor_preferences_validate(const AfEditorPreferences *preferences) {
     if (preferences == NULL || preferences->theme >= AF_EDITOR_THEME_COUNT ||
+        preferences->theme_accent_rgb > 0xFFFFFFU || preferences->theme_panel_rgb > 0xFFFFFFU ||
+        preferences->theme_canvas_rgb > 0xFFFFFFU || preferences->theme_depth_percent > 100U ||
         preferences->autosave_interval_seconds > AF_EDITOR_AUTOSAVE_MAX_SECONDS ||
         preferences->shortcut_override_count > AF_EDITOR_SHORTCUT_OVERRIDE_CAPACITY ||
         preferences->recent_project_count > AF_EDITOR_RECENT_PROJECT_CAPACITY ||
@@ -421,6 +427,11 @@ AfResult af_editor_preferences_serialize(const AfEditorPreferences *preferences,
             preferences->show_tooltips ? 1U : 0U, preferences->show_extended_tooltips ? 1U : 0U,
             preferences->reopen_last_project ? 1U : 0U, preferences->onboarding_complete ? 1U : 0U);
     }
+    if (result == AF_RESULT_SUCCESS)
+        result = af_editor_preference_write(
+            &writer, "theme_accent %u\ntheme_panel %u\ntheme_canvas %u\ntheme_depth %u\n",
+            preferences->theme_accent_rgb, preferences->theme_panel_rgb,
+            preferences->theme_canvas_rgb, preferences->theme_depth_percent);
     for (uint32_t index = 0U; result == AF_RESULT_SUCCESS && index < AF_EDITOR_DOCK_COUNT;
          ++index) {
         const AfEditorDockPreference *dock = &preferences->workspace.docks[index];
@@ -506,6 +517,20 @@ static AfResult af_editor_preference_parse_scalar(AfEditorPreferences *preferenc
             return AF_RESULT_INVALID_ARGUMENT;
         }
         preferences->theme = (AfEditorTheme)value;
+    } else if (strcmp(tokens[0], "theme_accent") == 0 || strcmp(tokens[0], "theme_panel") == 0 ||
+               strcmp(tokens[0], "theme_canvas") == 0) {
+        if (value > 0xFFFFFFU)
+            return AF_RESULT_INVALID_ARGUMENT;
+        if (strcmp(tokens[0], "theme_accent") == 0)
+            preferences->theme_accent_rgb = value;
+        else if (strcmp(tokens[0], "theme_panel") == 0)
+            preferences->theme_panel_rgb = value;
+        else
+            preferences->theme_canvas_rgb = value;
+    } else if (strcmp(tokens[0], "theme_depth") == 0) {
+        if (value > 100U)
+            return AF_RESULT_INVALID_ARGUMENT;
+        preferences->theme_depth_percent = value;
     } else if (strcmp(tokens[0], "autosave") == 0) {
         if (value > AF_EDITOR_AUTOSAVE_MAX_SECONDS) {
             return AF_RESULT_INVALID_ARGUMENT;
@@ -666,7 +691,7 @@ AfResult af_editor_preferences_parse(const char *data, size_t size,
                 !af_editor_preference_parse_u32(tokens[1], &version)) {
                 return AF_RESULT_INVALID_ARGUMENT;
             }
-            if (version != AF_EDITOR_PREFERENCES_VERSION) {
+            if (version == 0U || version > AF_EDITOR_PREFERENCES_VERSION) {
                 return AF_RESULT_UNSUPPORTED_VERSION;
             }
             header_seen = true;

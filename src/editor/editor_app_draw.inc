@@ -16,17 +16,23 @@ static AfUiContext *af_editor_ui(AfEditorState *editor) {
     ui->reduced_motion = editor->preferences.accessibility.reduced_motion != AF_REDUCED_MOTION_OFF;
     ui->high_contrast = editor->preferences.accessibility.high_contrast;
     ui->contrast_border = AF_UI_MUTED;
+    ui->surface_styles = &editor->preview_style_data;
+    ui->surface_depth = (float)editor->preferences.theme_depth_percent / 100;
     const bool covered = editor->command_palette.open || editor->top_menu != AF_EDITOR_MENU_NONE ||
                          editor->context_menu != AF_EDITOR_CONTEXT_NONE || editor->choice_menu ||
                          editor->shortcuts_overlay || editor->welcome_visible ||
                          editor->template_panel_visible || editor->recent_panel_visible ||
-                         editor->export_panel_visible || editor->offset_panel_open;
+                         editor->export_panel_visible || editor->offset_panel_open ||
+                         editor->appearance_visible;
     ui->interaction_blocked_below_layer = covered ? 210000 : INT32_MIN;
     return ui;
 }
 
 static void af_editor_add_shape(AfEditorState *editor, AfNodeType type, AfAffine2 transform,
                                 AfVec2 bounds, AfColor color, float radius, int32_t layer) {
+    if (layer >= 200000 && color.a > .99F && af_editor_theme_brightness(color) < .35F &&
+        fmaxf(color.r, fmaxf(color.g, color.b)) - fminf(color.r, fminf(color.g, color.b)) < .1F)
+        color = AF_UI_PANEL;
     af_ui_add_shape(af_editor_ui(editor), type, transform, bounds, color, radius, layer);
 }
 
@@ -45,14 +51,52 @@ static void af_editor_add_surface(AfEditorState *editor, float x, float y, float
     af_ui_add_surface(af_editor_ui(editor), x, y, width, height, color, radius, layer);
 }
 
+static void af_editor_add_panel(AfEditorState *editor, float x, float y, float width, float height,
+                                AfColor color, float radius, int32_t layer) {
+    const float depth = (float)editor->preferences.theme_depth_percent / 100;
+    const AfColor top = af_editor_theme_mix(color, (AfColor){1, 1, 1, color.a}, depth * .025F);
+    const AfColor bottom = af_editor_theme_mix(color, (AfColor){0, 0, 0, color.a}, depth * .13F);
+    af_ui_add_gradient_surface(af_editor_ui(editor), x, y, width, height, top, bottom, radius,
+                               layer);
+}
+
+static AfColor af_editor_button_color(AfEditorState *editor, AfColor color) {
+    const float brightness = af_editor_theme_brightness(color);
+    if (brightness < .4F &&
+        fmaxf(color.r, fmaxf(color.g, color.b)) - fminf(color.r, fminf(color.g, color.b)) < .16F) {
+        const float lift = fminf(.14F, fmaxf(0, brightness - .12F));
+        color = af_editor_theme_mix(AF_UI_SURFACE, (AfColor){1, 1, 1, color.a}, lift);
+    }
+    return color;
+}
+
+static void af_editor_add_card(AfEditorState *editor, float x, float y, float width, float height) {
+    af_editor_add_surface(editor, x, y + 2, width, height, (AfColor){0, 0, 0, .18F}, 8, 100106);
+    af_editor_add_surface(editor, x, y, width, height, AF_UI_BORDER, 8, 100107);
+    af_editor_add_panel(editor, x + 1, y + 1, width - 2, height - 2, AF_UI_SURFACE, 7, 100108);
+}
+
+static void af_editor_add_inset_field(AfEditorState *editor, float x, float y, float width,
+                                      float height, AfColor color, int32_t layer) {
+    const float depth = (float)editor->preferences.theme_depth_percent / 100;
+    const AfColor top = af_editor_theme_mix(color, (AfColor){0, 0, 0, 1}, depth * .35F);
+    af_ui_add_gradient_surface(af_editor_ui(editor), x, y, width, height,
+                               af_editor_theme_mix(AF_UI_BORDER, (AfColor){0, 0, 0, 1}, .5F),
+                               AF_UI_BORDER, 5, layer);
+    af_ui_add_gradient_surface(af_editor_ui(editor), x + 1, y + 1, width - 2, height - 2, top,
+                               color, 4, layer + 1);
+}
+
 static void af_editor_add_button_rect(AfEditorState *editor, float x, float y, float width,
                                       float height, AfColor color, int32_t layer) {
-    af_ui_add_button_rect(af_editor_ui(editor), x, y, width, height, color, layer);
+    af_ui_add_button_rect(af_editor_ui(editor), x, y, width, height,
+                          af_editor_button_color(editor, color), layer);
 }
 
 static void af_editor_add_button_rounded(AfEditorState *editor, float x, float y, float width,
                                          float height, AfColor color, float radius, int32_t layer) {
-    af_ui_add_button_rounded(af_editor_ui(editor), x, y, width, height, color, radius, layer);
+    af_ui_add_button_rounded(af_editor_ui(editor), x, y, width, height,
+                             af_editor_button_color(editor, color), radius, layer);
 }
 
 static void af_editor_add_line(AfEditorState *editor, AfVec2 start, AfVec2 end, float thickness,
@@ -62,6 +106,30 @@ static void af_editor_add_line(AfEditorState *editor, AfVec2 start, AfVec2 end, 
 
 static void af_editor_add_text(AfEditorState *editor, float x, float y, const char *text,
                                float scale, float maximum_width, AfColor color, int32_t layer) {
+    if (editor->palette.light && layer >= 100000 &&
+        fmaxf(color.r, fmaxf(color.g, color.b)) - fminf(color.r, fminf(color.g, color.b)) < .24F) {
+        AfColor background = AF_UI_PANEL;
+        int32_t background_layer = INT32_MIN;
+        const uint32_t count = editor->render_scene.count;
+        for (uint32_t i = count > 160 ? count - 160 : 0; i < count; ++i) {
+            const AfSceneNode *node = &editor->render_scene.nodes[i];
+            if (node->id < AF_EDITOR_UI_NODE_ID_BASE || node->type == AF_NODE_PATH ||
+                node->layer_order >= layer || node->layer_order < background_layer ||
+                node->fill.a < .9F)
+                continue;
+            if (af_ui_point_in_rect((AfVec2){x, y}, node->world_transform.tx,
+                                    node->world_transform.ty, node->bounds.x, node->bounds.y)) {
+                background = node->fill;
+                background_layer = node->layer_order;
+            }
+        }
+        const AfColor target = af_editor_theme_brightness(background) > .45F
+                                   ? (AfColor){.035F, .04F, .065F, color.a}
+                                   : (AfColor){.97F, .98F, 1, color.a};
+        const bool normal =
+            fabsf(color.r - AF_UI_TEXT.r) < .01F || af_editor_theme_brightness(color) > .78F;
+        color = af_editor_theme_mix(background, target, normal ? .96F : .82F);
+    }
     af_ui_add_text(af_editor_ui(editor), x, y, text, scale, maximum_width, color, layer);
 }
 

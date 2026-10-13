@@ -1203,6 +1203,11 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
     float canvas_width = 0.0F;
     float canvas_height = 0.0F;
     editor->mouse_position = (AfVec2){x, y};
+    if (editor->appearance_visible) {
+        if (event->button == SDL_BUTTON_LEFT)
+            (void)af_editor_appearance_mouse(editor, width, height, x, y);
+        return;
+    }
     if (editor->gradient_drag)
         return;
     if (editor->inspector_field != AF_EDITOR_INSPECTOR_NONE &&
@@ -1535,6 +1540,10 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
     const AfProjectClip *clip =
         af_project_find_clip_const(&editor->project, editor->selected_clip_id);
     editor->mouse_position = (AfVec2){event->x, event->y};
+    if (editor->appearance_visible) {
+        af_editor_appearance_motion(editor, event->x);
+        return;
+    }
     af_editor_top_menu_hover(editor, width, event);
     if (editor->gradient_drag) {
         af_editor_gradient_motion(editor, width, height, event->x, event->y);
@@ -1782,6 +1791,10 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
 }
 
 static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
+    if (editor->appearance_visible) {
+        af_editor_appearance_up(editor);
+        return;
+    }
     editor->text_dragging = false;
     editor->snap_result = (AfEditorSnapResult){0};
     if (editor->gradient_drag) {
@@ -2022,6 +2035,8 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     if (!event->down) {
         return;
     }
+    if (af_editor_appearance_key(editor, event))
+        return;
     if (editor->gradient_drag) {
         if (event->key == SDLK_ESCAPE)
             af_editor_gradient_finish_drag(editor, true);
@@ -2191,7 +2206,9 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
             return;
         }
     }
-    if (alt && (event->key == SDLK_RETURN || event->key == SDLK_KP_ENTER)) {
+    if (control && event->key == SDLK_COMMA) {
+        af_editor_execute_workflow_action(editor, AF_EDITOR_MENU_ACTION_APPEARANCE, width, height);
+    } else if (alt && (event->key == SDLK_RETURN || event->key == SDLK_KP_ENTER)) {
         af_editor_execute_menu_action(editor, AF_EDITOR_MENU_ACTION_FULLSCREEN, width, height);
     } else if (control && (event->key == SDLK_Y ||
                            ((event->mod & SDL_KMOD_SHIFT) != 0U && event->key == SDLK_Z))) {
@@ -2405,7 +2422,9 @@ static void af_editor_handle_event(AfEditorState *editor, SDL_Event *event, int 
     } else if (event->type == SDL_EVENT_KEY_DOWN) {
         af_editor_key(editor, width, height, &event->key);
     } else if (event->type == SDL_EVENT_TEXT_INPUT) {
-        if (editor->text_panel_open) {
+        if (editor->appearance_visible) {
+            af_editor_appearance_append(editor, event->text.text);
+        } else if (editor->text_panel_open) {
             af_editor_text_panel_append(editor, event->text.text);
         } else if (editor->inspector_field != AF_EDITOR_INSPECTOR_NONE) {
             af_editor_append_inspector_text(editor, event->text.text);

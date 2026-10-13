@@ -77,6 +77,7 @@ typedef enum AfEditorMenuAction {
     AF_EDITOR_MENU_ACTION_OUTLINE_OBJECT,
     AF_EDITOR_MENU_ACTION_OFFSET,
     AF_EDITOR_MENU_ACTION_TEXT,
+    AF_EDITOR_MENU_ACTION_APPEARANCE,
     AF_EDITOR_MENU_ACTION_COUNT
 } AfEditorMenuAction;
 
@@ -160,8 +161,9 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
                    {"Rulers", "", AF_EDITOR_MENU_ACTION_TOGGLE_RULERS},
                    {"Measurements", "", AF_EDITOR_MENU_ACTION_TOGGLE_MEASUREMENTS},
                    {"Smart guides", "", AF_EDITOR_MENU_ACTION_TOGGLE_SMART_GUIDES},
-                   {"Reset workspace", "", AF_EDITOR_MENU_ACTION_RESET_WORKSPACE}},
-         .item_count = 9U},
+                   {"Reset workspace", "", AF_EDITOR_MENU_ACTION_RESET_WORKSPACE},
+                   {"Appearance...", "CTRL+,", AF_EDITOR_MENU_ACTION_APPEARANCE}},
+         .item_count = 10U},
         {.label = "Tools",
          .width = 62.0F,
          .items = {{"Align left", "", AF_EDITOR_MENU_ACTION_ALIGN_LEFT},
@@ -205,8 +207,9 @@ static float af_editor_top_menu_scale(const AfEditorState *editor) {
          menu = (AfEditorTopMenu)(menu + 1)) {
         total += af_editor_top_menu_info(menu)->width;
     }
-    return af_editor_clamp(((float)editor->window_width - editor->left_width -
-                            editor->right_width - 16.0F) / total, 0.1F, 1.0F);
+    return af_editor_clamp(
+        ((float)editor->window_width - editor->left_width - editor->right_width - 16.0F) / total,
+        0.1F, 1.0F);
 }
 
 static float af_editor_top_menu_x(const AfEditorState *editor, AfEditorTopMenu menu) {
@@ -229,7 +232,7 @@ static bool af_editor_menu_blocked(const AfEditorState *editor) {
            editor->platform_panel_visible || editor->update_panel_visible ||
            editor->template_panel_visible || editor->recent_panel_visible ||
            editor->shortcuts_overlay || editor->recovery_overlay || editor->preset_panel_visible ||
-           editor->help_overlay;
+           editor->help_overlay || editor->appearance_visible;
 }
 static float af_editor_top_popup_x(const AfEditorState *editor, int width) {
     return af_editor_clamp(af_editor_top_menu_x(editor, editor->top_menu), 0,
@@ -1081,8 +1084,8 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
         SDL_free(path);
         path = decoded_path;
 #endif
-        const AfResult result = af_project_import_image(&editor->project, image_project_path,
-                                                        path, &asset_id, &node_id);
+        const AfResult result = af_project_import_image(&editor->project, image_project_path, path,
+                                                        &asset_id, &node_id);
         if (result == AF_RESULT_SUCCESS) {
             editor->selected_asset_id = asset_id;
             editor->asset_browser_visible = true;
@@ -1336,6 +1339,7 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
     case AF_EDITOR_MENU_ACTION_RECOVERY:
     case AF_EDITOR_MENU_ACTION_RESET_WORKSPACE:
     case AF_EDITOR_MENU_ACTION_PRESET_LIBRARY:
+    case AF_EDITOR_MENU_ACTION_APPEARANCE:
         af_editor_execute_workflow_action(editor, action, width, height);
         break;
     case AF_EDITOR_MENU_ACTION_WELCOME:
@@ -1457,9 +1461,9 @@ static bool af_editor_top_menu_key(AfEditorState *editor, int width, int height,
 
 static void af_editor_render_top_menu(AfEditorState *editor, int width, int height) {
     const float right = (float)width - editor->right_width;
-    const AfColor text_color = {0.8F, 0.83F, 0.89F, 1.0F};
-    af_editor_add_rect(editor, editor->left_width, 0.0F, right - editor->left_width,
-                       AF_EDITOR_MENU_HEIGHT, (AfColor){0.075F, 0.082F, 0.105F, 1.0F}, 210000);
+    const AfColor text_color = AF_UI_TEXT;
+    af_editor_add_panel(editor, editor->left_width, 0, right - editor->left_width,
+                        AF_EDITOR_MENU_HEIGHT, AF_UI_FIELD, 0, 210000);
     for (AfEditorTopMenu menu = AF_EDITOR_MENU_FILE; menu <= AF_EDITOR_MENU_HELP;
          menu = (AfEditorTopMenu)(menu + 1)) {
         const AfEditorTopMenuInfo *info = af_editor_top_menu_info(menu);
@@ -1470,9 +1474,7 @@ static void af_editor_render_top_menu(AfEditorState *editor, int width, int heig
                              editor->mouse_position.y < AF_EDITOR_MENU_HEIGHT;
         if (hovered || editor->top_menu == menu) {
             af_editor_add_rect(editor, x, 0.0F, menu_width, AF_EDITOR_MENU_HEIGHT,
-                               editor->top_menu == menu ? AF_UI_SELECTION
-                                                        : (AfColor){0.16F, 0.18F, 0.23F, 1.0F},
-                               210010);
+                               editor->top_menu == menu ? AF_UI_SELECTION : AF_UI_SURFACE, 210010);
         }
         af_editor_add_text(editor, x + 10.0F, 9.0F, info->label, 0.95F, menu_width - 16.0F,
                            text_color, 210020);

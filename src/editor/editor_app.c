@@ -511,6 +511,18 @@ typedef struct AfEditorState {
     bool measurement_visible;
     bool workflow_initialized;
     bool preferences_read_only;
+    AfEditorPalette palette;
+    bool appearance_visible;
+    bool appearance_hex_active;
+    bool appearance_hex_replace;
+    bool appearance_drag;
+    bool appearance_drag_changed;
+    uint32_t appearance_color;
+    uint32_t appearance_drag_rgb;
+    AfEditorTheme appearance_drag_theme;
+    uint32_t appearance_drag_colors[3];
+    float appearance_drag_x;
+    char appearance_hex[9];
     bool project_read_only;
     bool external_change_visible;
     uint64_t selected_asset_id;
@@ -603,6 +615,8 @@ static void af_editor_group_selection(AfEditorState *editor);
 static void af_editor_choice_open(AfEditorState *editor, uint32_t menu, int width, int height,
                                   float x, float y);
 static void af_editor_render_gradient_handles(AfEditorState *editor, int width, int height);
+static void af_editor_save_preferences(AfEditorState *editor);
+static void af_editor_render_appearance(AfEditorState *editor, int width, int height);
 static uint32_t af_editor_gradient_stop(const AfEditorState *editor, const AfPaint *paint);
 static void af_editor_text_preview_update(AfEditorState *editor);
 static void af_editor_text_panel_mouse(AfEditorState *editor, int width, int height, float x,
@@ -634,6 +648,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_text.inc"
 #include "editor/editor_app_properties.inc"
 #include "editor/editor_app_gradient.inc"
+#include "editor/editor_app_appearance.inc"
 #include "editor/editor_app_menus.inc"
 #include "editor/editor_app_export.inc"
 #include "editor/editor_app_workflow_core.inc"

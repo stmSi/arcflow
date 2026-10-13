@@ -1,6 +1,14 @@
 #include "web/browser_bridge.h"
 #include <emscripten.h>
 
+EM_JS(void, af_web_set_ui_colors, (uint32_t panel, uint32_t accent, uint32_t text), {
+    function color(value) { return "#" + value.toString(16).padStart(6, "0"); }
+    const style = document.documentElement.style;
+    style.setProperty("--ui-panel", color(panel));
+    style.setProperty("--ui-accent", color(accent));
+    style.setProperty("--ui-text", color(text));
+})
+
 EM_ASYNC_JS(char *, af_web_prepare_image, (const char *path), {
     const filename = UTF8ToString(path);
     const extension = filename.split(".").pop().toLowerCase();

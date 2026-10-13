@@ -786,6 +786,16 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
             : fminf(0.05F, (float)(ui_now - editor->ui_previous_ticks) / 1000000000.0F);
     editor->ui_previous_ticks = ui_now;
     editor->render_scene.count = 0U;
+    const AfEditorPalette palette = af_editor_theme_palette(&editor->preferences);
+#ifdef __EMSCRIPTEN__
+    if (af_editor_theme_rgb(palette.panel) != af_editor_theme_rgb(editor->palette.panel) ||
+        af_editor_theme_rgb(palette.accent) != af_editor_theme_rgb(editor->palette.accent))
+        af_web_set_ui_colors(af_editor_theme_rgb(palette.panel),
+                             af_editor_theme_rgb(palette.accent),
+                             af_editor_theme_rgb(palette.text));
+#endif
+    editor->palette = palette;
+    editor->preview_style_data.count = editor->project.style_data.count;
     editor->render_scene.styles = &editor->preview_style_data;
     editor->render_scene.images = &editor->project.image_data;
     if (editor->export_panel_visible) {
@@ -811,6 +821,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
         af_editor_add_text(editor, editor->left_width + 18.0F, 18.0F, "ARCFLOW EDITOR", 0.82F,
                            180.0F, (AfColor){0.6F, 0.68F, 0.8F, 1.0F}, -99970);
         af_editor_render_onboarding(editor, width, height);
+        af_editor_render_appearance(editor, width, height);
         return;
     }
     af_editor_add_rect(editor, canvas_x, canvas_y, canvas_width, canvas_height, AF_UI_CANVAS,
@@ -853,12 +864,24 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
     }
     af_editor_render_vector_tool_preview(editor, width, height);
     af_editor_render_canvas_box(editor);
-    af_editor_add_rect(editor, 0.0F, 0.0F, editor->left_width, (float)height, AF_UI_PANEL, 100000);
-    af_editor_add_rect(editor, (float)width - editor->right_width, 0.0F, editor->right_width,
-                       (float)height, AF_UI_PANEL, 100000);
-    af_editor_add_rect(editor, editor->left_width, 0.0F,
-                       (float)width - editor->left_width - editor->right_width,
-                       editor->toolbar_height, AF_UI_SURFACE, 100000);
+    af_editor_add_panel(editor, 0.0F, 0.0F, editor->left_width, (float)height, AF_UI_PANEL, 0,
+                        100000);
+    af_editor_add_panel(editor, (float)width - editor->right_width, 0.0F, editor->right_width,
+                        (float)height, AF_UI_PANEL, 0, 100000);
+    af_editor_add_panel(editor, editor->left_width, 0.0F,
+                        (float)width - editor->left_width - editor->right_width,
+                        editor->toolbar_height, AF_UI_SURFACE, 0, 100000);
+    af_editor_add_rect(editor, editor->left_width, editor->toolbar_height - 1,
+                       (float)width - editor->left_width - editor->right_width, 1, AF_UI_BORDER,
+                       100101);
+    for (uint32_t i = 0; i < 4; ++i) {
+        const AfColor shadow = {0, 0, 0, .055F * (float)(4 - i)};
+        af_editor_add_rect(editor, editor->left_width + (float)i, editor->toolbar_height, 1,
+                           (float)height - editor->toolbar_height, shadow, 99999);
+        af_editor_add_rect(editor, (float)width - editor->right_width - (float)i - 1,
+                           editor->toolbar_height, 1, (float)height - editor->toolbar_height,
+                           shadow, 99999);
+    }
     af_editor_add_rect(editor, editor->left_width, (float)height - editor->status_height,
                        (float)width - editor->left_width - editor->right_width,
                        editor->status_height, (AfColor){0.08F, 0.087F, 0.105F, 1.0F}, 100000);

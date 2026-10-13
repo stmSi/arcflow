@@ -219,6 +219,8 @@ static const char *af_editor_action_description(AfEditorMenuAction action, AfEdi
         return "Find any action without leaving your canvas.";
     case AF_EDITOR_MENU_ACTION_RESET_WORKSPACE:
         return "Restore the default panel arrangement.";
+    case AF_EDITOR_MENU_ACTION_APPEARANCE:
+        return "Customize the studio palette, colors and surface depth.";
     case AF_EDITOR_MENU_ACTION_SHORTCUTS:
         return "Learn or customize your keyboard shortcuts.";
     case AF_EDITOR_MENU_ACTION_GUIDED_PROJECT:
@@ -986,6 +988,13 @@ static void af_editor_execute_workflow_action(AfEditorState *editor, AfEditorMen
         break;
     case AF_EDITOR_MENU_ACTION_PRESET_LIBRARY:
         editor->preset_panel_visible = !editor->preset_panel_visible;
+        break;
+    case AF_EDITOR_MENU_ACTION_APPEARANCE:
+        editor->appearance_visible = true;
+        editor->top_menu = AF_EDITOR_MENU_NONE;
+        editor->context_menu = AF_EDITOR_CONTEXT_NONE;
+        editor->command_palette.open = false;
+        editor->timeline_focus = false;
         break;
     default:
         break;
