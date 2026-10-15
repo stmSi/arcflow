@@ -361,7 +361,7 @@ static void af_editor_load_preferences(AfEditorState *editor, int width, int hei
         (float)editor->preferences.workspace.docks[AF_EDITOR_DOCK_ASSET_BROWSER].extent_pixels,
         80.0F,
         fmaxf(80.0F, (float)height - editor->status_height - editor->timeline_height -
-                         editor->toolbar_height - 56.0F));
+                         AF_EDITOR_HIERARCHY_TOP - 48.0F));
     editor->asset_browser_visible |= editor->workspace.assets_visible;
     editor->profiler_visible = editor->workspace.profiling_visible;
     editor->validation_visible = editor->workspace.validation_visible;

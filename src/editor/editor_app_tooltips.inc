@@ -511,9 +511,8 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
         }
         return tooltip;
     }
-    if (mouse.x < editor->left_width && mouse.y >= editor->toolbar_height + 8.0F) {
-        const uint32_t row =
-            (uint32_t)((mouse.y - editor->toolbar_height - 8.0F) / AF_EDITOR_ROW_HEIGHT);
+    if (mouse.x < editor->left_width && mouse.y >= AF_EDITOR_HIERARCHY_TOP) {
+        const uint32_t row = (uint32_t)((mouse.y - AF_EDITOR_HIERARCHY_TOP) / AF_EDITOR_ROW_HEIGHT);
         const uint32_t hierarchy_index = editor->hierarchy_scroll + row;
         if (hierarchy_index < editor->hierarchy_count) {
             const uint32_t node_index = editor->hierarchy_order[hierarchy_index];

@@ -2168,7 +2168,7 @@ static void af_editor_open_context_menu(AfEditorState *editor, int width, int he
             }
             return;
         }
-        const float hierarchy_top = editor->toolbar_height + 8.0F;
+        const float hierarchy_top = AF_EDITOR_HIERARCHY_TOP;
         editor->context_menu = AF_EDITOR_CONTEXT_HIERARCHY;
         if (y >= hierarchy_top) {
             const uint32_t row = (uint32_t)((y - hierarchy_top) / AF_EDITOR_ROW_HEIGHT);

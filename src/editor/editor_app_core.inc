@@ -401,7 +401,7 @@ static int af_editor_hierarchy_compare(const void *a, const void *b) {
 }
 
 static void af_editor_hierarchy_autoscroll(AfEditorState *editor, int height, uint64_t ticks) {
-    const float top = editor->toolbar_height + 8.0F;
+    const float top = AF_EDITOR_HIERARCHY_TOP;
     const float bottom = (float)height - editor->status_height - editor->timeline_height -
                          (editor->asset_browser_visible ? editor->asset_height : 0.0F);
     const AfVec2 mouse = editor->mouse_position;

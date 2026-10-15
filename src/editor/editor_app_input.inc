@@ -1302,8 +1302,8 @@ static void af_editor_mouse_down(AfEditorState *editor, int width, int height,
         }
         return;
     }
-    if (x < editor->left_width && y >= editor->toolbar_height + 8.0F) {
-        const uint32_t row = (uint32_t)((y - editor->toolbar_height - 8.0F) / AF_EDITOR_ROW_HEIGHT);
+    if (x < editor->left_width && y >= AF_EDITOR_HIERARCHY_TOP) {
+        const uint32_t row = (uint32_t)((y - AF_EDITOR_HIERARCHY_TOP) / AF_EDITOR_ROW_HEIGHT);
         const uint32_t hierarchy_index = editor->hierarchy_scroll + row;
         if (hierarchy_index < editor->hierarchy_count) {
             const uint64_t clicked =
@@ -1575,7 +1575,7 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
         editor->asset_height = af_editor_clamp(
             (float)height - editor->status_height - editor->timeline_height - event->y, 80.0F,
             fmaxf(80.0F, (float)height - editor->status_height - editor->timeline_height -
-                             editor->toolbar_height - 56.0F));
+                             AF_EDITOR_HIERARCHY_TOP - 48.0F));
         return;
     }
     if (editor->drag_mode == AF_EDITOR_DRAG_TOOLBAR_HEIGHT) {
@@ -1802,7 +1802,7 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
         return;
     }
     if (editor->drag_mode == AF_EDITOR_DRAG_HIERARCHY && editor->hierarchy_drag_started) {
-        const float top = editor->toolbar_height + 8.0F;
+        const float top = AF_EDITOR_HIERARCHY_TOP;
         const float bottom = editor->asset_browser_visible
                                  ? af_editor_asset_browser_top(editor, height)
                                  : (float)height - editor->status_height - editor->timeline_height;
@@ -2485,7 +2485,7 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
     const float saved_asset_height = editor->asset_height;
     editor->asset_height = fminf(
         editor->asset_height, fmaxf(0, af_editor_timeline_top(editor, height) -
-                                           editor->toolbar_height - 6 * AF_EDITOR_ROW_HEIGHT - 16));
+                                           AF_EDITOR_HIERARCHY_TOP - 6 * AF_EDITOR_ROW_HEIGHT - 8));
     /* Navigation must preserve the pointer anchor and keep dock input local. */
     const float saved_zoom = editor->zoom;
     const AfVec2 saved_pan = editor->pan;
@@ -2675,10 +2675,10 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
     editor->hierarchy_scroll = first;
     const uint32_t reorder_cursor = editor->history.cursor;
     click.x = 100;
-    click.y = editor->toolbar_height + 18;
+    click.y = AF_EDITOR_HIERARCHY_TOP + 10;
     af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
     SDL_MouseMotionEvent motion = {.x = 100,
-                                   .y = editor->toolbar_height + 8 + AF_EDITOR_ROW_HEIGHT * 1.8F};
+                                   .y = AF_EDITOR_HIERARCHY_TOP + AF_EDITOR_ROW_HEIGHT * 1.8F};
     af_editor_mouse_motion(editor, width, height, &motion);
     af_editor_mouse_up(editor, width, height);
     if (editor->history.cursor !=
@@ -2691,12 +2691,29 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
     click.y = old_toolbar;
     af_editor_mouse_down(editor, width, height, &click, SDL_KMOD_NONE);
     motion.x = click.x;
-    motion.y = old_toolbar + 12;
+    motion.y = old_toolbar + 56;
     af_editor_mouse_motion(editor, width, height, &motion);
     af_editor_mouse_up(editor, width, height);
     if (editor->toolbar_height <= old_toolbar)
         return af_editor_interaction_smoke_failure(editor, __LINE__);
-    editor->toolbar_height = old_toolbar;
+    /* Keep the toolbar enlarged while exercising layer selection and reparenting. */
+    af_editor_build_hierarchy(editor);
+    const uint64_t row_id =
+        editor->project.scene.nodes[editor->hierarchy_order[editor->hierarchy_scroll]].id;
+    motion.x = 100;
+    motion.y = AF_EDITOR_HIERARCHY_TOP + AF_EDITOR_ROW_HEIGHT * .5F;
+    af_editor_mouse_motion(editor, width, height, &motion);
+    const AfEditorTooltip layer_tooltip = af_editor_find_tooltip(editor, width, height);
+    if (layer_tooltip.title == NULL ||
+        strcmp(layer_tooltip.title, af_project_name(&editor->project, row_id)) != 0)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_select_only(editor, 0);
+    const SDL_MouseButtonEvent layer_click = {
+        .button = SDL_BUTTON_RIGHT, .down = true, .clicks = 1, .x = motion.x, .y = motion.y};
+    af_editor_mouse_down(editor, width, height, &layer_click, SDL_KMOD_NONE);
+    if (editor->selected_id != row_id || editor->context_menu == AF_EDITOR_CONTEXT_NONE)
+        return af_editor_interaction_smoke_failure(editor, __LINE__);
+    af_editor_key(editor, width, height, &(SDL_KeyboardEvent){.key = SDLK_ESCAPE, .down = true});
     /* A newly created root can be dropped into the center of an existing group. */
     if (af_editor_create_primitive_at(editor, AF_NODE_RECTANGLE, rect) != AF_RESULT_SUCCESS)
         return af_editor_interaction_smoke_failure(editor, __LINE__);
@@ -2718,7 +2735,7 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
                                    .down = true,
                                    .clicks = 1,
                                    .x = 100 / metrics.pixel_scale_x,
-                                   .y = (editor->toolbar_height + 8 + AF_EDITOR_ROW_HEIGHT * 0.5F) /
+                                   .y = (AF_EDITOR_HIERARCHY_TOP + AF_EDITOR_ROW_HEIGHT * 0.5F) /
                                         metrics.pixel_scale_y}};
     af_editor_handle_event(editor, &direct, width, height);
     if (!af_editor_can_reorder(&editor->project, fresh, star))
@@ -2729,7 +2746,7 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
     direct.button.type = SDL_EVENT_MOUSE_BUTTON_UP;
     direct.button.down = false;
     direct.button.x = 110 / metrics.pixel_scale_x;
-    direct.button.y = (editor->toolbar_height + 10) / metrics.pixel_scale_y;
+    direct.button.y = (AF_EDITOR_HIERARCHY_TOP + 2) / metrics.pixel_scale_y;
     af_editor_handle_event(editor, &direct, width, height);
     if (af_scene_find(&editor->project.scene, fresh)->parent_id != destination ||
         af_project_find_index(&editor->project, fresh) >=
@@ -2743,21 +2760,20 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
         for (uint32_t row = 0U; row < editor->hierarchy_count; ++row)
             if (editor->project.scene.nodes[editor->hierarchy_order[row]].id == fresh)
                 editor->hierarchy_scroll = row;
-        SDL_Event event = {
-            .button = {.type = SDL_EVENT_MOUSE_BUTTON_DOWN,
-                       .button = SDL_BUTTON_LEFT,
-                       .down = true,
-                       .clicks = 1,
-                       .x = 100 / metrics.pixel_scale_x,
-                       .y = (editor->toolbar_height + 8 + AF_EDITOR_ROW_HEIGHT * 0.5F) /
-                            metrics.pixel_scale_y}};
+        SDL_Event event = {.button = {.type = SDL_EVENT_MOUSE_BUTTON_DOWN,
+                                      .button = SDL_BUTTON_LEFT,
+                                      .down = true,
+                                      .clicks = 1,
+                                      .x = 100 / metrics.pixel_scale_x,
+                                      .y = (AF_EDITOR_HIERARCHY_TOP + AF_EDITOR_ROW_HEIGHT * 0.5F) /
+                                           metrics.pixel_scale_y}};
         af_editor_handle_event(editor, &event, width, height);
         if (editor->drag_mode != AF_EDITOR_DRAG_HIERARCHY)
             return af_editor_interaction_smoke_failure(editor, __LINE__);
         /* Start the drag, then release at a different location without another motion. */
         event = (SDL_Event){.motion = {.type = SDL_EVENT_MOUSE_MOTION,
                                        .x = 110 / metrics.pixel_scale_x,
-                                       .y = (editor->toolbar_height + 10) / metrics.pixel_scale_y}};
+                                       .y = (AF_EDITOR_HIERARCHY_TOP + 2) / metrics.pixel_scale_y}};
         af_editor_handle_event(editor, &event, width, height);
         const uint32_t scroll_before = editor->hierarchy_scroll;
         af_editor_hierarchy_autoscroll(editor, height,
@@ -2776,7 +2792,7 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
         event = (SDL_Event){.button = {.type = SDL_EVENT_MOUSE_BUTTON_UP,
                                        .button = SDL_BUTTON_LEFT,
                                        .x = 110 / metrics.pixel_scale_x,
-                                       .y = (editor->toolbar_height + 8 + drop_offsets[attempt]) /
+                                       .y = (AF_EDITOR_HIERARCHY_TOP + drop_offsets[attempt]) /
                                             metrics.pixel_scale_y}};
         af_editor_handle_event(editor, &event, width, height);
         af_editor_update_preview(editor);
@@ -2801,7 +2817,7 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
                    .down = true,
                    .clicks = 1,
                    .x = 100 / metrics.pixel_scale_x,
-                   .y = (editor->toolbar_height + 8 + AF_EDITOR_ROW_HEIGHT * 0.5F) /
+                   .y = (AF_EDITOR_HIERARCHY_TOP + AF_EDITOR_ROW_HEIGHT * 0.5F) /
                         metrics.pixel_scale_y}};
     af_editor_handle_event(editor, &same_parent, width, height);
     if (!af_editor_hierarchy_can_drop_inside(editor, destination))
@@ -2849,6 +2865,7 @@ static AfResult af_editor_interaction_smoke(AfEditorState *editor, int width, in
     af_editor_select_only(editor, star);
     af_editor_set_vector_tool(editor, AF_EDITOR_TOOL_SELECT);
     editor->asset_height = saved_asset_height;
+    editor->toolbar_height = old_toolbar;
     af_editor_update_preview(editor);
     return af_project_validate(&editor->project);
 }

@@ -1,7 +1,7 @@
 static void af_editor_render_hierarchy(AfEditorState *editor, int height) {
     uint32_t visible_rows = 0U;
     uint32_t row = 0U;
-    const float top = editor->toolbar_height + 8.0F;
+    const float top = AF_EDITOR_HIERARCHY_TOP;
     char count[24];
     (void)snprintf(count, sizeof(count), "%u", editor->project.scene.count);
     af_editor_add_text(editor, 14, 13, "Layers", 1.7F, editor->left_width - 68, AF_UI_TEXT, 100125);
