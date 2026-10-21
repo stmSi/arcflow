@@ -34,6 +34,7 @@ Browser build and GitHub Pages deployment: [Web guide](docs/web.md).
 - Particle values use the same controls; scroll the Inspector to reach lower rows.
 - `Ctrl+,` opens Appearance: eight themes, custom colors, and surface depth (Flat by default).
 - `Shift+G` selects Gradient: choose Fill/Outline and Linear/Radial/Conic, then drag on a shape.
+- `F6` opens animation curves: easing presets, draggable handles, X/Y or RGBA; `F` fits the graph.
 - `Ctrl+S` saves; `Ctrl+Z`/`Ctrl+Y` undo/redo; `Ctrl+Shift+P` opens commands.
 - File > Export produces `.afp`, SVG, Lottie, GIF, or MP4. GIF/MP4 require FFmpeg.
 

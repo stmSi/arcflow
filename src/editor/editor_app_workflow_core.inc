@@ -907,10 +907,16 @@ static void af_editor_execute_workflow_action(AfEditorState *editor, AfEditorMen
         }
         break;
     case AF_EDITOR_MENU_ACTION_COPY_OBJECTS:
-        af_editor_copy_objects(editor);
+        if (editor->timeline_focus)
+            af_editor_copy_keyframes(editor);
+        else
+            af_editor_copy_objects(editor);
         break;
     case AF_EDITOR_MENU_ACTION_PASTE_OBJECTS:
-        af_editor_paste_objects(editor);
+        if (editor->timeline_focus)
+            (void)af_editor_paste_keyframes(editor, false);
+        else
+            af_editor_paste_objects(editor);
         break;
     case AF_EDITOR_MENU_ACTION_FIND_HIERARCHY:
         editor->hierarchy_search_active = true;

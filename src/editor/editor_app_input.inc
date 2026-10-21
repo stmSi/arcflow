@@ -19,6 +19,7 @@ static void af_editor_timeline_commit_keys(AfEditorState *editor, AfEditorMergeK
             AF_RESULT_SUCCESS) {
         return;
     }
+    bool changed = false;
     command.keyframe_before_count = editor->key_drag_count;
     command.keyframe_after_count = editor->key_drag_count;
     for (index = 0U; index < editor->key_drag_count; ++index) {
@@ -30,6 +31,12 @@ static void af_editor_timeline_commit_keys(AfEditorState *editor, AfEditorMergeK
             return;
         }
     }
+    for (index = 0; index < editor->key_drag_count; ++index)
+        changed |= memcmp(&command.keyframe_before[index].keyframe,
+                          &command.keyframe_after[index].keyframe,
+                          sizeof(command.keyframe_before[index].keyframe)) != 0;
+    if (!changed)
+        return;
     result = af_editor_history_execute(&editor->history, &editor->project, &command, true, false);
     if (result == AF_RESULT_SUCCESS) {
         af_editor_mark_dirty(editor);
@@ -163,36 +170,127 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
         }
         return true;
     }
+    if (editor->curve_visible) {
+        const AfProjectTrack *track = af_editor_selected_track(editor);
+        const AfEditorCurveView view = af_editor_curve_view(editor, width, height);
+        const float controls_top = top + AF_EDITOR_TIMELINE_RULER_HEIGHT;
+        if (track == NULL)
+            return true;
+        for (uint32_t i = 0; i < editor->selected_keyframe_count;) {
+            const AfProjectKeyframe *key =
+                af_project_find_keyframe_const(&editor->project, editor->selected_keyframes[i]);
+            if (key == NULL || key->track_id != track->id) {
+                memmove(&editor->selected_keyframes[i], &editor->selected_keyframes[i + 1],
+                        (editor->selected_keyframe_count - i - 1) *
+                            sizeof(editor->selected_keyframes[0]));
+                --editor->selected_keyframe_count;
+            } else
+                ++i;
+        }
+        if (event->x < ruler_x) {
+            const float local_x = event->x - editor->left_width - 10;
+            const float sidebar_width = editor->timeline_header_width - 20;
+            const float local_y = event->y - controls_top;
+            if (local_x < 0 || local_x >= sidebar_width - 4)
+                return true;
+            if (local_y >= 24 && local_y < 48 && controls_top + 48 <= view.bottom) {
+                editor->curve_component =
+                    (uint32_t)(local_x / sidebar_width *
+                               (float)af_editor_curve_components(track->property));
+            } else if (local_y >= 56 && local_y < 136 && event->y < view.bottom) {
+                const uint32_t row = (uint32_t)((local_y - 56) / 28);
+                if (local_y - 56 - (float)row * 28 >= 24 ||
+                    controls_top + 80 + (float)row * 28 > view.bottom)
+                    return true;
+                const uint32_t preset = row * 2 + (local_x >= sidebar_width * .5F ? 1U : 0U);
+                if (editor->selected_keyframe_count == 0) {
+                    const AfProjectKeyframe *chosen = NULL;
+                    for (uint32_t i = 0; i < editor->project.keyframe_count; ++i) {
+                        const AfProjectKeyframe *key = &editor->project.keyframes[i];
+                        if (key->track_id != track->id)
+                            continue;
+                        if (chosen == NULL ||
+                            (key->keyframe.time <= editor->playhead &&
+                             key->keyframe.time > chosen->keyframe.time) ||
+                            (chosen->keyframe.time > editor->playhead &&
+                             key->keyframe.time < chosen->keyframe.time))
+                            chosen = key;
+                    }
+                    if (chosen != NULL)
+                        af_editor_select_keyframe(editor, chosen->id, false);
+                }
+                const int operations[] = {0, 0, 5, 6, 4, 7};
+                const AfInterpolation interpolations[] = {
+                    AF_INTERPOLATION_LINEAR,       AF_INTERPOLATION_STEP,
+                    AF_INTERPOLATION_CUBIC_BEZIER, AF_INTERPOLATION_CUBIC_BEZIER,
+                    AF_INTERPOLATION_CUBIC_BEZIER, AF_INTERPOLATION_CUBIC_BEZIER};
+                if (preset < 6)
+                    (void)af_editor_modify_selected_keys(editor, operations[preset],
+                                                         interpolations[preset]);
+            } else if (local_y >= 144 && local_y < 168 && controls_top + 170 < view.bottom) {
+                af_editor_curve_fit(editor, width);
+            }
+            return true;
+        }
+        for (uint32_t i = 0; i < editor->project.keyframe_count; ++i) {
+            const AfProjectKeyframe *key = &editor->project.keyframes[i];
+            if (key->track_id != track->id)
+                continue;
+            const AfVec2 point = af_editor_curve_point(editor, view, key);
+            if (af_editor_curve_contains(view, point) && fabsf(event->x - point.x) <= 9 &&
+                fabsf(event->y - point.y) <= 9) {
+                af_editor_select_keyframe(editor, key->id,
+                                          (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) != 0);
+                if (af_editor_keyframe_selected(editor, key->id)) {
+                    editor->curve_drag_min = view.minimum;
+                    editor->curve_drag_max = view.maximum;
+                    editor->drag_mode = AF_EDITOR_DRAG_KEYFRAMES;
+                    editor->drag_start_mouse = (AfVec2){event->x, event->y};
+                    editor->preview_playing = false;
+                    af_editor_begin_selected_key_drag(editor);
+                    af_editor_status(editor,
+                                     "Drag keys horizontally to retime; choose a preset to ease");
+                }
+                return true;
+            }
+        }
+        if (editor->selected_keyframe_count == 1) {
+            const AfProjectKeyframe *key =
+                af_project_find_keyframe_const(&editor->project, editor->selected_keyframes[0]);
+            AfVec2 start, end;
+            if (key != NULL && key->keyframe.interpolation == AF_INTERPOLATION_CUBIC_BEZIER &&
+                af_editor_curve_segment(editor, view, key, &start, &end)) {
+                for (uint32_t i = 0; i < 2; ++i) {
+                    const AfVec2 handle =
+                        af_editor_curve_handle(start, end, key->keyframe.easing, i != 0);
+                    if (af_editor_curve_contains(view, handle) && fabsf(event->x - handle.x) <= 8 &&
+                        fabsf(event->y - handle.y) <= 8) {
+                        editor->curve_drag_min = view.minimum;
+                        editor->curve_drag_max = view.maximum;
+                        editor->drag_mode =
+                            i == 0 ? AF_EDITOR_DRAG_TANGENT_OUT : AF_EDITOR_DRAG_TANGENT_IN;
+                        editor->preview_playing = false;
+                        af_editor_begin_selected_key_drag(editor);
+                        af_editor_status(editor, "Drag the handle to shape easing; Esc cancels");
+                        return true;
+                    }
+                }
+            }
+        }
+        if (fabsf(event->x - af_editor_time_to_x(editor, editor->playhead)) > 8) {
+            if ((modifiers & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == 0)
+                af_editor_clear_key_selection(editor);
+            editor->drag_mode = AF_EDITOR_DRAG_KEY_BOX;
+            editor->key_box_start = (AfVec2){event->x, event->y};
+            editor->key_box_current = editor->key_box_start;
+            return true;
+        }
+    }
     if (event->y >= top + AF_EDITOR_TIMELINE_RULER_HEIGHT + 3.0F && event->x >= ruler_x &&
         fabsf(event->x - af_editor_time_to_x(editor, editor->playhead)) <= 8.0F) {
         editor->drag_mode = AF_EDITOR_DRAG_PLAYHEAD;
         editor->preview_playing = false;
         af_editor_status(editor, "Drag the playhead to scrub animation time");
-        return true;
-    }
-    if (editor->curve_visible) {
-        if (editor->selected_keyframe_count == 1U) {
-            AfProjectKeyframe *key =
-                af_project_find_keyframe(&editor->project, editor->selected_keyframes[0]);
-            if (key == NULL) {
-                af_editor_clear_key_selection(editor);
-                return true;
-            }
-            const float curve_top = top + AF_EDITOR_TIMELINE_RULER_HEIGHT;
-            const float bottom = (float)height - editor->status_height - 12.0F;
-            const float out_x = ruler_x + 30.0F + key->keyframe.easing[0] * 100.0F;
-            const float out_y = bottom - 30.0F - key->keyframe.easing[1] * 80.0F;
-            const float in_x = center_right - 130.0F + key->keyframe.easing[2] * 100.0F;
-            const float in_y = bottom - key->keyframe.easing[3] * 80.0F;
-            (void)curve_top;
-            if (fabsf(event->x - out_x) <= 10.0F && fabsf(event->y - out_y) <= 10.0F) {
-                editor->drag_mode = AF_EDITOR_DRAG_TANGENT_OUT;
-                af_editor_begin_selected_key_drag(editor);
-            } else if (fabsf(event->x - in_x) <= 10.0F && fabsf(event->y - in_y) <= 10.0F) {
-                editor->drag_mode = AF_EDITOR_DRAG_TANGENT_IN;
-                af_editor_begin_selected_key_drag(editor);
-            }
-        }
         return true;
     }
     {
@@ -252,20 +350,27 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
     return true;
 }
 
-static void af_editor_timeline_box_select(AfEditorState *editor, int height) {
+static void af_editor_timeline_box_select(AfEditorState *editor, int width, int height) {
     const float top = af_editor_timeline_top(editor, height);
     const float left = fminf(editor->key_box_start.x, editor->key_box_current.x);
     const float right = fmaxf(editor->key_box_start.x, editor->key_box_current.x);
     const float box_top = fminf(editor->key_box_start.y, editor->key_box_current.y);
     const float bottom = fmaxf(editor->key_box_start.y, editor->key_box_current.y);
+    const AfEditorCurveView view = af_editor_curve_view(editor, width, height);
+    const AfProjectTrack *track = af_editor_selected_track(editor);
     uint32_t index = 0U;
     for (index = 0U; index < editor->project.keyframe_count; ++index) {
         const AfProjectKeyframe *key = &editor->project.keyframes[index];
         const uint32_t row = af_editor_track_row(editor, key->track_id);
         const float x = af_editor_time_to_x(editor, key->keyframe.time);
-        const float y = top + AF_EDITOR_TIMELINE_RULER_HEIGHT +
-                        (float)row * AF_EDITOR_TIMELINE_TRACK_HEIGHT + 17.0F;
-        if (row != UINT32_MAX && x >= left && x <= right && y >= box_top && y <= bottom &&
+        if (editor->curve_visible && (track == NULL || key->track_id != track->id))
+            continue;
+        const float y = editor->curve_visible
+                            ? af_editor_curve_point(editor, view, key).y
+                            : top + AF_EDITOR_TIMELINE_RULER_HEIGHT +
+                                  (float)row * AF_EDITOR_TIMELINE_TRACK_HEIGHT + 17.0F;
+        if (!af_editor_keyframe_selected(editor, key->id) && row != UINT32_MAX && x >= left &&
+            x <= right && y >= box_top && y <= bottom &&
             editor->selected_keyframe_count < AF_EDITOR_COMMAND_MAX_KEYFRAMES) {
             editor->selected_keyframes[editor->selected_keyframe_count++] = key->id;
         }
@@ -1654,7 +1759,15 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
         return;
     }
     if (editor->drag_mode == AF_EDITOR_DRAG_KEYFRAMES && clip != NULL) {
-        const float delta = (event->x - editor->drag_start_mouse.x) / editor->timeline_zoom;
+        float delta = (event->x - editor->drag_start_mouse.x) / editor->timeline_zoom;
+        float first = INFINITY, last = -INFINITY;
+        for (uint32_t i = 0; i < editor->key_drag_count; ++i) {
+            first = fminf(first, editor->key_drag_before[i].keyframe.keyframe.time);
+            last = fmaxf(last, editor->key_drag_before[i].keyframe.keyframe.time);
+        }
+        if (editor->snapping)
+            delta = roundf(delta * 10) * .1F;
+        delta = af_editor_clamp(delta, -first, clip->duration - last);
         uint32_t index = 0U;
         for (index = 0U; index < editor->key_drag_count; ++index) {
             AfProjectKeyframe *key = af_project_find_keyframe(
@@ -1663,8 +1776,7 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
             if (key == NULL) {
                 continue;
             }
-            time = af_editor_key_time(editor, clip, time);
-            key->keyframe.time = time;
+            key->keyframe.time = af_editor_clamp(time, 0, clip->duration);
         }
         return;
     }
@@ -1677,24 +1789,15 @@ static void af_editor_mouse_motion(AfEditorState *editor, int width, int height,
         editor->key_drag_count == 1U) {
         AfProjectKeyframe *key =
             af_project_find_keyframe(&editor->project, editor->key_drag_before[0].keyframe.id);
-        const float top = af_editor_timeline_top(editor, height) + AF_EDITOR_TIMELINE_RULER_HEIGHT;
-        const float bottom = (float)height - editor->status_height - 12.0F;
-        const float right = (float)width - editor->right_width;
-        if (key == NULL) {
+        const AfEditorCurveView view = af_editor_curve_view(editor, width, height);
+        AfVec2 start, end;
+        if (key == NULL || !af_editor_curve_segment(editor, view, key, &start, &end))
             return;
-        }
-        key->keyframe.interpolation = AF_INTERPOLATION_CUBIC_BEZIER;
-        if (editor->drag_mode == AF_EDITOR_DRAG_TANGENT_OUT) {
-            key->keyframe.easing[0] = af_editor_clamp(
-                (event->x - af_editor_timeline_ruler_x(editor) - 30.0F) / 100.0F, 0.0F, 1.0F);
-            key->keyframe.easing[1] =
-                af_editor_clamp((bottom - 30.0F - event->y) / 80.0F, -2.0F, 2.0F);
-        } else {
-            key->keyframe.easing[2] =
-                af_editor_clamp((event->x - (right - 130.0F)) / 100.0F, 0.0F, 1.0F);
-            key->keyframe.easing[3] = af_editor_clamp((bottom - event->y) / 80.0F, -2.0F, 2.0F);
-        }
-        (void)top;
+        const uint32_t component = editor->drag_mode == AF_EDITOR_DRAG_TANGENT_IN ? 2U : 0U;
+        key->keyframe.easing[component] =
+            af_editor_clamp((event->x - start.x) / (end.x - start.x), 0, 1);
+        key->keyframe.easing[component + 1] =
+            af_editor_clamp((event->y - start.y) / (end.y - start.y), -2, 2);
         return;
     }
     if (editor->drag_mode == AF_EDITOR_DRAG_PATH_POINT ||
@@ -1902,7 +2005,7 @@ static void af_editor_mouse_up(AfEditorState *editor, int width, int height) {
                editor->drag_mode == AF_EDITOR_DRAG_TANGENT_OUT) {
         af_editor_timeline_commit_keys(editor, AF_EDITOR_MERGE_TANGENT);
     } else if (editor->drag_mode == AF_EDITOR_DRAG_KEY_BOX) {
-        af_editor_timeline_box_select(editor, height);
+        af_editor_timeline_box_select(editor, width, height);
     } else if (editor->drag_mode == AF_EDITOR_DRAG_PATH_POINT ||
                editor->drag_mode == AF_EDITOR_DRAG_PATH_CONTROL1 ||
                editor->drag_mode == AF_EDITOR_DRAG_PATH_CONTROL2 ||
@@ -1997,8 +2100,8 @@ static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
             editor->timeline_pan = fmaxf(0.0F, editor->timeline_pan - scroll_y * 0.25F);
         } else {
             editor->timeline_zoom = af_editor_clamp(
-                editor->timeline_zoom * powf(1.12F, af_editor_clamp(scroll_y, -64.0F, 64.0F)),
-                24.0F, 800.0F);
+                editor->timeline_zoom * powf(1.12F, af_editor_clamp(scroll_y, -64.0F, 64.0F)), .01F,
+                1000.0F);
             editor->timeline_pan =
                 fmaxf(0.0F, anchor_time - (event->mouse_x - af_editor_timeline_ruler_x(editor)) /
                                               editor->timeline_zoom);
@@ -2116,6 +2219,24 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
         } else if (event->key == SDLK_BACKSPACE) {
             af_editor_backspace_utf8(editor->rename_buffer);
         }
+        return;
+    }
+    if (event->key == SDLK_ESCAPE && (editor->drag_mode == AF_EDITOR_DRAG_TANGENT_IN ||
+                                      editor->drag_mode == AF_EDITOR_DRAG_TANGENT_OUT ||
+                                      editor->drag_mode == AF_EDITOR_DRAG_KEYFRAMES)) {
+        for (uint32_t i = 0; i < editor->key_drag_count; ++i) {
+            AfProjectKeyframe *key =
+                af_project_find_keyframe(&editor->project, editor->key_drag_before[i].keyframe.id);
+            if (key != NULL)
+                *key = editor->key_drag_before[i].keyframe;
+        }
+        editor->drag_mode = AF_EDITOR_DRAG_NONE;
+        editor->key_drag_count = 0;
+        af_editor_status(editor, "Timeline drag cancelled");
+        return;
+    }
+    if (!control && !alt && event->key == SDLK_F && editor->timeline_focus) {
+        af_editor_curve_fit(editor, width);
         return;
     }
     if (af_editor_workflow_key(editor, event)) {
@@ -2280,7 +2401,7 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     } else if (alt && event->key == SDLK_DELETE) {
         (void)af_editor_delete_clip(editor);
     } else if (event->key == SDLK_DELETE || event->key == SDLK_BACKSPACE) {
-        if (editor->timeline_focus && editor->selected_keyframe_count != 0U) {
+        if (editor->timeline_focus) {
             (void)af_editor_delete_keyframes(editor);
         } else if (editor->active_tool == AF_EDITOR_TOOL_NODE && !shift &&
                    af_editor_selected_path(editor) != NULL &&

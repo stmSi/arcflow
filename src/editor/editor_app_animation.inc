@@ -488,6 +488,10 @@ static AfResult af_editor_modify_selected_keys(AfEditorState *editor, int operat
                 minimum + (snapshot.keyframe.keyframe.time - minimum) * 0.9F;
         } else if (operation == 3) {
             snapshot.keyframe.keyframe.time = minimum + maximum - snapshot.keyframe.keyframe.time;
+        } else if (operation == 7) {
+            snapshot.keyframe.keyframe.interpolation = AF_INTERPOLATION_CUBIC_BEZIER;
+            const float easing[] = {.34F, 1.56F, .64F, 1};
+            memcpy(snapshot.keyframe.keyframe.easing, easing, sizeof(easing));
         } else if (operation >= 4 && operation <= 6) {
             snapshot.keyframe.keyframe.interpolation = AF_INTERPOLATION_CUBIC_BEZIER;
             snapshot.keyframe.keyframe.easing[0] = operation == 6 ? 0.0F : 0.42F;

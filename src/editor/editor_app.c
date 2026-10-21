@@ -301,6 +301,8 @@ typedef struct AfEditorState {
     AfProjectKeyframe key_clipboard[AF_EDITOR_COMMAND_MAX_KEYFRAMES];
     uint32_t key_clipboard_count;
     uint32_t *curve_order;
+    uint32_t curve_component;
+    float curve_drag_min, curve_drag_max;
     AfPathTessellationScratch *path_scratch;
     AfTextEngine *text_engine;
     AfFileData document_font_files[12];
@@ -664,6 +666,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_export_smoke.inc"
 #include "editor/editor_app_gradient_smoke.inc"
 #include "editor/editor_app_gradient_tool_smoke.inc"
+#include "editor/editor_app_graph_smoke.inc"
 #include "editor/editor_app_editing_smoke.inc"
 #include "editor/editor_app_studio_smoke.inc"
 #include "editor/editor_app_template_smoke.inc"

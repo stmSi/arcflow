@@ -176,37 +176,6 @@ static uint32_t af_editor_track_row(const AfEditorState *editor, uint64_t track_
     return UINT32_MAX;
 }
 
-static float af_editor_curve_value(const AfProjectTrack *track, const AfProjectKeyframe *key) {
-    float value = key->keyframe.value[0];
-    switch (track->property) {
-    case AF_PROPERTY_POSITION:
-        value /= 1280.0F;
-        break;
-    case AF_PROPERTY_ROTATION:
-        value = 0.5F + value / 6.28318530718F;
-        break;
-    case AF_PROPERTY_SCALE:
-        value *= 0.5F;
-        break;
-    case AF_PROPERTY_SKEW:
-        value = 0.5F + value / (2.0F * AF_TRANSFORM_MAX_SKEW_RADIANS);
-        break;
-    case AF_PROPERTY_CORNER_RADIUS:
-        value *= 0.01F;
-        break;
-    case AF_PROPERTY_PATH_POINT:
-    case AF_PROPERTY_PATH_CONTROL_IN:
-    case AF_PROPERTY_PATH_CONTROL_OUT:
-        value = 0.5F + value / 2560.0F;
-        break;
-    case AF_PROPERTY_OPACITY:
-    case AF_PROPERTY_FILL_COLOR:
-    default:
-        break;
-    }
-    return af_editor_clamp(value, 0.0F, 1.0F);
-}
-
 static bool af_editor_curve_key_less(const AfProject *project, uint32_t left, uint32_t right) {
     const AfProjectKeyframe *left_key = &project->keyframes[left];
     const AfProjectKeyframe *right_key = &project->keyframes[right];
@@ -260,89 +229,7 @@ static float af_editor_curve_bezier(float first, float second, float parameter) 
            3.0F * inverse * parameter * parameter * second + parameter * parameter * parameter;
 }
 
-static void af_editor_render_curve(AfEditorState *editor, int width, int height) {
-    const AfProjectTrack *track = af_editor_selected_track(editor);
-    const float top = af_editor_timeline_top(editor, height) + AF_EDITOR_TIMELINE_RULER_HEIGHT;
-    const float bottom = (float)height - editor->status_height - 12.0F;
-    const float left = af_editor_timeline_ruler_x(editor);
-    const float right = (float)width - editor->right_width;
-    uint32_t curve_count = 0U;
-    uint32_t index = 0U;
-    if (track == NULL || bottom <= top || editor->curve_order == NULL) {
-        return;
-    }
-    for (index = 0U; index <= 4U; ++index) {
-        const float y = top + (bottom - top) * (float)index * 0.25F;
-        af_editor_add_rect(editor, left, y, right - left, 1.0F, (AfColor){0.2F, 0.22F, 0.27F, 1.0F},
-                           100115);
-    }
-    for (index = 0U; index < editor->project.keyframe_count; ++index) {
-        if (editor->project.keyframes[index].track_id == track->id) {
-            editor->curve_order[curve_count++] = index;
-        }
-    }
-    af_editor_curve_sort(&editor->project, editor->curve_order, curve_count);
-    for (index = 1U; index < curve_count; ++index) {
-        const AfProjectKeyframe *previous =
-            &editor->project.keyframes[editor->curve_order[index - 1U]];
-        const AfProjectKeyframe *key = &editor->project.keyframes[editor->curve_order[index]];
-        const float first_value = af_editor_curve_value(track, previous);
-        const float second_value = af_editor_curve_value(track, key);
-        AfVec2 start = {af_editor_time_to_x(editor, previous->keyframe.time),
-                        bottom - first_value * (bottom - top)};
-        if (previous->keyframe.interpolation == AF_INTERPOLATION_STEP) {
-            const AfVec2 corner = {af_editor_time_to_x(editor, key->keyframe.time), start.y};
-            const AfVec2 end = {corner.x, bottom - second_value * (bottom - top)};
-            af_editor_add_line(editor, start, corner, 2.0F,
-                               af_editor_property_color(track->property), 100130);
-            af_editor_add_line(editor, corner, end, 2.0F, af_editor_property_color(track->property),
-                               100130);
-        } else if (previous->keyframe.interpolation == AF_INTERPOLATION_CUBIC_BEZIER) {
-            for (uint32_t sample = 1U; sample <= 16U; ++sample) {
-                const float parameter = (float)sample / 16.0F;
-                const float time_progress = af_editor_curve_bezier(
-                    previous->keyframe.easing[0], previous->keyframe.easing[2], parameter);
-                const float value_progress = af_editor_curve_bezier(
-                    previous->keyframe.easing[1], previous->keyframe.easing[3], parameter);
-                const AfVec2 end = {
-                    af_editor_time_to_x(editor, previous->keyframe.time +
-                                                    (key->keyframe.time - previous->keyframe.time) *
-                                                        time_progress),
-                    bottom - (first_value + (second_value - first_value) * value_progress) *
-                                 (bottom - top)};
-                af_editor_add_line(editor, start, end, 2.0F,
-                                   af_editor_property_color(track->property), 100130);
-                start = end;
-            }
-        } else {
-            const AfVec2 end = {af_editor_time_to_x(editor, key->keyframe.time),
-                                bottom - second_value * (bottom - top)};
-            af_editor_add_line(editor, start, end, 2.0F, af_editor_property_color(track->property),
-                               100130);
-        }
-    }
-    if (editor->selected_keyframe_count == 1U) {
-        const AfProjectKeyframe *key =
-            af_project_find_keyframe_const(&editor->project, editor->selected_keyframes[0]);
-        if (key != NULL && key->track_id == track->id &&
-            key->keyframe.interpolation == AF_INTERPOLATION_CUBIC_BEZIER) {
-            const AfVec2 origin = {left + 30.0F, bottom - 30.0F};
-            const AfVec2 out = {origin.x + key->keyframe.easing[0] * 100.0F,
-                                origin.y - key->keyframe.easing[1] * 80.0F};
-            const AfVec2 in = {right - 130.0F + key->keyframe.easing[2] * 100.0F,
-                               bottom - key->keyframe.easing[3] * 80.0F};
-            const AfVec2 in_origin = {right - 30.0F, top + 30.0F};
-            af_editor_add_line(editor, origin, out, 2.0F, (AfColor){0.96F, 0.58F, 0.25F, 1.0F},
-                               100140);
-            af_editor_add_line(editor, in_origin, in, 2.0F, (AfColor){0.35F, 0.74F, 1.0F, 1.0F},
-                               100140);
-            af_editor_add_rect(editor, out.x - 5.0F, out.y - 5.0F, 10.0F, 10.0F,
-                               (AfColor){0.96F, 0.58F, 0.25F, 1.0F}, 100150);
-            af_editor_add_rect(editor, in.x - 5.0F, in.y - 5.0F, 10.0F, 10.0F,
-                               (AfColor){0.35F, 0.74F, 1.0F, 1.0F}, 100150);
-        }
-    }
-}
+#include "editor_app_graph.inc"
 
 static void af_editor_render_timeline(AfEditorState *editor, int width, int height) {
     const float top = af_editor_timeline_top(editor, height);
@@ -450,19 +337,25 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                            editor->timeline_header_width - 20.0F,
                            (AfColor){0.72F, 0.76F, 0.84F, 1.0F}, 100130);
     }
-    tick_time = ceilf(editor->timeline_pan * 2.0F) * 0.5F;
+    const float tick_base = powf(10, floorf(log10f(60 / editor->timeline_zoom)));
+    const float tick_ratio = 60 / editor->timeline_zoom / tick_base;
+    const float tick_step = tick_base * (tick_ratio <= 1   ? 1
+                                         : tick_ratio <= 2 ? 2
+                                         : tick_ratio <= 5 ? 5
+                                                           : 10);
+    tick_time = ceilf(editor->timeline_pan / tick_step) * tick_step;
     while (af_editor_time_to_x(editor, tick_time) < center_right && tick_time <= clip->duration) {
         const float x = af_editor_time_to_x(editor, tick_time);
         if (x >= ruler_x) {
             char tick_label[16];
             af_editor_add_rect(editor, x, top + 44.0F, 1.0F, 15.0F,
                                (AfColor){0.48F, 0.5F, 0.58F, 1.0F}, 100120);
-            (void)snprintf(tick_label, sizeof(tick_label), "%.1f", (double)tick_time);
+            (void)snprintf(tick_label, sizeof(tick_label), "%.3g", (double)tick_time);
             af_editor_add_text(editor, x + 3.0F, top + 53.0F, tick_label, 0.72F,
                                fminf(28.0F, center_right - x - 3.0F),
                                (AfColor){0.58F, 0.61F, 0.69F, 1.0F}, 100125);
         }
-        tick_time += 0.5F;
+        tick_time += tick_step;
     }
     if (clip->loop) {
         const float loop_start = af_editor_time_to_x(editor, clip->loop_start);

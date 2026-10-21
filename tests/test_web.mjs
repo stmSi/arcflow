@@ -146,6 +146,137 @@ try {
   assert.equal((await page.request.get(base + 'favicon.svg')).status(), 200);
   console.log('PASS PNG/WebP imports into a new project and favicon');
   await context.close();
+  const graph = await browser.newPage({viewport: {width: 1440, height: 900}, acceptDownloads: true});
+  const graphErrors = [];
+  graph.on('pageerror', e => graphErrors.push(e.message));
+  graph.on('dialog', d => d.accept());
+  await graph.goto(base);
+  await graph.waitForFunction(() => Module.afCanvasFrames > 3);
+  await graph.keyboard.press('Escape');
+  const graphChooser = graph.waitForEvent('filechooser');
+  await graph.keyboard.press('Control+o');
+  await (await graphChooser).setFiles({name: 'graph.afproj', mimeType: 'text/plain',
+    buffer: await readFile(new URL('../assets/editor_demo.afproj', import.meta.url))});
+  await graph.waitForFunction(() => Module.FS.analyzePath('/documents/session.json').exists &&
+    JSON.parse(Module.FS.readFile('/documents/session.json', {encoding: 'utf8'})).project.endsWith('/graph.afproj'));
+  const settleGraph = async () => graph.waitForFunction(n => Module.afCanvasFrames > n + 2,
+    await graph.evaluate(() => Module.afCanvasFrames));
+  const saveGraph = async () => {
+    await settleGraph();
+    const download = graph.waitForEvent('download');
+    await graph.keyboard.press('Control+s');
+    await download;
+    return graph.evaluate(() => Module.FS.readFile('/documents/graph.afproj', {encoding: 'utf8'}));
+  };
+  const graphKey = (project, id) => {
+    const block = project.match(new RegExp(`keyframe\\nid ${id}\\n([\\s\\S]*?)end_keyframe`))?.[1];
+    assert.ok(block, `Key ${id} exists`);
+    return {time: Number(block.match(/^time (.*)$/m)[1]),
+      interpolation: block.match(/^interpolation (.*)$/m)[1],
+      easing: block.match(/^easing (.*)$/m)[1].split(' ').map(v => Number(Number(v).toFixed(6))),
+      value: block.match(/^value (.*)$/m)[1].split(' ').map(v => Number(Number(v).toFixed(6)))};
+  };
+  await graph.mouse.click(280, 682); // Position track, first row.
+  await graph.keyboard.press('F6');
+  await graph.keyboard.press('f');
+  await settleGraph();
+  // 1440x900 default layout: graph range 118.5..391.5, plot y678..854, time 0..4.
+  const start = {x: 450, y: 833.692308};
+  const end = {x: 1108, y: 698.307692};
+  await graph.mouse.click(start.x, start.y); // Key at time zero overlaps the playhead/divider.
+  await graph.mouse.click(285, 760); // Ease in preset.
+  let graphProject = await saveGraph();
+  assert.deepEqual(graphKey(graphProject, 8).easing, [.42, 0, 1, 1]);
+  await graph.mouse.click(285, 788); // Ease both.
+  await graph.mouse.move(start.x + (end.x - start.x) * .42, start.y);
+  await graph.mouse.down();
+  await graph.mouse.move(start.x + (end.x - start.x) * .25,
+    start.y + (end.y - start.y) * .35, {steps: 6});
+  await graph.mouse.up();
+  graphProject = await saveGraph();
+  assert.ok(Math.abs(graphKey(graphProject, 8).easing[0] - .25) < .003);
+  assert.ok(Math.abs(graphKey(graphProject, 8).easing[1] - .35) < .003);
+  const editedEasing = graphKey(graphProject, 8).easing;
+  await graph.keyboard.press('Control+z');
+  assert.deepEqual(graphKey(await saveGraph(), 8).easing, [.42, 0, .58, 1]);
+  await graph.keyboard.press('Control+y');
+  assert.deepEqual(graphKey(await saveGraph(), 8).easing, editedEasing);
+  await graph.mouse.click(385, 700); // Y component; same normalized positions for this track.
+  await settleGraph();
+  await graph.mouse.move(start.x + (end.x - start.x) * .58, end.y);
+  await graph.mouse.down();
+  await graph.mouse.move(900, 730, {steps: 5});
+  await graph.keyboard.press('Escape');
+  await graph.mouse.up();
+  assert.deepEqual(graphKey(await saveGraph(), 8).easing, editedEasing, 'Escape cancels a handle drag');
+  await graph.mouse.move(start.x, start.y);
+  await graph.mouse.down();
+  await graph.mouse.move(start.x + 82.25, start.y, {steps: 5}); // +0.5 seconds.
+  await graph.mouse.up();
+  graphProject = await saveGraph();
+  assert.equal(graphKey(graphProject, 8).time, .5);
+  assert.deepEqual(graphKey(graphProject, 8).value, [150, 140, 0, 0], 'Retiming preserves both values');
+  await graph.keyboard.press('Control+z');
+  assert.equal(graphKey(await saveGraph(), 8).time, 0);
+  await graph.mouse.click(370, 788); // Overshoot fits its handle above the endpoint.
+  graphProject = await saveGraph();
+  assert.deepEqual(graphKey(graphProject, 8).easing, [.34, 1.56, .64, 1]);
+  await graph.keyboard.press('Control+z');
+  await graph.mouse.move(480, 680);
+  await graph.mouse.down();
+  await graph.mouse.move(1140, 845, {steps: 5}); // Box-select only the end key.
+  await graph.mouse.up();
+  await graph.keyboard.press('Delete');
+  graphProject = await saveGraph();
+  assert.doesNotMatch(graphProject, /keyframe\nid 9\n/, 'Graph box selection deletes the visible end key');
+  assert.match(graphProject, /keyframe\nid 8\n/, 'Box selection preserves the first key');
+  await graph.keyboard.press('Control+z');
+  graphProject = await saveGraph();
+  assert.equal(graphKey(graphProject, 9).time, 4);
+  assert.deepEqual(graphKey(graphProject, 10).value, [.12, 0, 0, 0], 'Other tracks remain unchanged');
+  const positionKeys = source => [...source.matchAll(/keyframe\n([\s\S]*?)end_keyframe/g)]
+    .filter(match => /^track 2$/m.test(match[1])).length;
+  await graph.keyboard.press('Control+a');
+  await graph.keyboard.press('Control+d');
+  graphProject = await saveGraph();
+  assert.equal(positionKeys(graphProject), 4, 'Duplicate copies the selected keys');
+  assert.equal((graphProject.match(/^node$/gm) || []).length, 4, 'Duplicate preserves object count');
+  await graph.keyboard.press('Control+z');
+  await graph.keyboard.press('Control+a');
+  await graph.keyboard.press('Control+c');
+  await graph.mouse.click(614.5, 642); // Scrub to one second.
+  await graph.keyboard.press('Control+v');
+  assert.equal(positionKeys(await saveGraph()), 4, 'Copy/paste works with timeline focus');
+  await graph.keyboard.press('Control+z');
+  await graph.keyboard.press('Control+a');
+  await graph.keyboard.press('Delete');
+  graphProject = await saveGraph();
+  assert.equal(positionKeys(graphProject), 0, 'Select All addresses the displayed track');
+  assert.equal((graphProject.match(/^node$/gm) || []).length, 4, 'Deleting keys preserves objects');
+  await graph.keyboard.press('Delete');
+  assert.equal((await saveGraph()).match(/^node$/gm).length, 4, 'Delete with no keys preserves objects');
+  await graph.keyboard.press('Control+z');
+  assert.equal(positionKeys(await saveGraph()), 2);
+  await graph.keyboard.press('F6');
+  await graph.mouse.click(290, 817); // Fill color track.
+  await graph.keyboard.press('F6');
+  await graph.mouse.click(420, 700); // Alpha component.
+  await graph.mouse.click(285, 788); // Ease both on the current segment.
+  graphProject = await saveGraph();
+  assert.deepEqual(graphKey(graphProject, 16).easing, [.42, 0, .58, 1]);
+  assert.equal(graphKey(graphProject, 16).value[3], 1, 'Constant alpha is preserved');
+  await graph.keyboard.press('Control+z');
+  await graph.keyboard.press('F6');
+  await graph.mouse.click(280, 682);
+  await graph.keyboard.press('F6');
+  await graph.mouse.click(285, 700); // X component.
+  await graph.mouse.click(start.x, start.y);
+  await graph.mouse.move(700, 500);
+  await settleGraph();
+  await graph.screenshot({path: '/tmp/arcflow-graph-browser.png'});
+  assert.deepEqual(graphErrors, []);
+  await graph.close();
+  console.log('PASS animation graph presets, handles, components, retiming, selection, undo and cancel');
   const splitter = await browser.newPage({viewport: {width: 1440, height: 900}, acceptDownloads: true});
   const splitterErrors = [];
   splitter.on('pageerror', e => splitterErrors.push(e.message));

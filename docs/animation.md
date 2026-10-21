@@ -13,7 +13,16 @@ after a track exists, canvas and inspector edits create or update the key at tha
 The dope sheet identifies every track by object and property, and clicking a row selects its target.
 Drag the upper red playhead marker or its vertical track line to scrub. Drag either endpoint of the
 lower green loop bar to resize the playback range, or drag the bar itself to move the range. Use the graph view
-only after selecting the track whose easing needs adjustment.
+after selecting the track whose easing needs adjustment.
+
+In **Curves** (`F6`), click or box-select keys and drag them horizontally to retime.
+`Shift`/`Ctrl`-click adds or removes keys; `Ctrl+A` selects the displayed track's keys.
+Choose **Linear**, **Hold**, **Ease in**, **Ease out**, **Ease both**, or **Overshoot**, then drag the
+handles attached to the selected key's next segment. Easing applies to all components of that segment.
+Switch **X/Y** or **RGBA** to inspect each component. Values scale automatically, including overshoot;
+**Fit graph** (`F`) fits the track in time. Wheel zooms and `Shift`+wheel pans.
+`Delete`, copy/paste, and duplicate operate on keys while the timeline is focused. `Esc` cancels a
+key/handle drag; `Ctrl+Z` undoes a finished edit. Constant segments and last keys have no easing handles.
 
 For paths, select a visible point and use the canvas action bar to key the point, convert its incoming
 segment between line and cubic, insert a point, open or close the contour, or delete the segment

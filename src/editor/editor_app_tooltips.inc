@@ -487,10 +487,13 @@ static AfEditorTooltip af_editor_find_tooltip(AfEditorState *editor, int width, 
             .summary = editor->curve_visible ? "Edit easing curves and tangent handles."
                                              : "Select, box-select, and move keyframes.",
             .details = editor->curve_visible
-                           ? "Cubic keys expose bounded in and out tangent controls."
+                           ? "Select a key, choose an easing preset, then drag its handles. X/Y "
+                             "and RGBA switch the displayed component."
                            : "Drag the red playhead line anywhere along its full height to scrub. "
                              "Ctrl toggles key selection; dragging a key moves it.",
-            .shortcut = "Drag playhead to scrub; right click for keyframe actions"};
+            .shortcut = editor->curve_visible
+                            ? "F fits / Shift-click adds keys / Esc cancels a drag"
+                            : "Drag playhead to scrub; right click for keyframe actions"};
     }
     if (mouse.x < editor->left_width && editor->asset_browser_visible &&
         mouse.y >= af_editor_asset_browser_top(editor, height)) {

@@ -1189,16 +1189,34 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         }
         break;
     case AF_EDITOR_MENU_ACTION_DUPLICATE:
-        (void)af_editor_duplicate_selection(editor);
+        if (editor->timeline_focus)
+            (void)af_editor_paste_keyframes(editor, true);
+        else
+            (void)af_editor_duplicate_selection(editor);
         break;
     case AF_EDITOR_MENU_ACTION_RENAME:
         af_editor_begin_rename(editor);
         break;
     case AF_EDITOR_MENU_ACTION_DELETE:
-        (void)af_editor_delete_selection(editor);
+        if (editor->timeline_focus)
+            (void)af_editor_delete_keyframes(editor);
+        else
+            (void)af_editor_delete_selection(editor);
         break;
     case AF_EDITOR_MENU_ACTION_SELECT_ALL:
-        af_editor_select_all(editor);
+        if (editor->timeline_focus) {
+            const AfProjectTrack *selected = af_editor_selected_track(editor);
+            af_editor_clear_key_selection(editor);
+            for (uint32_t i = 0; i < editor->project.keyframe_count; ++i) {
+                const AfProjectKeyframe *key = &editor->project.keyframes[i];
+                const AfProjectTrack *track =
+                    af_project_find_track_const(&editor->project, key->track_id);
+                if (track != NULL && track->clip_id == editor->selected_clip_id &&
+                    (!editor->curve_visible || (selected != NULL && track->id == selected->id)))
+                    af_editor_select_keyframe(editor, key->id, true);
+            }
+        } else
+            af_editor_select_all(editor);
         break;
     case AF_EDITOR_MENU_ACTION_GRID:
         editor->grid_visible = !editor->grid_visible;
