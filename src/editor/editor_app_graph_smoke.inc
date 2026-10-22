@@ -6,6 +6,8 @@ static AfResult af_editor_graph_smoke(AfEditorState *editor, int width, int heig
             return AF_RESULT_INVALID_ARGUMENT;                                                     \
         }                                                                                          \
     } while (0)
+    /* The previous smoke created this disposable fixture; reset it without a dialog. */
+    editor->dirty = false;
     GRAPH_CHECK(af_editor_new_project(editor) == AF_RESULT_SUCCESS);
     editor->welcome_visible = false;
     editor->curve_visible = true;
@@ -33,6 +35,51 @@ static AfResult af_editor_graph_smoke(AfEditorState *editor, int width, int heig
     GRAPH_CHECK(view.minimum < -1200 && view.maximum > 2000);
     AfPlatformWindowMetrics metrics;
     GRAPH_CHECK(af_platform_window_metrics(&editor->window, &metrics) == AF_RESULT_SUCCESS);
+    editor->playhead = 0;
+    GRAPH_CHECK(fabsf(af_editor_time_to_x(editor, 0) - af_editor_timeline_ruler_x(editor) - 24) <
+                .001F);
+    GRAPH_CHECK(fabsf(af_editor_x_to_time(editor, af_editor_time_to_x(editor, 1.25F)) - 1.25F) <
+                .001F);
+    const float row_y =
+        af_editor_timeline_top(editor, height) + AF_EDITOR_TIMELINE_RULER_HEIGHT + 17;
+    editor->curve_visible = false;
+    for (int side = -1; side <= 1; side += 2) {
+        const AfVec2 press = {af_editor_time_to_x(editor, 0) + (float)side * 6, row_y};
+        af_editor_gradient_smoke_button(editor, width, height, &metrics, press, true,
+                                        SDL_BUTTON_LEFT);
+        GRAPH_CHECK(editor->drag_mode == AF_EDITOR_DRAG_KEYFRAMES);
+        const AfVec2 release = {press.x + editor->timeline_zoom * .5F, press.y};
+        af_editor_gradient_smoke_motion(editor, width, height, &metrics, release);
+        af_editor_gradient_smoke_button(editor, width, height, &metrics, release, false,
+                                        SDL_BUTTON_LEFT);
+        first = af_project_find_keyframe(&editor->project, first_id);
+        GRAPH_CHECK(fabsf(first->keyframe.time - .5F) < .001F && editor->playhead == 0);
+        GRAPH_CHECK(af_editor_history_undo(&editor->history, &editor->project) ==
+                    AF_RESULT_SUCCESS);
+    }
+    const AfVec2 marker = {af_editor_time_to_x(editor, 0),
+                           af_editor_timeline_top(editor, height) + 50};
+    af_editor_gradient_smoke_button(editor, width, height, &metrics, marker, true, SDL_BUTTON_LEFT);
+    GRAPH_CHECK(editor->drag_mode == AF_EDITOR_DRAG_PLAYHEAD);
+    const AfVec2 scrub = {af_editor_time_to_x(editor, 1), marker.y};
+    af_editor_gradient_smoke_motion(editor, width, height, &metrics, scrub);
+    af_editor_gradient_smoke_button(editor, width, height, &metrics, scrub, false, SDL_BUTTON_LEFT);
+    GRAPH_CHECK(fabsf(editor->playhead - 1) < .001F);
+    first = af_project_find_keyframe(&editor->project, first_id);
+    GRAPH_CHECK(first->keyframe.time == 0);
+    const SDL_MouseWheelEvent wheel = {.x = 0, .y = 2, .mouse_x = scrub.x, .mouse_y = row_y};
+    af_editor_mouse_wheel(editor, width, height, &wheel);
+    GRAPH_CHECK(fabsf(af_editor_x_to_time(editor, scrub.x) - 1) < .001F);
+    af_editor_curve_fit(editor, width);
+    editor->curve_visible = true;
+    editor->playhead = 0;
+    const AfVec2 divider = {af_editor_timeline_ruler_x(editor) + 2, row_y};
+    af_editor_gradient_smoke_button(editor, width, height, &metrics, divider, true,
+                                    SDL_BUTTON_LEFT);
+    GRAPH_CHECK(editor->drag_mode == AF_EDITOR_DRAG_TIMELINE_HEADER);
+    af_editor_gradient_smoke_button(editor, width, height, &metrics, divider, false,
+                                    SDL_BUTTON_LEFT);
+    view = af_editor_curve_view(editor, width, height);
     AfVec2 point = af_editor_curve_point(editor, view, first);
     const uint32_t cursor = editor->history.cursor;
     /* A time-zero key must win over the playhead and the adjacent divider. */

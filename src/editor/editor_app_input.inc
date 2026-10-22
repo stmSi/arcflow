@@ -286,7 +286,8 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
             return true;
         }
     }
-    if (event->y >= top + AF_EDITOR_TIMELINE_RULER_HEIGHT + 3.0F && event->x >= ruler_x &&
+    if (editor->curve_visible && event->y >= top + AF_EDITOR_TIMELINE_RULER_HEIGHT + 3.0F &&
+        event->x >= ruler_x &&
         fabsf(event->x - af_editor_time_to_x(editor, editor->playhead)) <= 8.0F) {
         editor->drag_mode = AF_EDITOR_DRAG_PLAYHEAD;
         editor->preview_playing = false;
@@ -298,7 +299,7 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
                                                 AF_EDITOR_TIMELINE_TRACK_HEIGHT);
         const AfProjectTrack *clicked_track = af_editor_track_at_row(editor, clicked_row);
         uint64_t hit_id = 0U;
-        float hit_distance = 10.0F;
+        float hit_distance = 11.0F;
         if (clicked_track != NULL) {
             af_editor_select_only(editor, clicked_track->node_id);
             editor->selected_property = clicked_track->property;
@@ -325,7 +326,7 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
             const float x = af_editor_time_to_x(editor, key->keyframe.time);
             const float y = top + AF_EDITOR_TIMELINE_RULER_HEIGHT +
                             (float)row * AF_EDITOR_TIMELINE_TRACK_HEIGHT + 17.0F;
-            const float distance = fabsf(event->x - x) + fabsf(event->y - y);
+            const float distance = fmaxf(fabsf(event->x - x), fabsf(event->y - y));
             if (row != UINT32_MAX && distance < hit_distance) {
                 hit_id = key->id;
                 hit_distance = distance;
@@ -338,6 +339,10 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
                 editor->drag_start_mouse = (AfVec2){event->x, event->y};
                 af_editor_begin_selected_key_drag(editor);
             }
+        } else if (fabsf(event->x - af_editor_time_to_x(editor, editor->playhead)) <= 8.0F) {
+            editor->drag_mode = AF_EDITOR_DRAG_PLAYHEAD;
+            editor->preview_playing = false;
+            af_editor_status(editor, "Drag the playhead to scrub animation time");
         } else {
             if ((modifiers & SDL_KMOD_CTRL) == 0U) {
                 af_editor_clear_key_selection(editor);
@@ -2103,7 +2108,7 @@ static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
                 editor->timeline_zoom * powf(1.12F, af_editor_clamp(scroll_y, -64.0F, 64.0F)), .01F,
                 1000.0F);
             editor->timeline_pan =
-                fmaxf(0.0F, anchor_time - (event->mouse_x - af_editor_timeline_ruler_x(editor)) /
+                fmaxf(0.0F, anchor_time - (event->mouse_x - af_editor_timeline_origin_x(editor)) /
                                               editor->timeline_zoom);
         }
         return;

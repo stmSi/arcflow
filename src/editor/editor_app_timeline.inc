@@ -26,13 +26,18 @@ static float af_editor_timeline_ruler_x(const AfEditorState *editor) {
     return editor->left_width + editor->timeline_header_width;
 }
 
+/* Keep time zero clear of the resizable track-header divider. */
+static float af_editor_timeline_origin_x(const AfEditorState *editor) {
+    return af_editor_timeline_ruler_x(editor) + 24.0F;
+}
+
 static float af_editor_time_to_x(const AfEditorState *editor, float time) {
-    return af_editor_timeline_ruler_x(editor) +
+    return af_editor_timeline_origin_x(editor) +
            (time - editor->timeline_pan) * editor->timeline_zoom;
 }
 
 static float af_editor_x_to_time(const AfEditorState *editor, float x) {
-    return editor->timeline_pan + (x - af_editor_timeline_ruler_x(editor)) / editor->timeline_zoom;
+    return editor->timeline_pan + (x - af_editor_timeline_origin_x(editor)) / editor->timeline_zoom;
 }
 
 static float af_editor_key_time(const AfEditorState *editor, const AfProjectClip *clip,
@@ -453,12 +458,16 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
                                       .m10 = 0.70710678F,
                                       .m11 = 0.70710678F,
                                       .tx = key_x,
-                                      .ty = y + 12.0F};
+                                      .ty = y + 17.0F - 7.0710678F};
+                AfAffine2 outline = diamond;
+                outline.ty = y + 17.0F - 9.8994949F;
+                af_editor_add_shape(editor, AF_NODE_RECTANGLE, outline, (AfVec2){14.0F, 14.0F},
+                                    AF_UI_PANEL, 0.0F, 100175);
                 af_editor_add_shape(editor, AF_NODE_RECTANGLE, diamond, (AfVec2){10.0F, 10.0F},
                                     af_editor_keyframe_selected(editor, key->id)
                                         ? (AfColor){1.0F, 0.82F, 0.26F, 1.0F}
                                         : af_editor_property_color(track->property),
-                                    0.0F, 100135);
+                                    0.0F, 100180);
             }
             ++row;
         }

@@ -163,9 +163,9 @@ static void af_editor_curve_fit(AfEditorState *editor, int width) {
         last = clip != NULL ? clip->duration : 1;
     }
     const float available =
-        (float)width - editor->right_width - af_editor_timeline_ruler_x(editor) - 32;
+        (float)width - editor->right_width - af_editor_timeline_origin_x(editor) - 32;
     editor->timeline_zoom = af_editor_clamp(available / fmaxf(last - first, .1F), .01F, 1000);
-    editor->timeline_pan = fmaxf(0, first - 16 / editor->timeline_zoom);
+    editor->timeline_pan = fmaxf(0, first);
     af_editor_status(editor, "Graph fitted to the selected track");
 }
 

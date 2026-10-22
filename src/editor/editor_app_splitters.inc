@@ -31,7 +31,6 @@ static AfEditorDragMode af_editor_splitter_at(const AfEditorState *editor, int w
         if (fabsf(p.y - ((float)height - editor->status_height)) <= 4.0F)
             return AF_EDITOR_DRAG_STATUS_HEIGHT;
         if (p.y > timeline + AF_EDITOR_TIMELINE_RULER_HEIGHT &&
-            (!editor->curve_visible || p.x < editor->left_width + editor->timeline_header_width) &&
             fabsf(p.x - editor->left_width - editor->timeline_header_width) <= 4.0F)
             return AF_EDITOR_DRAG_TIMELINE_HEADER;
     }

@@ -177,13 +177,29 @@ try {
       value: block.match(/^value (.*)$/m)[1].split(' ').map(v => Number(Number(v).toFixed(6)))};
   };
   await graph.mouse.click(280, 682); // Position track, first row.
+  // A zero-time key can be grabbed from either edge even while the playhead is at zero.
+  for (const grabX of [468, 480]) {
+    await graph.mouse.move(grabX, 681);
+    await graph.mouse.down();
+    await graph.mouse.move(grabX + 60, 681, {steps: 5});
+    await graph.mouse.up();
+    assert.equal(graphKey(await saveGraph(), 8).time, .5, 'Dope-sheet key wins over the playhead');
+    await graph.keyboard.press('Control+z');
+    assert.equal(graphKey(await saveGraph(), 8).time, 0);
+  }
+  await graph.mouse.move(474, 642); // The marker still scrubs without moving a key.
+  await graph.mouse.down();
+  await graph.mouse.move(594, 642, {steps: 5});
+  await graph.mouse.up();
+  assert.equal(graphKey(await saveGraph(), 8).time, 0);
+  await graph.keyboard.press('Home');
   await graph.keyboard.press('F6');
   await graph.keyboard.press('f');
   await settleGraph();
   // 1440x900 default layout: graph range 118.5..391.5, plot y678..854, time 0..4.
-  const start = {x: 450, y: 833.692308};
+  const start = {x: 474, y: 833.692308};
   const end = {x: 1108, y: 698.307692};
-  await graph.mouse.click(start.x, start.y); // Key at time zero overlaps the playhead/divider.
+  await graph.mouse.click(start.x, start.y); // Time zero has a gutter; the key wins over its playhead.
   await graph.mouse.click(285, 760); // Ease in preset.
   let graphProject = await saveGraph();
   assert.deepEqual(graphKey(graphProject, 8).easing, [.42, 0, 1, 1]);
@@ -211,7 +227,7 @@ try {
   assert.deepEqual(graphKey(await saveGraph(), 8).easing, editedEasing, 'Escape cancels a handle drag');
   await graph.mouse.move(start.x, start.y);
   await graph.mouse.down();
-  await graph.mouse.move(start.x + 82.25, start.y, {steps: 5}); // +0.5 seconds.
+  await graph.mouse.move(start.x + 79.25, start.y, {steps: 5}); // +0.5 seconds.
   await graph.mouse.up();
   graphProject = await saveGraph();
   assert.equal(graphKey(graphProject, 8).time, .5);
@@ -222,7 +238,7 @@ try {
   graphProject = await saveGraph();
   assert.deepEqual(graphKey(graphProject, 8).easing, [.34, 1.56, .64, 1]);
   await graph.keyboard.press('Control+z');
-  await graph.mouse.move(480, 680);
+  await graph.mouse.move(490, 680);
   await graph.mouse.down();
   await graph.mouse.move(1140, 845, {steps: 5}); // Box-select only the end key.
   await graph.mouse.up();
@@ -244,7 +260,7 @@ try {
   await graph.keyboard.press('Control+z');
   await graph.keyboard.press('Control+a');
   await graph.keyboard.press('Control+c');
-  await graph.mouse.click(614.5, 642); // Scrub to one second.
+  await graph.mouse.click(632.5, 642); // Scrub to one second.
   await graph.keyboard.press('Control+v');
   assert.equal(positionKeys(await saveGraph()), 4, 'Copy/paste works with timeline focus');
   await graph.keyboard.press('Control+z');
