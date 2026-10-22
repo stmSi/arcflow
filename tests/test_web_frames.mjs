@@ -99,6 +99,28 @@ export async function testVectorFrames(browser, base) {
   assert.match(appended.at(-1), /^cel_frame 4$/m, 'Duplicate skips occupied drawings and held cells');
   await page.keyboard.press('Control+z');
   assert.equal(tracks(await save()).length, 3);
+  // A single drawing at 10 fps must stay visible when a slow frame hits the loop end exactly.
+  await open(blank);
+  await page.keyboard.press('Shift+F6');
+  await page.keyboard.press('r');
+  await page.mouse.move(500, 250);
+  await page.mouse.down();
+  await page.mouse.move(650, 360, {steps: 6});
+  await page.mouse.up();
+  for (let i = 0; i < 14; ++i) await page.mouse.click(367, 764);
+  await page.mouse.click(330, 792);
+  assert.match(await save(), /^frame_rate 10$/m);
+  const capture = () => page.screenshot({clip: {x: 540, y: 280, width: 20, height: 20}});
+  const still = await capture();
+  const client = await page.context().newCDPSession(page);
+  await client.send('Emulation.setCPUThrottlingRate', {rate: 8});
+  await page.keyboard.press('Space');
+  for (let i = 0; i < 4; ++i) {
+    await settle();
+    assert.deepEqual(await capture(), still, 'Looping a single drawing never flashes an empty frame');
+  }
+  await client.send('Emulation.setCPUThrottlingRate', {rate: 1});
+  await page.keyboard.press('Space');
   assert.deepEqual(errors, []);
   await page.close();
   console.log('PASS vector frames: drawing, duplication, onion skin, holds, fps, undo and reopen');

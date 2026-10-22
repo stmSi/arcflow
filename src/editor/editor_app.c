@@ -902,7 +902,7 @@ int af_editor_run(int argument_count, char **arguments) {
                 af_project_find_clip_const(&editor.project, editor.selected_clip_id);
             if (clip != NULL) {
                 editor.playhead += fminf(delta_time, 0.1F);
-                if (clip->loop && editor.playhead > clip->loop_end) {
+                if (clip->loop && editor.playhead >= clip->loop_end) {
                     const float length = clip->loop_end - clip->loop_start;
                     editor.playhead =
                         length > 0.0F
