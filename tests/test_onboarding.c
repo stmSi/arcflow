@@ -28,6 +28,7 @@ int main(void) {
         CHECK(af_onboarding_guide_topic(guide) == (AfOnboardingTopic)index);
         for (uint32_t step = 0U; step < guide->step_count; ++step) {
             CHECK(guide->steps[step] != NULL && guide->steps[step][0] != '\0');
+            CHECK(guide->details[step] != NULL);
         }
     }
     CHECK(af_onboarding_guide_find("not-a-topic") == NULL);

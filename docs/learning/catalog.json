@@ -1,0 +1,586 @@
+{
+  "schema_version": 1,
+  "guides": [
+    {
+      "id": "AF_ONBOARDING_INSTALLATION",
+      "slug": "installation",
+      "title": "Installation and portable use",
+      "summary": "Install a packaged build or run the portable directory in place.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Use the browser editor without installing, or download a desktop release."
+        },
+        {
+          "text": "Extract the archive or run the platform installer."
+        },
+        {
+          "text": "Keep bin/shaders, bin/fonts, and bin/assets beside the executables."
+        },
+        {
+          "text": "Launch arcflow_editor; no global dependency installation is required."
+        },
+        {
+          "text": "Use arcflow_compiler --version to verify channel and format versions."
+        },
+        {
+          "text": "Projects and user settings live outside the application install tree."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_QUICK_START",
+      "slug": "quick-start",
+      "title": "Your first animation",
+      "summary": "Draw a shape, add two keys, and make it move.",
+      "category": "Create",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Draw a rectangle with R.",
+          "detail": "Click and drag on the canvas. Start a blank project from File > New From Template if you want an empty workspace. The walkthrough also works with your current project."
+        },
+        {
+          "text": "Select the shape with Pick (V).",
+          "detail": "V toggles Pick and Node. Choose Pick, then click the shape or its name in Layers. Drag the shape to its starting position."
+        },
+        {
+          "text": "At time zero, choose POSITION and add the first key.",
+          "detail": "Use the property chooser above the timeline, then click + First key or press K. Create this key before moving to a later time."
+        },
+        {
+          "text": "Move the playhead to one second and move the shape.",
+          "detail": "Once a Position track exists, dragging the shape creates or updates the key at the current time. Two diamonds on the track define the motion."
+        },
+        {
+          "text": "Press Space to play, then pause.",
+          "detail": "Press F6 for Curves. Select the Position track, apply Ease both, and press F to fit the graph. You can undo any change with Ctrl+Z."
+        },
+        {
+          "text": "Save the editable project with Ctrl+S.",
+          "detail": "Keep the .afproj file for later edits. In a browser this downloads the file; store that download somewhere you can find it. Use File > Export when you are ready to share."
+        }
+      ],
+      "demo": "curves"
+    },
+    {
+      "id": "AF_ONBOARDING_VECTOR_ANIMATION",
+      "slug": "vector-animation",
+      "title": "Animate vector points and Bezier handles",
+      "summary": "Every editable path point and cubic handle can have its own track.",
+      "category": "Create",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Create a Path or open the Vector Animation example."
+        },
+        {
+          "text": "Use Node (V) to select a point; choose PATH POINT, HANDLE IN, or HANDLE OUT in the timeline."
+        },
+        {
+          "text": "Move the playhead and press K before and after changing the selected handle."
+        },
+        {
+          "text": "Use Curve Editor to tune interpolation without changing path topology."
+        },
+        {
+          "text": "Preview with Space; point and handle tracks evaluate together."
+        },
+        {
+          "text": "Remove point tracks before adding or deleting path commands."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_INTERACTIVE_BUTTON",
+      "slug": "interactive-button",
+      "title": "Interactive button workflow",
+      "summary": "Build visual button states and exercise pointer or keyboard activation.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Open the Interactive Button example and select the button background."
+        },
+        {
+          "text": "Edit the background, focus ring, and icon directly in Layers."
+        },
+        {
+          "text": "Use the Press Feedback clip to animate scale, color, and opacity."
+        },
+        {
+          "text": "Compile and send pointer down/up or keyboard activate through the C API."
+        },
+        {
+          "text": "Poll runtime events and let the host perform application actions."
+        },
+        {
+          "text": "Authoring state-machine bindings are limited; host event wiring is required."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_RESPONSIVE_UI",
+      "slug": "responsive-ui",
+      "title": "Responsive UI and safe areas",
+      "summary": "Anchors, percent sizing, layout direction, and safe areas adapt a canvas.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Open the Responsive UI example and select a layout-managed object."
+        },
+        {
+          "text": "Use Inspector layout controls to cycle fixed, percent, and intrinsic sizing."
+        },
+        {
+          "text": "Set anchors and pivots before adjusting offsets and minimum sizes."
+        },
+        {
+          "text": "Configure the root safe area and Fit, Fill, or Stretch canvas scaling."
+        },
+        {
+          "text": "Resize the window and inspect ruler measurements at multiple aspect ratios."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_PARTICLE_EFFECT",
+      "slug": "particle-effect",
+      "title": "Particle effect authoring",
+      "summary": "Emitters expose spawning, forces, output, collisions, LOD, and trails.",
+      "category": "Create",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Open the Particle Effect example and select the Emitter object."
+        },
+        {
+          "text": "Use the Inspector pages to set spawn shape, lifetime, velocity, and color."
+        },
+        {
+          "text": "Tune force, collision, trail, flipbook, and output pages as needed."
+        },
+        {
+          "text": "Preview at several zoom levels; particles remain canvas-clipped."
+        },
+        {
+          "text": "Set capacity and LOD before compiling to bound runtime cost."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_RUNTIME_INTEGRATION",
+      "slug": "runtime-integration",
+      "title": "Embed the Arcflow C runtime",
+      "summary": "Load a compiled package, create an instance, update it, and release handles.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Include arcflow/arcflow_runtime.h and link arcflow_runtime."
+        },
+        {
+          "text": "Fill AfRuntimeCreateInfo; frames_in_flight must be one or two."
+        },
+        {
+          "text": "Call af_runtime_create, af_package_load, then af_instance_create."
+        },
+        {
+          "text": "Call play/update, resize, input, property, and event functions from the host."
+        },
+        {
+          "text": "Destroy instance before package, then destroy the runtime."
+        },
+        {
+          "text": "See the shipped runtime_sample.c; it is built and tested with every release."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_VULKAN_INTEGRATION",
+      "slug": "vulkan-integration",
+      "title": "Vulkan host integration",
+      "summary": "Arcflow accepts an existing Vulkan device and graphics queue.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Create a Vulkan 1.3 instance, physical device, logical device, and queue."
+        },
+        {
+          "text": "Pass all four Vulkan handles plus the graphics queue family together."
+        },
+        {
+          "text": "Keep those handles alive until every Arcflow runtime instance is destroyed."
+        },
+        {
+          "text": "Use host-owned command buffers only through the versioned host SDK contract."
+        },
+        {
+          "text": "Arcflow does not own presentation, queue submission, waits, or device teardown."
+        },
+        {
+          "text": "Check runtime and package ABI versions before loading external content."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_FILE_FORMATS",
+      "slug": "file-formats",
+      "title": "Project and package formats",
+      "summary": ".afproj is deterministic authoring text; .afp is validated runtime data.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Commit .afproj text and project-relative asset sources to source control."
+        },
+        {
+          "text": "Never hand-edit .afp packages; regenerate them with arcflow_compiler."
+        },
+        {
+          "text": "Resolve <<<<<<<, =======, and >>>>>>> markers before opening a project."
+        },
+        {
+          "text": "Use --validate-project, --check-determinism, and --validate in CI."
+        },
+        {
+          "text": "Unknown future format versions are rejected before allocation or execution."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_C_API",
+      "slug": "c-api",
+      "title": "C API reference map",
+      "summary": "The installed public headers are the authoritative declarations.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Runtime lifetime: af_runtime_create and af_runtime_destroy."
+        },
+        {
+          "text": "Packages: af_package_load and af_package_destroy."
+        },
+        {
+          "text": "Instances: create, destroy, update, play, pause, stop, seek, and resize."
+        },
+        {
+          "text": "Input: pointer, keyboard, controller, state inputs, triggers, and events."
+        },
+        {
+          "text": "Bindings: property_id, property type, get, set, format, and locale."
+        },
+        {
+          "text": "Accessibility and VFX controls are declared in arcflow_runtime.h."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_TROUBLESHOOTING",
+      "slug": "troubleshooting",
+      "title": "Troubleshooting",
+      "summary": "Use validation first, then isolate project, package, platform, or GPU state.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Run --validate-project; repair missing assets and merge markers first."
+        },
+        {
+          "text": "Run --check-determinism and compile a release package again."
+        },
+        {
+          "text": "Open Workspace > System / Displays for DPI, input, and Vulkan capabilities."
+        },
+        {
+          "text": "Use F11 project validation and F10 profiler inside the editor."
+        },
+        {
+          "text": "Keep generated captures when reporting visual or driver-specific problems."
+        },
+        {
+          "text": "Unsupported GPU capabilities fail explicitly instead of silently degrading."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_PERFORMANCE",
+      "slug": "performance",
+      "title": "Performance workflow",
+      "summary": "Measure frame time, then reduce the subsystem shown to be expensive.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Use F10 to inspect frame time, scene size, animation keys, and allocations."
+        },
+        {
+          "text": "Bound particle capacity and use LOD before reducing visual quality globally."
+        },
+        {
+          "text": "Pack atlases and avoid unnecessary image dimensions and duplicated assets."
+        },
+        {
+          "text": "Keep vector topology stable and use the fewest useful animated points."
+        },
+        {
+          "text": "Use release packages for representative measurements."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_SECURITY",
+      "slug": "security",
+      "title": "Security boundaries",
+      "summary": "Treat projects, packages, plugins, and update artifacts as untrusted input.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Validate sizes, formats, runtime ABI, and package versions before use."
+        },
+        {
+          "text": "Use atomic writes and rotating backups for project and staged update files."
+        },
+        {
+          "text": "Require signature verification before accepting an update artifact."
+        },
+        {
+          "text": "Only register trusted editor plugins and validate compiler-transform output."
+        },
+        {
+          "text": "Do not expose arbitrary host files through runtime or plugin callbacks."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_MIGRATION",
+      "slug": "migration",
+      "title": "Project and runtime migration",
+      "summary": "Migrate authoring data forward while keeping the original recoverable.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Keep the original project and its asset directory under source control."
+        },
+        {
+          "text": "Open the project in the new editor and review migration diagnostics."
+        },
+        {
+          "text": "Save to a new path first when crossing more than one format generation."
+        },
+        {
+          "text": "Validate and compile again; do not reuse packages from an incompatible ABI."
+        },
+        {
+          "text": "Downgrade by restoring source control, not by editing version fields."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_SHORTCUTS",
+      "slug": "shortcuts",
+      "title": "Keyboard shortcut reference",
+      "summary": "F1 opens the live, configurable shortcut list for the current build.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Ctrl+N/O/S create, open, and save; Ctrl+Shift+S saves as."
+        },
+        {
+          "text": "F5 compiles, Space previews, K adds a key, F6 opens Curves, and Shift+F6 opens Frames."
+        },
+        {
+          "text": "Ctrl+Z/Y undo and redo; Ctrl+C/V/D copy, paste, and duplicate."
+        },
+        {
+          "text": "Ctrl+F searches hierarchy; Ctrl+Shift+P opens the command palette."
+        },
+        {
+          "text": "Use the toolbar for grid and snapping; Alt+Enter toggles fullscreen."
+        },
+        {
+          "text": "Open Help > Keyboard Shortcuts to inspect or rebind every command."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_LIMITATIONS",
+      "slug": "limitations",
+      "title": "Known limitations",
+      "summary": "Current constraints are explicit so projects can plan around them.",
+      "category": "Reference",
+      "minutes": 5,
+      "steps": [
+        {
+          "text": "Desktop targets are Linux x64 and Windows x64; the browser build also runs the editor and player."
+        },
+        {
+          "text": "Cloud collaboration is not built in; use standard source control and locks."
+        },
+        {
+          "text": "Lottie import remains unavailable. Lottie JSON and dotLottie export cover core vector motion; advanced SVG/VFX features may require GIF, MP4, or .afp."
+        },
+        {
+          "text": "Interactive state-machine authoring is less complete than runtime playback."
+        },
+        {
+          "text": "Automatic updates are opt-in and require a host-provided signature verifier."
+        },
+        {
+          "text": "Desktop rendering uses Vulkan; the browser uses Canvas 2D. Export and platform capabilities differ."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_VECTOR_FRAMES",
+      "slug": "vector-frames",
+      "title": "Frame-by-frame drawing",
+      "summary": "Create independent vector drawings and turn them into a flipbook.",
+      "category": "Create",
+      "minutes": 7,
+      "demo": "frames",
+      "steps": [
+        {
+          "text": "Open Frames with Shift+F6.",
+          "detail": "You can also click Frames beside the timeline timecode. Frame 1 is time zero. Existing ordinary objects remain visible as backgrounds."
+        },
+        {
+          "text": "Draw on the current frame.",
+          "detail": "Use the existing shape, pen, or freehand tools. Drawing in an empty cell creates a drawing group automatically. Each group holds that frame’s editable objects."
+        },
+        {
+          "text": "Click Duplicate and change the new drawing.",
+          "detail": "The copy is independent. Duplicate and + Blank move to the next empty cell, skipping occupied and held cells. Use + Blank when you want to redraw from scratch."
+        },
+        {
+          "text": "Step with [ and ] and turn on Onion skin.",
+          "detail": "The previous drawing appears blue and the next appears pink. Ghosts are references: they cannot be selected through the active frame, and they do not appear in exports."
+        },
+        {
+          "text": "Use Hold + to extend a drawing into empty cells.",
+          "detail": "A held drawing stays visible for several frames. Hold cannot overwrite the next drawing. Every cell in the hold edits the same drawing."
+        },
+        {
+          "text": "Set FPS and click Fit clip length.",
+          "detail": "FPS changes the speed of drawing exposures. Fit clip length trims trailing empty time while retaining ordinary animation keys. Enlarge the timeline if this button is hidden."
+        },
+        {
+          "text": "Preview with Space and save with Ctrl+S.",
+          "detail": "Pause before editing. Undo restores drawings and their timing. .afproj preserves all frames; .afp and Lottie export keep their stepped visibility. GIF/MP4 export requires FFmpeg."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_ANIMATION_GRAPHS",
+      "slug": "animation-graphs",
+      "title": "Shape motion in the graph",
+      "summary": "Use easing presets and handles to control the feel of a movement.",
+      "category": "Create",
+      "minutes": 6,
+      "demo": "curves",
+      "steps": [
+        {
+          "text": "Create two keys for a property.",
+          "detail": "Follow Your first animation if you do not have a track yet. Select its row in the timeline; the graph displays the selected object and property."
+        },
+        {
+          "text": "Press F6 for Curves, then F to fit.",
+          "detail": "The horizontal axis is time. The vertical axis shows actual property values. Use X/Y or RGBA to inspect one component of a multi-value property."
+        },
+        {
+          "text": "Select a key and choose an easing preset.",
+          "detail": "Linear has constant interpolation. Hold keeps the previous value. Ease in, Ease out, Ease both, and Overshoot shape the segment after the selected key."
+        },
+        {
+          "text": "Drag a handle to adjust the transition.",
+          "detail": "The handles belong to the segment after the selected key. Constant segments and final keys have no handles. Overshoot can move beyond the endpoint values."
+        },
+        {
+          "text": "Drag keys horizontally to retime.",
+          "detail": "Box-select several keys, or use Shift/Ctrl-click to change selection. Wheel zooms; Shift+wheel pans. Escape cancels an active drag."
+        },
+        {
+          "text": "Play the motion and save.",
+          "detail": "When the timeline has focus, Delete, duplicate, copy, and paste work on keys. Click the canvas before using those commands on objects. Ctrl+Z restores an edit."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_GRADIENTS",
+      "slug": "gradients",
+      "title": "Draw and animate gradients",
+      "summary": "Apply a gradient to a fill or outline, then animate it.",
+      "category": "Create",
+      "minutes": 6,
+      "demo": "gradient",
+      "steps": [
+        {
+          "text": "Draw or select a shape.",
+          "detail": "Choose Fill or Outline in the Inspector. An outline needs a visible stroke width; use the same value controls to type, drag, or step the width."
+        },
+        {
+          "text": "Press Shift+G and choose a gradient type.",
+          "detail": "Choose Linear, Radial, or Conic. Drag across the selected object to set the gradient. You can move its handles directly on the canvas."
+        },
+        {
+          "text": "Adjust the stops and their colors.",
+          "detail": "Select a stop to change its position or color. RGB, alpha, and hex fields accept typing, dragging, and minus/plus steps. Hex stepping changes the RGB number."
+        },
+        {
+          "text": "Choose a gradient property in the timeline.",
+          "detail": "For example, choose GRAD START, GRAD END, GRAD ANGLE, or STOP COLOR. Keep the relevant Fill/Outline target and stop selected. Add a key at the starting time."
+        },
+        {
+          "text": "Move to a later time and adjust the gradient.",
+          "detail": "After the track exists, edits update the current key. Add another key if needed, then preview. Keep the same stop structure while animating its values."
+        },
+        {
+          "text": "Save the project and check your export.",
+          "detail": "The editable project retains fill and outline gradients. Export support varies by format: preview the result and use rendered output or .afp if a vector format cannot represent an effect."
+        }
+      ]
+    },
+    {
+      "id": "AF_ONBOARDING_SAVING_SHARING",
+      "slug": "saving-sharing",
+      "title": "Save, reopen, and share",
+      "summary": "Keep an editable original and choose the right format for delivery.",
+      "category": "Share",
+      "minutes": 4,
+      "demo": "",
+      "steps": [
+        {
+          "text": "Save the source project with Ctrl+S.",
+          "detail": "Use .afproj for continued editing. In a browser, a normal download is created and a download-ready link appears. Keep the downloaded file; browser storage is not your only backup."
+        },
+        {
+          "text": "Open a project with Ctrl+O.",
+          "detail": "Choose an .afproj file using the file picker. Opening another project can ask you to save or discard unsaved changes. Image assets must remain available or be embedded."
+        },
+        {
+          "text": "Open File > Export.",
+          "detail": "Choose .afp for Arcflow playback, SVG for a static vector image, or Lottie for supported vector animation. Test the resulting file in its intended viewer."
+        },
+        {
+          "text": "For drawing frames, fit the clip before exporting.",
+          "detail": "Frames > Fit clip length keeps the useful animation range. Preview it first to check holds, timing, and any background objects."
+        },
+        {
+          "text": "Use GIF or MP4 for a rendered animation.",
+          "detail": "These exports need FFmpeg in the desktop environment. Browser builds cannot run the desktop FFmpeg process; use a supported vector/runtime export or open the project on desktop."
+        },
+        {
+          "text": "Reopen the saved source once before archiving.",
+          "detail": "Store the .afproj, any external asset files, and exported delivery files together. When sharing a bug, include a small reproducible project and the editor build version."
+        }
+      ]
+    }
+  ]
+}

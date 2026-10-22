@@ -119,6 +119,7 @@ if(EMSCRIPTEN)
     set(AF_FRAMEWORK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 endif()
 enable_testing()
+include(cmake/ArcflowLearning.cmake)
 set(ARCFLOW_FRAMEWORK_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/framework" CACHE PATH
     "Reusable framework checkout; may point to a separate repository")
 if(NOT EXISTS "${ARCFLOW_FRAMEWORK_SOURCE_DIR}/CMakeLists.txt")
@@ -425,6 +426,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/" DESTINATION "${CMA
 install(FILES "${ARCFLOW_NOTICE_FILE}" DESTINATION ".")
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/arcflow")
+install(DIRECTORY "${ARCFLOW_LEARNING_SITE}/" DESTINATION "${CMAKE_INSTALL_DATADIR}/arcflow/learn")
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/arcflow")
 

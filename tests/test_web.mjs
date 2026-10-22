@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {testLearning} from './test_web_learning.mjs';
 import {testVectorFrames} from './test_web_frames.mjs';
 import {createServer} from 'node:http';
 import {readFile, stat} from 'node:fs/promises';
@@ -7,7 +8,7 @@ import {chromium} from '../web/node_modules/playwright/index.mjs';
 
 const root = resolve(process.argv[2] || 'build/web/site');
 const prefix = '/arcflow/';
-const types = {'.html': 'text/html', '.js': 'application/javascript', '.wasm': 'application/wasm', '.data': 'application/octet-stream', '.svg': 'image/svg+xml'};
+const types = {'.html': 'text/html', '.js': 'application/javascript', '.wasm': 'application/wasm', '.data': 'application/octet-stream', '.svg': 'image/svg+xml', '.css': 'text/css', '.pdf': 'application/pdf'};
 const server = createServer(async (request, response) => {
   const path = new URL(request.url, 'http://localhost').pathname;
   if (path === '/favicon.ico') { response.writeHead(204).end(); return; }
@@ -25,6 +26,7 @@ const options = {headless: true};
 if (process.env.ARCFLOW_CHROMIUM) options.executablePath = process.env.ARCFLOW_CHROMIUM;
 const browser = await chromium.launch(options);
 try {
+  await testLearning(browser, base);
   await testVectorFrames(browser, base);
   for (const [smoke, frames] of [['studio', 4], ['template', 2], ['inspector', 8], ['vector-tools', 8], ['image', 4], ['gradient-drag', 4], ['editing', 4], ['particle-inputs', 4], ['particle-view', 24]]) {
     const page = await browser.newPage({viewport: {width: 1440, height: 900}});

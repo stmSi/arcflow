@@ -55,6 +55,10 @@ def main():
                      "player.html", "player.js", "player.wasm", "player.data", "favicon.svg"):
             if not (site / name).is_file():
                 raise ValueError(f"Browser artifact is missing {name}")
+        pdf = args.output / f"Arcflow-{version}-Tutorials.pdf"
+        shutil.copy2(site / "learn" / "Arcflow-Tutorials.pdf", pdf)
+        Path(str(pdf) + ".sha256").write_text(
+            hashlib.sha256(pdf.read_bytes()).hexdigest() + "  " + pdf.name + "\n")
         with zipfile.ZipFile(web, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             for file in sorted(site.rglob("*")):
                 if file.is_file():
@@ -64,7 +68,7 @@ def main():
     (args.output / "notes.md").write_text(
         "Linux and Windows editor, player, compiler, and runtime; browser editor and player.\n\n"
         "Downloads include portable archives, a Windows installer, and a browser site ZIP, "
-        "with SHA-256 checksums.\n\n"
+        "a tutorial PDF, and SHA-256 checksums.\n\n"
         "[Open in browser](https://stmsi.github.io/arcflow/)\n")
     print(f"Prepared {len(list(args.output.glob('Arcflow-*')))} release files for {args.tag}")
 

@@ -1,5 +1,10 @@
 {
   "private": true,
-  "scripts": { "test": "node ../tests/test_web.mjs ../build/web/site" },
-  "devDependencies": { "playwright": "1.59.1" }
+  "scripts": {
+    "test": "node ../tests/test_web.mjs ../build/web/site",
+    "docs:pdf": "node ../tools/build-learning-pdf.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.59.1"
+  }
 }

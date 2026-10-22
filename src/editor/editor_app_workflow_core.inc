@@ -440,6 +440,9 @@ static AfResult af_editor_workflow_init(AfEditorState *editor, int width, int he
     editor->window_width = width;
     editor->window_height = height;
     af_editor_load_preferences(editor, width, height);
+    if (editor->guided_tour_visible) {
+        editor->welcome_visible = false;
+    }
     result = af_editor_register_actions(editor);
     if (result == AF_RESULT_SUCCESS) {
         result = af_editor_preferences_apply_shortcuts(&editor->preferences, &editor->actions,

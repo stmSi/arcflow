@@ -1,6 +1,6 @@
 # Building
 
-Requires CMake 3.25+, Ninja, and a Vulkan 1.3 driver/loader.
+Requires Python 3.9+, CMake 3.25+, Ninja, and a Vulkan 1.3 driver/loader.
 
 ```sh
 git submodule update --init --recursive

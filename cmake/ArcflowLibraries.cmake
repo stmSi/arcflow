@@ -1,6 +1,7 @@
 # Arcflow's binary package format stays outside the generic engine.
 add_library(arcflow_core STATIC src/assets/package.c)
 set_target_properties(arcflow_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+add_dependencies(arcflow_core arcflow_learning)
 target_include_directories(arcflow_core PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated"
     PRIVATE src)
 target_link_libraries(arcflow_core PUBLIC af::engine)

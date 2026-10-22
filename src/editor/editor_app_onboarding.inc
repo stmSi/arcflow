@@ -5,6 +5,51 @@
 #define AF_EDITOR_GUIDE_WIDTH 920.0F
 #define AF_EDITOR_GUIDE_HEIGHT 590.0F
 
+/* Shape paragraphs with the same font metrics as the UI, then draw each line.
+ * Copy byte boundaries before drawing: add_text reuses the editor's shaping buffers. */
+static void af_editor_onboarding_paragraph(AfEditorState *editor, float x, float y,
+                                           const char *text, float scale, float width,
+                                           AfColor color, int32_t layer) {
+    const size_t length = text == NULL ? 0U : strlen(text);
+    if (length == 0U || length >= 1024U) {
+        return;
+    }
+    AfTextLayout layout = {.glyphs = editor->text_glyphs,
+                           .glyph_capacity = AF_EDITOR_TEXT_GLYPH_CAPACITY,
+                           .lines = editor->text_lines,
+                           .line_capacity = AF_EDITOR_TEXT_LINE_CAPACITY};
+    const AfTextRequest request = {.utf8 = text,
+                                   .byte_count = (uint32_t)length,
+                                   .font_ids = {AF_EDITOR_TEXT_FONT_ID},
+                                   .font_count = 1U,
+                                   .font_size = ceilf(9.0F + scale * 4.0F),
+                                   .maximum_width = width,
+                                   .maximum_lines = 16U,
+                                   .line_spacing = 1.0F,
+                                   .direction = AF_TEXT_DIRECTION_LTR,
+                                   .wrap = AF_TEXT_WRAP_WORD,
+                                   .kerning = true,
+                                   .ligatures = true};
+    if (editor->text_engine == NULL ||
+        af_text_shape(editor->text_engine, &request, &layout) != AF_RESULT_SUCCESS) {
+        af_editor_add_text(editor, x, y, text, scale, width, color, layer);
+        return;
+    }
+    const uint32_t count = layout.line_count < 16U ? layout.line_count : 16U;
+    uint32_t boundaries[17] = {0};
+    for (uint32_t line = 0U; line < count; ++line) {
+        boundaries[line] = layout.glyphs[layout.lines[line].glyph_start].cluster;
+    }
+    boundaries[count] = (uint32_t)length;
+    for (uint32_t line = 0U; line < count; ++line) {
+        char buffer[1024];
+        const uint32_t size = boundaries[line + 1U] - boundaries[line];
+        memcpy(buffer, text + boundaries[line], size);
+        buffer[size] = '\0';
+        af_editor_add_text(editor, x, y + (float)line * 18.0F, buffer, scale, width, color, layer);
+    }
+}
+
 static void af_editor_onboarding_finish_welcome(AfEditorState *editor) {
     editor->welcome_visible = false;
     editor->preferences.onboarding_complete = true;
@@ -39,6 +84,7 @@ static void af_editor_onboarding_start_guided(AfEditorState *editor) {
     if (af_editor_create_template(editor, AF_PROJECT_TEMPLATE_GUIDED_BASICS)) {
         af_editor_onboarding_finish_welcome(editor);
         editor->example_browser_visible = false;
+        editor->guided_topic = AF_ONBOARDING_QUICK_START;
         editor->guided_tour_visible = true;
         editor->guided_step = 0U;
         af_editor_status(editor, "Guided project ready; follow the checklist");
@@ -91,41 +137,42 @@ static void af_editor_render_welcome(AfEditorState *editor, int width, int heigh
 }
 
 static void af_editor_render_guided_tour(AfEditorState *editor, int width, int height) {
-    const AfOnboardingGuide *guide = af_onboarding_guide(AF_ONBOARDING_QUICK_START);
+    const AfOnboardingGuide *guide = af_onboarding_guide(editor->guided_topic);
     const float box_width = 430.0F;
-    const float box_height = 230.0F;
+    const float box_height = 300.0F;
     const float x = (float)width - editor->right_width - box_width - 14.0F;
     const float y = editor->toolbar_height + 14.0F;
-    char progress[64];
+    char progress[128];
     (void)height;
     if (!editor->guided_tour_visible || guide == NULL || editor->guided_step >= guide->step_count) {
         return;
     }
-    (void)snprintf(progress, sizeof(progress), "GUIDED FIRST PROJECT  %u / %u",
+    (void)snprintf(progress, sizeof(progress), "%s  %u / %u", guide->title,
                    editor->guided_step + 1U, guide->step_count);
     af_editor_add_shape(
         editor, AF_NODE_ROUNDED_RECTANGLE, (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x, .ty = y},
         (AfVec2){box_width, box_height}, (AfColor){0.075F, 0.09F, 0.125F, 0.98F}, 8.0F, 247000);
     af_editor_add_text(editor, x + 18.0F, y + 16.0F, progress, 0.9F, box_width - 36.0F,
                        (AfColor){0.62F, 0.84F, 1.0F, 1.0F}, 247010);
-    af_editor_add_text(editor, x + 18.0F, y + 53.0F, guide->steps[editor->guided_step], 0.86F,
-                       box_width - 36.0F, (AfColor){0.86F, 0.89F, 0.95F, 1.0F}, 247010);
-    af_editor_add_text(editor, x + 18.0F, y + 124.0F,
-                       "The panel stays open while you work on the canvas.", 0.64F,
-                       box_width - 36.0F, (AfColor){0.5F, 0.58F, 0.7F, 1.0F}, 247010);
+    af_editor_onboarding_paragraph(editor, x + 18.0F, y + 53.0F, guide->steps[editor->guided_step],
+                                   0.86F, box_width - 36.0F, (AfColor){0.86F, 0.89F, 0.95F, 1.0F},
+                                   247010);
+    af_editor_onboarding_paragraph(editor, x + 18.0F, y + 140.0F,
+                                   guide->details[editor->guided_step], 0.8F, box_width - 36.0F,
+                                   (AfColor){0.5F, 0.58F, 0.7F, 1.0F}, 247010);
     af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 18.0F, .ty = y + 174.0F},
+                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 18.0F, .ty = y + 244.0F},
                         (AfVec2){112.0F, 36.0F}, (AfColor){0.15F, 0.2F, 0.3F, 1.0F}, 4.0F, 247010);
-    af_editor_add_text(editor, x + 43.0F, y + 187.0F, "BACK", 0.7F, 80.0F,
+    af_editor_add_text(editor, x + 43.0F, y + 257.0F, "BACK", 0.7F, 80.0F,
                        (AfColor){0.8F, 0.84F, 0.92F, 1.0F}, 247020);
     af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
-                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 144.0F, .ty = y + 174.0F},
+                        (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 144.0F, .ty = y + 244.0F},
                         (AfVec2){160.0F, 36.0F}, (AfColor){0.18F, 0.42F, 0.68F, 1.0F}, 4.0F,
                         247010);
-    af_editor_add_text(editor, x + 180.0F, y + 187.0F,
+    af_editor_add_text(editor, x + 180.0F, y + 257.0F,
                        editor->guided_step + 1U == guide->step_count ? "FINISH" : "NEXT STEP", 0.7F,
                        120.0F, (AfColor){0.92F, 0.96F, 1.0F, 1.0F}, 247020);
-    af_editor_add_text(editor, x + 328.0F, y + 187.0F, "CLOSE", 0.66F, 78.0F,
+    af_editor_add_text(editor, x + 328.0F, y + 257.0F, "CLOSE", 0.66F, 78.0F,
                        (AfColor){0.58F, 0.65F, 0.76F, 1.0F}, 247020);
 }
 
@@ -219,11 +266,11 @@ static void af_editor_render_guide_browser(AfEditorState *editor, int width, int
         af_editor_add_text(editor, x + 22.0F, row_y + 13.0F, topic->title, 0.68F, 212.0F,
                            (AfColor){0.78F, 0.83F, 0.91F, 1.0F}, 249030);
     }
-    af_editor_add_text(editor, x + 22.0F, y + 444.0F, "UP / DOWN BROWSES ALL 16 TOPICS", 0.58F,
-                       212.0F, (AfColor){0.46F, 0.53F, 0.65F, 1.0F}, 249030);
+    af_editor_add_text(editor, x + 22.0F, y + 444.0F, "UP / DOWN BROWSES ALL TOPICS", 0.58F, 212.0F,
+                       (AfColor){0.46F, 0.53F, 0.65F, 1.0F}, 249030);
     af_editor_add_text(editor, x + 282.0F, y + 64.0F, guide->title, 1.2F, 600.0F,
                        (AfColor){0.9F, 0.94F, 1.0F, 1.0F}, 249030);
-    af_editor_add_text(editor, x + 282.0F, y + 101.0F, guide->summary, 0.78F, 600.0F,
+    af_editor_onboarding_paragraph(editor, x + 282.0F, y + 101.0F, guide->summary, 0.78F, 600.0F,
                        (AfColor){0.58F, 0.67F, 0.79F, 1.0F}, 249030);
     af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
                         (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 282.0F, .ty = y + 152.0F},
@@ -233,8 +280,11 @@ static void af_editor_render_guide_browser(AfEditorState *editor, int width, int
                    guide->step_count);
     af_editor_add_text(editor, x + 308.0F, y + 180.0F, step_label, 0.82F, 540.0F,
                        (AfColor){0.48F, 0.8F, 1.0F, 1.0F}, 249040);
-    af_editor_add_text(editor, x + 308.0F, y + 236.0F, guide->steps[editor->guide_step], 1.0F,
-                       550.0F, (AfColor){0.86F, 0.9F, 0.96F, 1.0F}, 249040);
+    af_editor_onboarding_paragraph(editor, x + 308.0F, y + 216.0F, guide->steps[editor->guide_step],
+                                   1.0F, 550.0F, (AfColor){0.86F, 0.9F, 0.96F, 1.0F}, 249040);
+    af_editor_onboarding_paragraph(editor, x + 308.0F, y + 300.0F,
+                                   guide->details[editor->guide_step], 0.72F, 550.0F, AF_UI_MUTED,
+                                   249040);
     af_editor_add_shape(editor, AF_NODE_ROUNDED_RECTANGLE,
                         (AfAffine2){.m00 = 1.0F, .m11 = 1.0F, .tx = x + 282.0F, .ty = y + 434.0F},
                         (AfVec2){292.0F, 48.0F}, (AfColor){0.15F, 0.22F, 0.34F, 1.0F}, 5.0F,
@@ -247,7 +297,15 @@ static void af_editor_render_guide_browser(AfEditorState *editor, int width, int
                        (AfColor){0.82F, 0.87F, 0.95F, 1.0F}, 249040);
     af_editor_add_text(editor, x + 686.0F, y + 451.0F, "NEXT STEP", 0.72F, 160.0F,
                        (AfColor){0.94F, 0.97F, 1.0F, 1.0F}, 249040);
-    af_editor_add_text(editor, x + 282.0F, y + 522.0F,
+    af_editor_add_button_rounded(editor, x + 282.0F, y + 490.0F, 292.0F, 26.0F, AF_UI_SURFACE, 5,
+                                 249030);
+    af_editor_add_text(editor, x + 318.0F, y + 497.0F, "PRACTICE IN EDITOR", 0.68F, 250.0F,
+                       AF_UI_TEXT, 249040);
+    af_editor_add_button_rounded(editor, x + 594.0F, y + 490.0F, 292.0F, 26.0F, AF_UI_SURFACE, 5,
+                                 249030);
+    af_editor_add_text(editor, x + 630.0F, y + 497.0F, "WEB LESSONS / PDF", 0.68F, 250.0F,
+                       AF_UI_TEXT, 249040);
+    af_editor_add_text(editor, x + 282.0F, y + 538.0F,
                        "UP / DOWN TOPIC  -  LEFT / RIGHT STEP  -  ESC CLOSES", 0.62F, 600.0F,
                        (AfColor){0.46F, 0.53F, 0.65F, 1.0F}, 249040);
 }
@@ -317,6 +375,20 @@ static bool af_editor_onboarding_mouse_down(AfEditorState *editor, int width, in
                 editor->guide_topic = (AfOnboardingTopic)(first_topic + row);
                 editor->guide_step = 0U;
             }
+        } else if (y >= box_y + 490.0F && y < box_y + 516.0F && guide != NULL) {
+            if (x >= box_x + 282.0F && x < box_x + 574.0F) {
+                editor->guided_topic = editor->guide_topic;
+                editor->guided_step = editor->guide_step;
+                editor->guide_browser_visible = false;
+                editor->guided_tour_visible = true;
+            } else if (x >= box_x + 594.0F && x < box_x + 886.0F) {
+                char url[256];
+                (void)snprintf(url, sizeof(url), "https://stmsi.github.io/arcflow/learn/#%s",
+                               guide->slug);
+                if (!SDL_OpenURL(url)) {
+                    af_editor_status(editor, "Could not open tutorials in your browser");
+                }
+            }
         } else if (y >= box_y + 434.0F && y < box_y + 482.0F && guide != NULL) {
             if (x >= box_x + 282.0F && x < box_x + 574.0F && editor->guide_step > 0U) {
                 --editor->guide_step;
@@ -328,13 +400,13 @@ static bool af_editor_onboarding_mouse_down(AfEditorState *editor, int width, in
         return true;
     }
     if (editor->guided_tour_visible) {
-        const AfOnboardingGuide *guide = af_onboarding_guide(AF_ONBOARDING_QUICK_START);
+        const AfOnboardingGuide *guide = af_onboarding_guide(editor->guided_topic);
         const float box_x = (float)width - editor->right_width - 430.0F - 14.0F;
         const float box_y = editor->toolbar_height + 14.0F;
-        if (x < box_x || x >= box_x + 430.0F || y < box_y || y >= box_y + 230.0F) {
+        if (x < box_x || x >= box_x + 430.0F || y < box_y || y >= box_y + 300.0F) {
             return false;
         }
-        if (y >= box_y + 174.0F && y < box_y + 210.0F) {
+        if (y >= box_y + 244.0F && y < box_y + 280.0F) {
             if (x >= box_x + 18.0F && x < box_x + 130.0F && editor->guided_step > 0U) {
                 --editor->guided_step;
             } else if (x >= box_x + 144.0F && x < box_x + 304.0F && guide != NULL) {
@@ -342,7 +414,7 @@ static bool af_editor_onboarding_mouse_down(AfEditorState *editor, int width, in
                     ++editor->guided_step;
                 } else {
                     editor->guided_tour_visible = false;
-                    af_editor_status(editor, "Guided first project complete");
+                    af_editor_status(editor, "Tutorial complete");
                 }
             } else if (x >= box_x + 304.0F) {
                 editor->guided_tour_visible = false;

@@ -1,6 +1,6 @@
 # Web build
 
-Requires [Emscripten 6.0.12](https://emscripten.org/docs/getting_started/downloads.html), CMake, and Ninja.
+Requires [Emscripten 6.0.12](https://emscripten.org/docs/getting_started/downloads.html), Python 3.9+, CMake, and Ninja.
 Activate `emsdk_env.sh`, then:
 
 ```sh
@@ -25,4 +25,7 @@ GIF/MP4 export and native plugins require the desktop app. Rendering uses browse
 and CPU billboard particles; GPU-specific VFX stay on desktop.
 
 Browser tests: `npm ci --prefix web`, `npx --prefix web playwright install chromium`,
-then `npm test --prefix web`.
+then `npm run docs:pdf --prefix web` and `npm test --prefix web`.
+
+Tutorials live at `/learn/`. Pages CI generates their downloadable PDF; for manual
+hosting, run the same PDF command before deploying. [Update lessons](learning/README.md).

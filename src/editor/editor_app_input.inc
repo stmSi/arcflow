@@ -3767,6 +3767,12 @@ static void af_editor_parse_arguments(AfEditorState *editor, int argument_count,
     for (index = 1; index < argument_count; ++index) {
         if (strcmp(arguments[index], "--frames") == 0 && index + 1 < argument_count) {
             editor->maximum_frames = (uint32_t)strtoul(arguments[++index], NULL, 10);
+        } else if (strcmp(arguments[index], "--tutorial") == 0 && index + 1 < argument_count) {
+            const AfOnboardingGuide *guide = af_onboarding_guide_find(arguments[++index]);
+            if (guide != NULL) {
+                editor->guided_topic = af_onboarding_guide_topic(guide);
+                editor->guided_tour_visible = true;
+            }
         } else if (strcmp(arguments[index], "--resize-smoke") == 0) {
             editor->resize_smoke = true;
         } else if (strcmp(arguments[index], "--context-smoke") == 0) {

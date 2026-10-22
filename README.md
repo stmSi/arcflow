@@ -9,7 +9,7 @@ Pushing a version tag (e.g. `v1.0.0`) automatically builds and publishes release
 
 ## Build and run
 
-Requires CMake 3.25+, Ninja, and a Vulkan 1.3 driver/loader.
+Requires Python 3.9+, CMake 3.25+, Ninja, and a Vulkan 1.3 driver/loader.
 
 ```sh
 git clone --recurse-submodules https://github.com/stmSi/arcflow.git
@@ -40,6 +40,10 @@ Browser build and GitHub Pages deployment: [Web guide](docs/web.md).
 - File > Export produces `.afp`, SVG, Lottie, GIF, or MP4. GIF/MP4 require FFmpeg.
 
 ## Docs
+
+[Interactive tutorials](https://stmsi.github.io/arcflow/learn/) ·
+[Tutorial PDF](https://stmsi.github.io/arcflow/learn/Arcflow-Tutorials.pdf) ·
+[Updating lessons](docs/learning/README.md)
 
 [Build](docs/building.md) · [Architecture](docs/architecture.md) ·
 [Framework](https://github.com/stmSi/af-framework#readme) · [Runtime API](docs/runtime-api.md) ·

@@ -69,6 +69,8 @@
         } else restore();
       }]
     };
+    if (!isPlayer && /^[a-z]+(?:-[a-z]+)*$/.test(query.get('tutorial') || ''))
+      Module.arguments.push('--tutorial', query.get('tutorial'));
     if (query.has('frames')) Module.arguments.push('--frames', query.get('frames'));
     if (query.has('capture')) Module.arguments.push('--output', '/documents/capture.png');
     var smoke = query.get('smoke');

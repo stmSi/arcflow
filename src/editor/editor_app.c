@@ -562,6 +562,7 @@ typedef struct AfEditorState {
     uint32_t example_selected_index;
     uint32_t guide_step;
     AfOnboardingTopic guide_topic;
+    AfOnboardingTopic guided_topic;
     bool shortcut_capture;
     bool running;
     bool dirty;
@@ -709,6 +710,7 @@ int af_editor_run(int argument_count, char **arguments) {
     bool loaded = false;
     int exit_code = 1;
     af_allocator_init_default(&editor.allocator);
+    editor.guided_topic = AF_ONBOARDING_QUICK_START;
     af_editor_parse_arguments(&editor, argument_count, arguments);
     result = af_project_load_file(editor.project_path, &editor.allocator, &editor.project);
     if (result == AF_RESULT_SUCCESS) {

@@ -193,7 +193,7 @@ static const AfEditorTopMenuInfo *af_editor_top_menu_info(AfEditorTopMenu menu) 
          .items = {{"Welcome", "", AF_EDITOR_MENU_ACTION_WELCOME},
                    {"Guided first project", "", AF_EDITOR_MENU_ACTION_GUIDED_PROJECT},
                    {"Example browser", "", AF_EDITOR_MENU_ACTION_EXAMPLE_BROWSER},
-                   {"Reference topics", "", AF_EDITOR_MENU_ACTION_BUTTON_GUIDE},
+                   {"Tutorials / PDF", "", AF_EDITOR_MENU_ACTION_BUTTON_GUIDE},
                    {"Keyboard shortcuts", "F1", AF_EDITOR_MENU_ACTION_SHORTCUTS},
                    {"Check for updates...", "", AF_EDITOR_MENU_ACTION_CHECK_UPDATES},
                    {"About arcflow", "", AF_EDITOR_MENU_ACTION_ABOUT}},
