@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AF_PROJECT_FORMAT_VERSION 16U
+#define AF_PROJECT_FORMAT_VERSION 17U
 #define AF_PROJECT_MAX_FILE_SIZE (32U * 1024U * 1024U)
 #define AF_PROJECT_NAME_CAPACITY 64U
 #define AF_PROJECT_MAX_CLIPS 64U
@@ -55,6 +55,7 @@ typedef struct AfProjectClip {
     float loop_start;
     float loop_end;
     bool loop;
+    uint32_t frame_rate; /* Zero uses 24 fps for older projects. */
 } AfProjectClip;
 
 typedef struct AfProjectTrack {
@@ -63,6 +64,8 @@ typedef struct AfProjectTrack {
     uint64_t node_id;
     AfPropertyType property;
     uint32_t element_index;
+    uint32_t cel_frame;
+    uint32_t cel_length; /* Nonzero marks a vector drawing exposure. */
 } AfProjectTrack;
 
 typedef struct AfProjectKeyframe {

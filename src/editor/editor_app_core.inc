@@ -60,6 +60,13 @@ static bool af_editor_selection_contains(const AfEditorState *editor, uint64_t i
 }
 
 static void af_editor_select_only(AfEditorState *editor, uint64_t id) {
+    const AfProjectTrack *cel = id ? af_editor_frame_owner(&editor->project, id) : NULL;
+    if (cel && !af_editor_frame_node_active(editor, id)) {
+        editor->selected_clip_id = cel->clip_id;
+        const AfProjectClip *clip = af_project_find_clip_const(&editor->project, cel->clip_id);
+        editor->playhead = (float)cel->cel_frame / (float)af_editor_frame_rate(clip);
+        editor->preview_playing = false;
+    }
     if (editor->selected_id != id) {
         editor->path_command_selection_node_id = id;
         editor->selected_path_command_count = 0U;

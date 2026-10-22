@@ -57,8 +57,9 @@ static const AfProjectTrack *af_editor_find_track(const AfEditorState *editor, u
     uint32_t index = 0U;
     for (index = 0U; index < editor->project.track_count; ++index) {
         const AfProjectTrack *track = &editor->project.tracks[index];
-        if (track->clip_id == editor->selected_clip_id && track->node_id == node_id &&
-            track->property == property && track->element_index == element_index) {
+        if (!track->cel_length && track->clip_id == editor->selected_clip_id &&
+            track->node_id == node_id && track->property == property &&
+            track->element_index == element_index) {
             return track;
         }
     }
@@ -140,7 +141,7 @@ static const AfProjectTrack *af_editor_track_at_row(const AfEditorState *editor,
     uint32_t row = 0U;
     for (uint32_t index = 0U; index < editor->project.track_count; ++index) {
         const AfProjectTrack *track = &editor->project.tracks[index];
-        if (track->clip_id != editor->selected_clip_id) {
+        if (track->cel_length || track->clip_id != editor->selected_clip_id) {
             continue;
         }
         if (row++ == requested_row) {
@@ -153,7 +154,10 @@ static const AfProjectTrack *af_editor_track_at_row(const AfEditorState *editor,
 static uint32_t af_editor_clip_track_count(const AfEditorState *editor) {
     uint32_t count = 0U;
     for (uint32_t index = 0U; index < editor->project.track_count; ++index) {
-        count += editor->project.tracks[index].clip_id == editor->selected_clip_id ? 1U : 0U;
+        count += !editor->project.tracks[index].cel_length &&
+                         editor->project.tracks[index].clip_id == editor->selected_clip_id
+                     ? 1U
+                     : 0U;
     }
     return count;
 }
@@ -170,7 +174,8 @@ static uint32_t af_editor_track_row(const AfEditorState *editor, uint64_t track_
     uint32_t index = 0U;
     uint32_t row = 0U;
     for (index = 0U; index < editor->project.track_count; ++index) {
-        if (editor->project.tracks[index].clip_id != editor->selected_clip_id) {
+        if (editor->project.tracks[index].cel_length ||
+            editor->project.tracks[index].clip_id != editor->selected_clip_id) {
             continue;
         }
         if (editor->project.tracks[index].id == track_id) {
@@ -339,8 +344,15 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
         (void)snprintf(timecode, sizeof(timecode), "%.2fs  /  %.2fs", (double)editor->playhead,
                        (double)clip->duration);
         af_editor_add_text(editor, center_left + 12.0F, top + 52.0F, timecode, 0.72F,
-                           editor->timeline_header_width - 20.0F,
+                           editor->timeline_header_width - 90.0F,
                            (AfColor){0.72F, 0.76F, 0.84F, 1.0F}, 100130);
+    }
+    af_editor_add_button_rect(editor, ruler_x - 70, top + 46, 62, 22,
+                              editor->frames_visible ? AF_UI_SELECTION : AF_UI_FIELD, 100140);
+    af_editor_add_text(editor, ruler_x - 63, top + 52, "Frames", .62F, 50, AF_UI_TEXT, 100145);
+    if (editor->frames_visible) {
+        af_editor_render_frames(editor, width, height);
+        return;
     }
     const float tick_base = powf(10, floorf(log10f(60 / editor->timeline_zoom)));
     const float tick_ratio = 60 / editor->timeline_zoom / tick_base;
@@ -409,7 +421,7 @@ static void af_editor_render_timeline(AfEditorState *editor, int width, int heig
             const AfProjectTrack *track = &editor->project.tracks[index];
             float y = 0.0F;
             uint32_t key_index = 0U;
-            if (track->clip_id != editor->selected_clip_id) {
+            if (track->cel_length || track->clip_id != editor->selected_clip_id) {
                 continue;
             }
             y = top + AF_EDITOR_TIMELINE_RULER_HEIGHT +

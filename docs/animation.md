@@ -5,6 +5,17 @@ color, corner radius, a path point/control, outline color, or gradient geometry/
 Keyframes store seconds, up to four value components, interpolation, and cubic
 Bézier easing controls. No pointer is serialized.
 
+## Drawing frames
+
+Click **Frames** (`Shift+F6`) to draw with the existing vector tools. Click a numbered cell or use
+`[` / `]` to step. **Blank** starts an empty drawing; **Duplicate** copies the current drawing into
+the next available frame. Each copy is independently editable. **Hold** extends a drawing into
+empty cells; **FPS** sets playback speed. Both have −/+ controls.
+
+**Onion skin** previews the previous and next drawings in blue and pink. **Fit clip length** trims
+playback and exports to the drawings and existing animation keys. Frame numbers start at 1 (time 0).
+Drawings, timing, and undo work in desktop and browser projects; ordinary objects remain backgrounds.
+
 ## Authoring workflow
 
 Select an object, position the playhead, choose the labeled property in the timeline, and click

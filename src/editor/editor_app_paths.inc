@@ -239,6 +239,10 @@ static AfResult af_editor_create_primitive_at(AfEditorState *editor, AfNodeType 
     if (rect.size.x < 0.1F || rect.size.y < 0.1F) {
         return result;
     }
+    uint64_t frame_parent = 0;
+    result = af_editor_frame_parent(editor, &frame_parent);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
     result = af_project_allocate_id(&editor->project, &id);
     if (result != AF_RESULT_SUCCESS) {
         return result;
@@ -249,6 +253,7 @@ static AfResult af_editor_create_primitive_at(AfEditorState *editor, AfNodeType 
     if (type == AF_NODE_ROUNDED_RECTANGLE) {
         snapshot.node.corner_radius = fminf(rect.size.x, rect.size.y) * 0.18F;
     }
+    snapshot.node.parent_id = frame_parent;
     snapshot.style = af_editor_default_style(id, &snapshot.node);
     snapshot.layout = af_editor_centered_pivot_layout(&snapshot.node);
     snapshot.has_layout = true;
@@ -278,6 +283,10 @@ static AfResult af_editor_create_path_geometry_with_shape(
         command_count > AF_EDITOR_COMMAND_MAX_PATH_COMMANDS || size.x <= 0.0F || size.y <= 0.0F) {
         return result;
     }
+    uint64_t frame_parent = 0;
+    result = af_editor_frame_parent(editor, &frame_parent);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
     result = af_project_allocate_id(&editor->project, &id);
     if (result != AF_RESULT_SUCCESS) {
         return result;
@@ -289,6 +298,7 @@ static AfResult af_editor_create_path_geometry_with_shape(
     snapshot.node.polygon_inset = inset;
     snapshot.node.fill =
         closed ? (AfColor){0.58F, 0.34F, 0.94F, 1.0F} : (AfColor){0.25F, 0.72F, 1.0F, 0.0F};
+    snapshot.node.parent_id = frame_parent;
     snapshot.style = af_editor_default_style(id, &snapshot.node);
     if (!closed) {
         snapshot.style.stroke.width = 3.0F;
@@ -697,13 +707,18 @@ static AfResult af_editor_create_primitive(AfEditorState *editor, AfNodeType typ
     const char *name = type == AF_NODE_RECTANGLE
                            ? "Rectangle"
                            : (type == AF_NODE_ROUNDED_RECTANGLE ? "Rounded Rectangle" : "Ellipse");
-    AfResult result = af_project_allocate_id(&editor->project, &id);
+    uint64_t frame_parent = 0;
+    AfResult result = af_editor_frame_parent(editor, &frame_parent);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
+    result = af_project_allocate_id(&editor->project, &id);
     if (result != AF_RESULT_SUCCESS) {
         return result;
     }
     snapshot = (AfProjectNodeSnapshot){
         .node = af_editor_default_node(type, id, af_editor_visible_center(editor, width, height)),
         .index = editor->project.scene.count};
+    snapshot.node.parent_id = frame_parent;
     snapshot.style = af_editor_default_style(id, &snapshot.node);
     snapshot.layout = af_editor_centered_pivot_layout(&snapshot.node);
     snapshot.has_layout = true;
@@ -771,7 +786,11 @@ static AfResult af_editor_create_path(AfEditorState *editor, int width, int heig
     AfProjectNodeSnapshot snapshot = {0};
     AfEditorCommand command = {0};
     uint64_t id = 0U;
-    AfResult result = af_project_allocate_id(&editor->project, &id);
+    uint64_t frame_parent = 0;
+    AfResult result = af_editor_frame_parent(editor, &frame_parent);
+    if (result != AF_RESULT_SUCCESS)
+        return result;
+    result = af_project_allocate_id(&editor->project, &id);
     if (result != AF_RESULT_SUCCESS) {
         return result;
     }
@@ -781,6 +800,7 @@ static AfResult af_editor_create_path(AfEditorState *editor, int width, int heig
         .index = editor->project.scene.count};
     snapshot.node.bounds = (AfVec2){220.0F, 180.0F};
     snapshot.node.fill = (AfColor){0.78F, 0.42F, 0.96F, 1.0F};
+    snapshot.node.parent_id = frame_parent;
     snapshot.style = af_editor_default_style(id, &snapshot.node);
     snapshot.layout = af_editor_centered_pivot_layout(&snapshot.node);
     snapshot.has_layout = true;
@@ -1714,6 +1734,11 @@ static void af_editor_reconcile_selection(AfEditorState *editor) {
 }
 
 static AfResult af_editor_duplicate_selection(AfEditorState *editor) {
+    const AfProjectTrack *cel = af_editor_frame_owner(&editor->project, editor->selected_id);
+    if (cel && cel->node_id == editor->selected_id) {
+        af_editor_frame_new(editor, true);
+        return AF_RESULT_SUCCESS;
+    }
     AfProjectNodeSnapshot originals[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     AfProjectNodeSnapshot copies[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];
     uint64_t roots[AF_EDITOR_COMMAND_MAX_SNAPSHOTS];

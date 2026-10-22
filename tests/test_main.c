@@ -27,6 +27,7 @@
 #include "arcflow/arcflow_runtime.h"
 #include "assets/package.h"
 #include "editor/editor_commands.h"
+#include "editor/editor_frames.h"
 #include "editor/editor_gizmo.h"
 #include "editor/editor_inspector.h"
 #include "editor/editor_text.h"
@@ -76,6 +77,7 @@ typedef struct AfTestFixture {
 #include "test_project.inc"
 #include "test_images.inc"
 #include "test_editor.inc"
+#include "test_editor_frames.inc"
 #include "test_editor_knife.inc"
 #include "test_editor_conversion.inc"
 #include "test_editor_compound.inc"
@@ -137,6 +139,7 @@ int main(void) {
         {"editable text", af_test_editor_text},
         {"document fonts", af_test_document_fonts},
         {"editor commands", af_test_editor_commands},
+        {"vector drawing frames", af_test_editor_frames},
         {"Vulkan pipeline smoke", af_test_gpu_smoke}};
     size_t index = 0U;
     size_t passed = 0U;

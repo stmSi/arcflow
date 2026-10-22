@@ -227,10 +227,16 @@ static void af_editor_apply_text_panel(AfEditorState *editor) {
     }
     if (text.mode != AF_PROJECT_TEXT_ON_PATH)
         text.guide_count = 0;
+    uint64_t frame_parent = 0;
+    if (!editor->text_panel_id &&
+        af_editor_frame_parent(editor, &frame_parent) != AF_RESULT_SUCCESS)
+        return;
     AfEditorCommand command;
     AfResult result = af_editor_command_text(
         &editor->project, text.font_name[0] ? editor->system_font_engine : editor->text_engine,
         font_id, editor->text_panel_id, editor->text_panel_position, &text, &command);
+    if (result == AF_RESULT_SUCCESS && !editor->text_panel_id)
+        command.after[0].node.parent_id = frame_parent;
     if (result == AF_RESULT_SUCCESS &&
         (!editor->text_panel_id ||
          strcmp(editor->text_panel_original_color, editor->text_panel_numbers[5]) != 0)) {

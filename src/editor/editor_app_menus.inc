@@ -358,7 +358,16 @@ static AfResult af_editor_adopt_project(AfEditorState *editor, AfProject *projec
     editor->selected_asset_id = 0U;
     editor->selected_path_command = UINT32_MAX;
     editor->selected_keyframe_count = 0U;
+    editor->frames_visible = false;
+    editor->playhead = 0;
+    editor->timeline_pan = 0;
     editor->selected_clip_id = editor->project.clip_count == 0U ? 0U : editor->project.clips[0].id;
+    for (uint32_t i = 0; i < editor->project.track_count; ++i)
+        if (editor->project.tracks[i].cel_length) {
+            editor->selected_clip_id = editor->project.tracks[i].clip_id;
+            af_editor_toggle_frames(editor);
+            break;
+        }
     editor->selected_property = AF_PROPERTY_POSITION;
     editor->playhead = 0.0F;
     editor->preview_playing = false;
@@ -1104,17 +1113,19 @@ static void af_editor_handle_dialog_event(AfEditorState *editor, const SDL_UserE
 }
 
 static void af_editor_select_all(AfEditorState *editor) {
-    editor->selected_count = editor->project.scene.count < AF_EDITOR_COMMAND_MAX_SNAPSHOTS
-                                 ? editor->project.scene.count
-                                 : AF_EDITOR_COMMAND_MAX_SNAPSHOTS;
-    for (uint32_t index = 0U; index < editor->selected_count; ++index) {
-        editor->selected_ids[index] = editor->project.scene.nodes[index].id;
+    editor->selected_count = 0;
+    for (uint32_t i = 0; i < editor->project.scene.count &&
+                         editor->selected_count < AF_EDITOR_COMMAND_MAX_SNAPSHOTS;
+         ++i) {
+        const AfSceneNode *node = &editor->project.scene.nodes[i];
+        const AfProjectTrack *cel = af_editor_frame_owner(&editor->project, node->id);
+        if (!af_editor_frame_node_active(editor, node->id) || (cel && cel->node_id == node->id))
+            continue;
+        editor->selected_ids[editor->selected_count++] = node->id;
     }
     editor->selected_id =
-        editor->selected_count == 0U ? 0U : editor->selected_ids[editor->selected_count - 1U];
-    af_editor_status(editor, editor->selected_count == editor->project.scene.count
-                                 ? "All objects selected"
-                                 : "Selection limited to 64 objects");
+        editor->selected_count ? editor->selected_ids[editor->selected_count - 1] : 0;
+    af_editor_status(editor, "Visible drawing objects selected");
 }
 
 static void af_editor_fit_canvas(AfEditorState *editor, int width, int height) {
@@ -1189,7 +1200,9 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         }
         break;
     case AF_EDITOR_MENU_ACTION_DUPLICATE:
-        if (editor->timeline_focus)
+        if (editor->frames_visible && editor->timeline_focus)
+            af_editor_frame_new(editor, true);
+        else if (editor->timeline_focus)
             (void)af_editor_paste_keyframes(editor, true);
         else
             (void)af_editor_duplicate_selection(editor);
@@ -1198,7 +1211,9 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         af_editor_begin_rename(editor);
         break;
     case AF_EDITOR_MENU_ACTION_DELETE:
-        if (editor->timeline_focus)
+        if (editor->frames_visible && editor->timeline_focus)
+            af_editor_frame_delete(editor);
+        else if (editor->timeline_focus)
             (void)af_editor_delete_keyframes(editor);
         else
             (void)af_editor_delete_selection(editor);
@@ -1211,7 +1226,8 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
                 const AfProjectKeyframe *key = &editor->project.keyframes[i];
                 const AfProjectTrack *track =
                     af_project_find_track_const(&editor->project, key->track_id);
-                if (track != NULL && track->clip_id == editor->selected_clip_id &&
+                if (track != NULL && !track->cel_length &&
+                    track->clip_id == editor->selected_clip_id &&
                     (!editor->curve_visible || (selected != NULL && track->id == selected->id)))
                     af_editor_select_keyframe(editor, key->id, true);
             }
@@ -1292,6 +1308,7 @@ static void af_editor_execute_menu_action(AfEditorState *editor, AfEditorMenuAct
         (void)af_editor_add_keyframe(editor);
         break;
     case AF_EDITOR_MENU_ACTION_CURVES:
+        editor->frames_visible = false;
         editor->curve_visible = !editor->curve_visible;
         editor->timeline_focus = true;
         break;

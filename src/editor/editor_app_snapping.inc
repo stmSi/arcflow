@@ -5,6 +5,8 @@ static void af_editor_prepare_snapping(AfEditorState *editor, bool exclude_selec
     bool first = true;
     for (uint32_t i = 0; i < editor->preview_scene.count; ++i) {
         AfSceneNode node = editor->preview_scene.nodes[i];
+        if (!af_editor_frame_node_active(editor, node.id))
+            continue;
         AfEditorSnapBounds bounds;
         if (!af_editor_scene_node_bounds(&editor->preview_scene, &node, false, &bounds))
             continue;

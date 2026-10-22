@@ -353,7 +353,7 @@ AfResult af_project_validate(const AfProject *project) {
         if (clip->id == 0U || clip->id >= UINT64_MAX - 1U || !af_project_name_valid(clip->name) ||
             !af_project_validation_insert(project, clip->id) || !isfinite(clip->duration) ||
             !isfinite(clip->loop_start) || !isfinite(clip->loop_end) || clip->duration <= 0.0F ||
-            clip->duration > 86400.0F || clip->loop_start < 0.0F ||
+            clip->duration > 86400.0F || clip->frame_rate > 120U || clip->loop_start < 0.0F ||
             clip->loop_end < clip->loop_start || clip->loop_end > clip->duration) {
             return AF_RESULT_INVALID_ARGUMENT;
         }
@@ -368,6 +368,16 @@ AfResult af_project_validate(const AfProject *project) {
             track->property > AF_PROPERTY_LAST ||
             !af_project_track_target_valid(project, track)) {
             return AF_RESULT_INVALID_ARGUMENT;
+        }
+        if (track->cel_length != 0U) {
+            const AfProjectClip *clip = af_project_find_clip_const(project, track->clip_id);
+            const AfSceneNode *node = af_scene_find_const(&project->scene, track->node_id);
+            const uint32_t fps = clip->frame_rate ? clip->frame_rate : 24U;
+            if (node == NULL || node->type != AF_NODE_GROUP ||
+                track->property != AF_PROPERTY_OPACITY || track->cel_frame > 10368000U ||
+                track->cel_length > 10368000U ||
+                (double)track->cel_frame + track->cel_length > (double)clip->duration * fps + .01)
+                return AF_RESULT_INVALID_ARGUMENT;
         }
         for (other = index + 1U; other < project->track_count; ++other) {
             const AfProjectTrack *candidate = &project->tracks[other];

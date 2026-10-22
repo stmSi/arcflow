@@ -310,7 +310,7 @@ AfResult af_project_deserialize_versioned(const void *data, size_t size, AfAlloc
             continue;
         }
         if (strcmp(line, "end_clip") == 0) {
-            if (!in_clip || fields != AF_PROJECT_CLIP_REQUIRED ||
+            if (!in_clip || (fields & AF_PROJECT_CLIP_REQUIRED) != AF_PROJECT_CLIP_REQUIRED ||
                 af_project_insert_clip_snapshot(&project, &clip) != AF_RESULT_SUCCESS) {
                 goto cleanup;
             }
@@ -334,7 +334,7 @@ AfResult af_project_deserialize_versioned(const void *data, size_t size, AfAlloc
             continue;
         }
         if (strcmp(line, "end_track") == 0) {
-            if (!in_track || fields != AF_PROJECT_TRACK_REQUIRED ||
+            if (!in_track || (fields & AF_PROJECT_TRACK_REQUIRED) != AF_PROJECT_TRACK_REQUIRED ||
                 af_project_insert_track_snapshot(&project, &track) != AF_RESULT_SUCCESS) {
                 goto cleanup;
             }

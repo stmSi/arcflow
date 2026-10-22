@@ -215,6 +215,13 @@ static bool af_project_parse_clip_field(const char *line, AfProjectClipSnapshot 
         snapshot->clip.loop = integer != 0U;
         return true;
     }
+    if ((value = af_project_value(line, "frame_rate")) != NULL) {
+        if (!af_project_set_field(fields, AF_PROJECT_CLIP_FPS) ||
+            !af_project_parse_u64(value, &integer) || integer > 120U)
+            return false;
+        snapshot->clip.frame_rate = (uint32_t)integer;
+        return true;
+    }
     if ((value = af_project_value(line, "loop_region")) != NULL) {
         if (!af_project_set_field(fields, AF_PROJECT_CLIP_REGION) ||
             !af_project_parse_floats(value, values, 2U)) {
@@ -283,6 +290,22 @@ static bool af_project_parse_track_field(const char *line, AfProjectTrackSnapsho
         } else {
             return false;
         }
+        return true;
+    }
+    if ((value = af_project_value(line, "cel_frame")) != NULL) {
+        uint64_t number = 0;
+        if (!af_project_set_field(fields, AF_PROJECT_TRACK_CEL_FRAME) ||
+            !af_project_parse_u64(value, &number) || number > 10368000U)
+            return false;
+        snapshot->track.cel_frame = (uint32_t)number;
+        return true;
+    }
+    if ((value = af_project_value(line, "cel_length")) != NULL) {
+        uint64_t number = 0;
+        if (!af_project_set_field(fields, AF_PROJECT_TRACK_CEL_LENGTH) ||
+            !af_project_parse_u64(value, &number) || number > 10368000U)
+            return false;
+        snapshot->track.cel_length = (uint32_t)number;
         return true;
     }
     if ((value = af_project_value(line, "element")) != NULL) {

@@ -21,6 +21,11 @@ static void af_editor_clear_key_selection(AfEditorState *editor) {
 }
 
 static void af_editor_select_keyframe(AfEditorState *editor, uint64_t id, bool toggle) {
+    const AfProjectKeyframe *key = af_project_find_keyframe_const(&editor->project, id);
+    const AfProjectTrack *track =
+        key ? af_project_find_track_const(&editor->project, key->track_id) : NULL;
+    if (track && track->cel_length)
+        return;
     uint32_t index = 0U;
     for (index = 0U; index < editor->selected_keyframe_count; ++index) {
         if (editor->selected_keyframes[index] == id) {

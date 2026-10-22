@@ -15,6 +15,7 @@
 #include "editor/editor_commands.h"
 #include "editor/editor_export.h"
 #include "editor/editor_fonts.h"
+#include "editor/editor_frames.h"
 #include "editor/editor_gizmo.h"
 #include "editor/editor_inspector.h"
 #include "editor/editor_preferences.h"
@@ -338,6 +339,8 @@ typedef struct AfEditorState {
     AfVec2 path_segment_start;
     bool timeline_focus;
     bool curve_visible;
+    bool frames_visible;
+    bool onion_skin_disabled;
     bool preview_playing;
     uint64_t previous_ticks;
     AfEditorDragMode drag_mode;
@@ -632,6 +635,15 @@ static AfPathCommand af_editor_pen_closing_segment(const AfEditorState *editor);
 static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_t count,
                                                   bool closed);
 
+static void af_editor_render_frames(AfEditorState *editor, int width, int height);
+static void af_editor_toggle_frames(AfEditorState *editor);
+static void af_editor_frame_seek(AfEditorState *editor, uint32_t frame);
+static uint32_t af_editor_current_frame(const AfEditorState *editor);
+static bool af_editor_frame_node_active(const AfEditorState *editor, uint64_t node_id);
+static bool af_editor_frames_mouse(AfEditorState *editor, int width, int height, float x, float y);
+static AfResult af_editor_frame_parent(AfEditorState *editor, uint64_t *parent);
+static void af_editor_render_onion(AfEditorState *editor, AfAffine2 camera);
+
 // clang-format off
 #include "editor/editor_app_core.inc"
 #include "editor/editor_app_collaboration.inc"
@@ -647,6 +659,7 @@ static AfResult af_editor_commit_pen_continuation(AfEditorState *editor, uint32_
 #include "editor/editor_app_canvas.inc"
 #include "editor/editor_app_snapping.inc"
 #include "editor/editor_app_animation.inc"
+#include "editor/editor_app_frames.inc"
 #include "editor/editor_app_paths.inc"
 #include "editor/editor_app_text.inc"
 #include "editor/editor_app_properties.inc"
@@ -1419,6 +1432,8 @@ int af_editor_run(int argument_count, char **arguments) {
                 .y = AF_EDITOR_COLOR_TARGET_Y + AF_EDITOR_COLOR_TARGET_HEIGHT * 0.5F};
             af_editor_mouse_down(&editor, width, height, &target_click, SDL_KMOD_NONE);
         }
+        if (editor.selected_id && !af_editor_frame_node_active(&editor, editor.selected_id))
+            af_editor_select_only(&editor, 0);
         af_editor_update_preview(&editor);
         af_editor_build_hierarchy(&editor);
         if (editor.vector_animation_smoke) {

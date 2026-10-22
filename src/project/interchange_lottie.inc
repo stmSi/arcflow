@@ -590,6 +590,24 @@ AfResult af_interchange_export_lottie_json(const AfProject *project, uint64_t cl
         const uint32_t node_index = order[output_index];
         const AfSceneNode *node = &project->scene.nodes[node_index];
         const char *name = project->names == NULL ? "Layer" : project->names[node_index];
+        float in_frame = 0, out_frame = fmaxf(1.0F, ceilf(clip->duration * frame_rate));
+        /* Lottie parenting does not inherit opacity. Gate each drawing descendant
+         * with layer in/out points so exported cels retain their exposure. */
+        const AfSceneNode *ancestor = node;
+        for (uint32_t depth = 0; ancestor && depth < project->scene.count; ++depth) {
+            for (uint32_t t = 0; t < project->track_count; ++t) {
+                const AfProjectTrack *cel = &project->tracks[t];
+                if (!cel->cel_length || cel->node_id != ancestor->id)
+                    continue;
+                const AfProjectClip *owner = af_lottie_find_clip(project, cel->clip_id);
+                const float fps = owner && owner->frame_rate ? (float)owner->frame_rate : 24.0F;
+                in_frame = (float)cel->cel_frame / fps * frame_rate;
+                out_frame = (float)(cel->cel_frame + cel->cel_length) / fps * frame_rate;
+                if (cel->clip_id != clip_id)
+                    in_frame = out_frame = 0;
+            }
+            ancestor = af_scene_find_const(&project->scene, ancestor->parent_id);
+        }
         uint32_t parent_index = UINT32_MAX;
         if (node->parent_id != AF_INVALID_NODE_ID) {
             for (uint32_t index = 0U; index < project->scene.count; ++index) {
@@ -628,9 +646,8 @@ AfResult af_interchange_export_lottie_json(const AfProject *project, uint64_t cl
                                   "embedding in a future export version or use GIF/MP4");
         }
         if (!af_interchange_writer_append(&writer,
-                                          "],\"ip\":0,\"op\":%.9g,\"st\":0,\"bm\":0,\"hd\":%s}",
-                                          fmaxf(1.0F, ceilf(clip->duration * frame_rate)),
-                                          node->visible ? "false" : "true")) {
+                                          "],\"ip\":%.9g,\"op\":%.9g,\"st\":0,\"bm\":0,\"hd\":%s}",
+                                          in_frame, out_frame, node->visible ? "false" : "true")) {
             goto output_limit;
         }
     }

@@ -139,6 +139,8 @@ static uint64_t af_editor_hit_test(AfEditorState *editor, AfVec2 project_point) 
     uint32_t index = 0U;
     for (index = 0U; index < editor->preview_scene.count; ++index) {
         const AfSceneNode *node = &editor->preview_scene.nodes[index];
+        if (!af_editor_frame_node_active(editor, node->id))
+            continue;
         const AfStyle *source_style =
             af_style_find_node_const(&editor->project.style_data, node->id);
         AfStyle resolved_style = {0};

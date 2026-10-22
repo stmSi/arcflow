@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {testVectorFrames} from './test_web_frames.mjs';
 import {createServer} from 'node:http';
 import {readFile, stat} from 'node:fs/promises';
 import {resolve, extname, sep} from 'node:path';
@@ -24,6 +25,7 @@ const options = {headless: true};
 if (process.env.ARCFLOW_CHROMIUM) options.executablePath = process.env.ARCFLOW_CHROMIUM;
 const browser = await chromium.launch(options);
 try {
+  await testVectorFrames(browser, base);
   for (const [smoke, frames] of [['studio', 4], ['template', 2], ['inspector', 8], ['vector-tools', 8], ['image', 4], ['gradient-drag', 4], ['editing', 4], ['particle-inputs', 4], ['particle-view', 24]]) {
     const page = await browser.newPage({viewport: {width: 1440, height: 900}});
     const errors = [];

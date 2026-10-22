@@ -245,7 +245,10 @@ rollback:
 static AfResult af_editor_animation_apply(AfProject *project, const AfEditorCommand *command,
                                           bool forward) {
     af_editor_animation_remove(project, command, forward);
-    return af_editor_animation_restore(project, command, !forward);
+    AfResult result = af_editor_animation_restore(project, command, !forward);
+    if (result != AF_RESULT_SUCCESS)
+        (void)af_editor_animation_restore(project, command, forward);
+    return result;
 }
 
 static void af_editor_path_remove(AfProject *project, const AfEditorCommand *command, bool before) {
@@ -378,16 +381,24 @@ static AfResult af_editor_command_apply_side(AfProject *project, const AfEditorC
     case AF_EDITOR_COMMAND_DUPLICATE:
         if (forward) {
             AfResult result = af_editor_restore(project, command->after, command->after_count);
-            if (result == AF_RESULT_SUCCESS) {
-                result = af_editor_path_restore(project, command, false);
-                if (result != AF_RESULT_SUCCESS) {
-                    (void)af_editor_remove(project, command->after, command->after_count);
-                }
+            if (result != AF_RESULT_SUCCESS)
+                return result;
+            result = af_editor_path_restore(project, command, false);
+            if (result == AF_RESULT_SUCCESS)
+                result = af_editor_animation_apply(project, command, true);
+            if (result != AF_RESULT_SUCCESS) {
+                af_editor_path_remove(project, command, false);
+                (void)af_editor_remove(project, command->after, command->after_count);
             }
             return result;
         }
-        af_editor_path_remove(project, command, false);
-        return af_editor_remove(project, command->after, command->after_count);
+        {
+            AfResult result = af_editor_animation_apply(project, command, false);
+            if (result != AF_RESULT_SUCCESS)
+                return result;
+            af_editor_path_remove(project, command, false);
+            return af_editor_remove(project, command->after, command->after_count);
+        }
     case AF_EDITOR_COMMAND_DELETE:
         if (forward) {
             AfResult result = AF_RESULT_SUCCESS;

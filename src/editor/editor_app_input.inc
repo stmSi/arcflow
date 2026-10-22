@@ -100,6 +100,7 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
             editor->playhead = 0.0F;
             af_editor_status(editor, "Preview reset to time zero");
         } else if (local_x >= 120.0F && local_x < 178.0F) {
+            editor->frames_visible = false;
             editor->curve_visible = !editor->curve_visible;
             af_editor_status(editor, editor->curve_visible ? "Animation graph opened"
                                                            : "Dope sheet opened");
@@ -145,6 +146,13 @@ static bool af_editor_timeline_mouse_down(AfEditorState *editor, int width, int 
     if (clip == NULL) {
         return true;
     }
+    if (event->y >= top + 46 && event->y < top + 68 && event->x >= ruler_x - 70 &&
+        event->x < ruler_x - 8) {
+        af_editor_toggle_frames(editor);
+        return true;
+    }
+    if (editor->frames_visible)
+        return af_editor_frames_mouse(editor, width, height, event->x, event->y);
     if (event->y < top + AF_EDITOR_TIMELINE_RULER_HEIGHT) {
         const float start_x = af_editor_time_to_x(editor, clip->loop_start);
         const float end_x = af_editor_time_to_x(editor, clip->loop_end);
@@ -1012,6 +1020,8 @@ static void af_editor_canvas_box_select(AfEditorState *editor, int width, int he
     }
     for (uint32_t index = 0U; index < editor->preview_scene.count; ++index) {
         const AfSceneNode *node = &editor->preview_scene.nodes[index];
+        if (!af_editor_frame_node_active(editor, node->id))
+            continue;
         float minimum_x = 0.0F;
         float minimum_y = 0.0F;
         float maximum_x = 0.0F;
@@ -2105,8 +2115,15 @@ static void af_editor_mouse_wheel(AfEditorState *editor, int width, int height,
             editor->timeline_pan = fmaxf(0.0F, editor->timeline_pan - scroll_y * 0.25F);
         } else {
             editor->timeline_zoom = af_editor_clamp(
-                editor->timeline_zoom * powf(1.12F, af_editor_clamp(scroll_y, -64.0F, 64.0F)), .01F,
-                1000.0F);
+                editor->timeline_zoom * powf(1.12F, af_editor_clamp(scroll_y, -64.0F, 64.0F)),
+                editor->frames_visible
+                    ? 8.0F * (float)af_editor_frame_rate(af_project_find_clip_const(
+                                 &editor->project, editor->selected_clip_id))
+                    : .01F,
+                editor->frames_visible
+                    ? 72.0F * (float)af_editor_frame_rate(af_project_find_clip_const(
+                                  &editor->project, editor->selected_clip_id))
+                    : 1000.0F);
             editor->timeline_pan =
                 fmaxf(0.0F, anchor_time - (event->mouse_x - af_editor_timeline_origin_x(editor)) /
                                               editor->timeline_zoom);
@@ -2286,7 +2303,7 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
             return;
         }
     }
-    if (!control && !alt && !editor->timeline_focus) {
+    if (!control && !alt && (!editor->timeline_focus || editor->frames_visible)) {
         AfEditorVectorTool shortcut_tool = AF_EDITOR_TOOL_COUNT;
         if (event->key == SDLK_V) {
             if (event->repeat)
@@ -2394,7 +2411,9 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     } else if (control && event->key == SDLK_V && editor->timeline_focus) {
         (void)af_editor_paste_keyframes(editor, false);
     } else if (control && event->key == SDLK_D) {
-        if (editor->timeline_focus && editor->selected_keyframe_count != 0U) {
+        if (editor->frames_visible && editor->timeline_focus) {
+            af_editor_frame_new(editor, true);
+        } else if (editor->timeline_focus && editor->selected_keyframe_count != 0U) {
             (void)af_editor_paste_keyframes(editor, true);
         } else {
             (void)af_editor_duplicate_selection(editor);
@@ -2406,7 +2425,9 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     } else if (alt && event->key == SDLK_DELETE) {
         (void)af_editor_delete_clip(editor);
     } else if (event->key == SDLK_DELETE || event->key == SDLK_BACKSPACE) {
-        if (editor->timeline_focus) {
+        if (editor->frames_visible && editor->timeline_focus) {
+            af_editor_frame_delete(editor);
+        } else if (editor->timeline_focus) {
             (void)af_editor_delete_keyframes(editor);
         } else if (editor->active_tool == AF_EDITOR_TOOL_NODE && !shift &&
                    af_editor_selected_path(editor) != NULL &&
@@ -2456,13 +2477,18 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
     } else if (event->key == SDLK_DOWN) {
         af_editor_nudge(editor, 0.0F, nudge);
     } else if (event->key == SDLK_LEFTBRACKET) {
-        if (control && editor->timeline_focus) {
+        if (editor->frames_visible && !control) {
+            const uint32_t frame = af_editor_current_frame(editor);
+            af_editor_frame_seek(editor, frame ? frame - 1 : 0);
+        } else if (control && editor->timeline_focus) {
             (void)af_editor_modify_selected_keys(editor, 2, AF_INTERPOLATION_LINEAR);
         } else {
             af_editor_modify_scalar(editor, AF_EDITOR_MERGE_LAYER, -1.0F, 2);
         }
     } else if (event->key == SDLK_RIGHTBRACKET) {
-        if (control && editor->timeline_focus) {
+        if (editor->frames_visible && !control) {
+            af_editor_frame_seek(editor, af_editor_current_frame(editor) + 1);
+        } else if (control && editor->timeline_focus) {
             (void)af_editor_modify_selected_keys(editor, 1, AF_INTERPOLATION_LINEAR);
         } else {
             af_editor_modify_scalar(editor, AF_EDITOR_MERGE_LAYER, 1.0F, 2);
@@ -2495,7 +2521,12 @@ static void af_editor_key(AfEditorState *editor, int width, int height,
                editor->timeline_focus) {
         (void)af_editor_modify_selected_keys(editor, 3, AF_INTERPOLATION_LINEAR);
     } else if (event->key == SDLK_F6) {
-        editor->curve_visible = !editor->curve_visible;
+        if (shift)
+            af_editor_toggle_frames(editor);
+        else {
+            editor->frames_visible = false;
+            editor->curve_visible = !editor->curve_visible;
+        }
         editor->timeline_focus = true;
     } else if (event->key == SDLK_F7 && editor->timeline_focus) {
         (void)af_editor_modify_selected_keys(editor, 4, AF_INTERPOLATION_CUBIC_BEZIER);

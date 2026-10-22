@@ -828,6 +828,7 @@ static void af_editor_build_render_scene(AfEditorState *editor, int width, int h
                        -100000);
     af_editor_render_grid(editor, width, height, camera);
     af_editor_render_canvas_workflow(editor, width, height, camera);
+    af_editor_render_onion(editor, camera);
     if (editor->text_panel_open)
         af_editor_text_preview_update(editor);
     for (index = 0U; !editor->export_panel_visible && index < editor->preview_scene.count;

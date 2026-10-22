@@ -435,19 +435,22 @@ AfResult af_project_serialize(const AfProject *project, AfAllocator *allocator,
     }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->clip_count; ++index) {
         const AfProjectClip *clip = &project->clips[index];
-        result = af_project_writer_append(
-            &writer,
-            "clip\nid %llu\nname %s\nduration %.9g\nloop %u\nloop_region %.9g %.9g\nend_clip\n",
-            (unsigned long long)clip->id, clip->name, clip->duration, clip->loop ? 1U : 0U,
-            clip->loop_start, clip->loop_end);
+        result = af_project_writer_append(&writer,
+                                          "clip\nid %llu\nname %s\nduration %.9g\nloop "
+                                          "%u\nloop_region %.9g %.9g\nframe_rate %u\nend_clip\n",
+                                          (unsigned long long)clip->id, clip->name, clip->duration,
+                                          clip->loop ? 1U : 0U, clip->loop_start, clip->loop_end,
+                                          clip->frame_rate);
     }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->track_count; ++index) {
         const AfProjectTrack *track = &project->tracks[index];
         result = af_project_writer_append(
-            &writer, "track\nid %llu\nclip %llu\nnode %llu\nproperty %s\nelement %u\nend_track\n",
+            &writer,
+            "track\nid %llu\nclip %llu\nnode %llu\nproperty %s\nelement %u\ncel_frame "
+            "%u\ncel_length %u\nend_track\n",
             (unsigned long long)track->id, (unsigned long long)track->clip_id,
             (unsigned long long)track->node_id, af_project_property_name(track->property),
-            track->element_index);
+            track->element_index, track->cel_frame, track->cel_length);
     }
     for (index = 0U; result == AF_RESULT_SUCCESS && index < project->keyframe_count; ++index) {
         const AfProjectKeyframe *key = &project->keyframes[index];
